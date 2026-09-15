@@ -36,6 +36,9 @@ from handlers.duel_text import (
     _legacy_plural_rounds_early,
     _plural_rounds,
     get_huyanie_title,
+    get_win_title,
+    get_loss_title,
+    get_stolen_dicks_title,
     ATTACK_PHRASES,
     BLOCK_PHRASES,
     HIT_PHRASES,
@@ -1540,8 +1543,33 @@ async def duel_stats_command(update, context):
         chat_id=chat_id,
     )
 
-    huyanie_title = get_huyanie_title(
+    win_title = get_win_title(user["wins"])
+    loss_title = get_loss_title(user["losses"])
+    stolen_title = get_stolen_dicks_title(
         user["stolen_dicks_count"]
+    )
+
+    huyanie_titles = []
+
+    if win_title:
+        huyanie_titles.append(
+            f"{win_title} ({user['wins']})"
+        )
+
+    if loss_title:
+        huyanie_titles.append(
+            f"{loss_title} ({user['losses']})"
+        )
+
+    if stolen_title:
+        huyanie_titles.append(
+            f"{stolen_title} ({user['stolen_dicks_count']})"
+        )
+
+    huyanie_text = (
+        "\n".join(huyanie_titles)
+        if huyanie_titles
+        else "Нет званий"
     )
 
     text = (
@@ -1549,7 +1577,7 @@ async def duel_stats_command(update, context):
         f"Очки: <b>{user['points']} / 100</b>\n"
         f"Побед: <b>{user['wins']}</b>\n"
         f"Поражений: <b>{user['losses']}</b>\n"
-        f"Хуяние: <b>{huyanie_title} ({user['stolen_dicks_count']})</b>\n"
+        f"Хуяние:\n<b>{huyanie_text}</b>\n"
         f"👹 Побеждено боссов: <b>{bosses_defeated}</b>\n"
         f"Статус на сегодня: <b>{status}</b>"
     )

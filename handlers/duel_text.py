@@ -6,51 +6,113 @@ This module deliberately has no Telegram, SQLite, or runtime-state imports.
 """
 
 HUYANIE_TITLES = {
-    10: "\U0001f346 \u041d\u0430\u0447\u0438\u043d\u0430\u044e\u0449\u0438\u0439 \u0425\u0443\u044f\u043d\u0438\u0441\u0442",
-    20: "\U0001f346 \u041f\u043e\u0434\u043c\u0430\u0441\u0442\u0435\u0440\u044c\u0435 \u0425\u0443\u044f\u043d\u0438\u044f",
-    30: "\U0001f346 \u041f\u0440\u0430\u043a\u0442\u0438\u043a\u0443\u044e\u0449\u0438\u0439 \u0425\u0443\u044f\u043d\u0438\u0441\u0442",
-    40: "\U0001f346 \u041e\u043f\u044b\u0442\u043d\u044b\u0439 \u0425\u0443\u044f\u043d\u0438\u0441\u0442",
-    50: "\U0001f346 \u041c\u0430\u0441\u0442\u0435\u0440 \u0425\u0443\u044f\u043d\u0438\u044f",
-    60: "\U0001f346 \u0412\u0435\u043b\u0438\u043a\u0438\u0439 \u0425\u0443\u044f\u043d\u0438\u0441\u0442",
-    70: "\U0001f346 \u0410\u0440\u0445\u0438\u043c\u0430\u0441\u0442\u0435\u0440 \u0425\u0443\u044f\u043d\u0438\u044f",
-    80: "\U0001f346 \u0412\u0435\u0440\u0445\u043e\u0432\u043d\u044b\u0439 \u0425\u0443\u044f\u043d\u0438\u0441\u0442",
-    90: "\U0001f346 \u0413\u0440\u043e\u0441\u0441\u043c\u0435\u0439\u0441\u0442\u0435\u0440 \u0425\u0443\u044f\u043d\u0438\u044f",
-    100: "\U0001f451 \u0412\u0435\u043b\u0438\u043a\u0438\u0439 \u041c\u0430\u0433\u0438\u0441\u0442\u0440 \u0425\u0443\u044f\u043d\u0438\u044f",
+    10: "🍆 Начинающий Хуянист",
+    20: "🍆 Подмастерье Хуяния",
+    30: "🍆 Практикующий Хуянист",
+    40: "🍆 Опытный Хуянист",
+    50: "🍆 Мастер Хуяния",
+    60: "🍆 Великий Хуянист",
+    70: "🍆 Архимастер Хуяния",
+    80: "🍆 Верховный Хуянист",
+    90: "🍆 Гроссмейстер Хуяния",
+    100: "👑 Великий Магистр Хуяния",
 }
 
 
 def get_huyanie_title(stolen_dicks_count: int) -> str:
     count = int(stolen_dicks_count or 0)
     if count < 10:
-        return "\u041d\u0435\u0442 \u0437\u0432\u0430\u043d\u0438\u044f"
+        return "Нет звания"
     level = min((count // 10) * 10, 100)
     return HUYANIE_TITLES[level]
+
+
+WIN_TITLES = {
+    100: "🍆 Начинающий Хуянист",
+    200: "🍆 Подмастерье Хуяния",
+    300: "🍆 Практикующий Хуянист",
+    400: "🍆 Опытный Хуянист",
+    500: "🍆 Мастер Хуяния",
+    600: "🍆 Великий Хуянист",
+    700: "🍆 Архимастер Хуяния",
+    800: "🍆 Верховный Хуянист",
+    900: "🍆 Гроссмейстер Хуяния",
+    1000: "👑 Великий Магистр Хуяния",
+}
+
+LOSS_TITLES = {
+    100: "🥉 Опытный Лох",
+    200: "🗿 Почётный Проигрыватель",
+    300: "💀 Профессиональный Пидор",
+    400: "🩸 Мясо Гномьей Арены",
+    500: "👴 Ветеран Проёбов",
+    600: "🗿 Неубиваемый Лузер",
+    700: "🆘 Чемпион по Проёбам",
+    800: "😈 Гроза Собственных Штанов",
+    900: "☠️ Легенда Поражений",
+    1000: "🏆 Абсолютный Еблан",
+}
+
+STOLEN_DICKS_TITLES = {
+    10: "🍆 Хуеприёмщик",
+    20: "🤏 Карманник Гениталий",
+    30: "🦹 Тихий Хуевор",
+    40: "🦹‍♀️ Похититель Причиндалов",
+    50: "🍆 Коллекционер Хуёв",
+    60: "☠️ Пират Мошонки",
+    70: "😈 Хуепоглотитель",
+    80: "🔪 Палач Паховой Области",
+    90: "💀 Архивариус Хуёв",
+    100: "👑 Верховный Хуекрад",
+}
+
+
+def _get_highest_title(value: int, titles: dict[int, str]) -> str | None:
+    value = int(value or 0)
+    reached = [threshold for threshold in titles if value >= threshold]
+
+    if not reached:
+        return None
+
+    return titles[max(reached)]
+
+
+def get_win_title(wins: int) -> str | None:
+    return _get_highest_title(wins, WIN_TITLES)
+
+
+def get_loss_title(losses: int) -> str | None:
+    return _get_highest_title(losses, LOSS_TITLES)
+
+
+def get_stolen_dicks_title(stolen_dicks_count: int) -> str | None:
+    return _get_highest_title(stolen_dicks_count, STOLEN_DICKS_TITLES)
 
 
 def _plural_rounds(value):
     value = int(value)
     if value % 10 == 1 and value % 100 != 11:
-        return "\u0440\u0430\u0443\u043d\u0434"
+        return "раунд"
     if 2 <= value % 10 <= 4 and not 12 <= value % 100 <= 14:
-        return "\u0440\u0430\u0443\u043d\u0434\u0430"
-    return "\u0440\u0430\u0443\u043d\u0434\u043e\u0432"
+        return "раунда"
+    return "раундов"
 
 
 def _legacy_plural_rounds_early(n: int) -> str:
     if n % 10 == 1 and n % 100 != 11:
-        return "\u0440\u0430\u0443\u043d\u0434"
+        return "раунд"
     if 2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20):
-        return "\u0440\u0430\u0443\u043d\u0434\u0430"
-    return "\u0440\u0430\u0443\u043d\u0434\u043e\u0432"
+        return "раунда"
+    return "раундов"
 
 
 def _legacy_plural_rounds(value):
     value = int(value)
     if value % 10 == 1 and value % 100 != 11:
-        return "\u0440\u0430\u0443\u043d\u0434"
+        return "раунд"
     if 2 <= value % 10 <= 4 and not 12 <= value % 100 <= 14:
-        return "\u0440\u0430\u0443\u043d\u0434\u0430"
-    return "\u0440\u0430\u0443\u043d\u0434\u043e\u0432"
+        return "раунда"
+    return "раундов"
 
 
 def _boss_alive_players(battle):
@@ -66,11 +128,11 @@ def _boss_all_alive_chosen(battle, field):
 
 def _boss_phase_status(participant, phase):
     if not participant["alive"]:
-        return "\U0001f480 \u043f\u043e\u0433\u0438\u0431"
+        return "💀 погиб"
     if phase == "attack":
-        return "\U0001f7e2 \u0432\u044b\u0431\u0440\u0430\u043b" if participant.get("attack") is not None else "\U0001f7e1 \u0432\u044b\u0431\u0438\u0440\u0430\u0435\u0442"
+        return "🟢 выбрал" if participant.get("attack") is not None else "🟡 выбирает"
     if phase == "block":
-        return "\U0001f7e2 \u0432\u044b\u0431\u0440\u0430\u043b" if participant.get("block") is not None else "\U0001f7e1 \u0432\u044b\u0431\u0438\u0440\u0430\u0435\u0442"
+        return "🟢 выбрал" if participant.get("block") is not None else "🟡 выбирает"
     return ""
 
 
@@ -87,6 +149,7 @@ def _boss_battle_hero(participants):
             1 if participant in alive else 0,
         ),
     )
+
 
 TARGET_NAMES = {
     "head": "Голова 🧠",
