@@ -34,6 +34,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_or_send(update, context, "Свобода. Равенство. Пошёл нахуй.")
 
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
+    if not update.message:
+        return
+
+    schedule_auto_delete(context, update.message)
+    await reply_or_send(
+        update,
+        context,
+        "Хуекрады здесь — https://t.me/huehuehuekrads",
+    )
+
+
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /top — статистика пидоров дня"""
     if not update.message:
