@@ -45,7 +45,9 @@ def test_callback_handler_patterns_are_stable():
         "boss_join": r"^boss_(join|attack_|block_)",
         "boss_attack_body_3": r"^boss_(join|attack_|block_)",
         "boss_block_dick_3": r"^boss_(join|attack_|block_)",
-        "hyperboreic_huy": r"^hyperboreic_huy$",
+        "hyperboreic_huy": r"^hyperboreic_huy(?:_(?:self|other))?$",
+        "hyperboreic_huy_self": r"^hyperboreic_huy(?:_(?:self|other))?$",
+        "hyperboreic_huy_other": r"^hyperboreic_huy(?:_(?:self|other))?$",
     }
     for payload, pattern in patterns.items():
         assert re.search(pattern, payload)

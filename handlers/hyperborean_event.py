@@ -3,17 +3,25 @@
 import logging
 import random
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from database import format_user_title, get_all_chats, get_or_create_duel_user
+from text_resources import get_text
 
-HYPERBOREAN_HUY_CHANCE = 0.04
-HYPERBOREAN_HUY_CHECK_MINUTES = 15
+HYPERBOREAN_HUY_CHANCE = 0.05
+HYPERBOREAN_HUY_CHECK_MINUTES = 60
+HYPERBOREAN_HUY_DAILY_LIMIT = 5
 ACTIVE_HYPERBOREAN_EVENTS = {}
+HYPERBOREAN_HUY_DAILY_SPAWNS = {}
 _HYPERBOREAN_DB_PATH = Path(__file__).resolve().parent.parent / "bot_database.db"
+
+
+def _current_date():
+    return date.today()
 
 async def _spawn_hyperboreic_huy(
     context: ContextTypes.DEFAULT_TYPE,
@@ -31,6 +39,16 @@ async def _spawn_hyperboreic_huy(
     if chat_id in ACTIVE_HYPERBOREAN_EVENTS:
         return
 
+    today = _current_date()
+    last_spawn_date, daily_count = HYPERBOREAN_HUY_DAILY_SPAWNS.get(
+        chat_id,
+        (today, 0),
+    )
+    if last_spawn_date != today:
+        daily_count = 0
+    if daily_count >= HYPERBOREAN_HUY_DAILY_LIMIT:
+        return
+
     if random.random() >= HYPERBOREAN_HUY_CHANCE:
         return
 
@@ -42,26 +60,18 @@ async def _spawn_hyperboreic_huy(
     )
 
     if event_type == "arthur":
-        event_text = (
-            "⚔️ <b>ОБНАРУЖЕН ХУЙ КОРОЛЯ АРТУРА</b>\n\n"
-            "Кто осмелится вытащить его из камня?\n\n"
-            "Один хуй тебе или два другому?"
-        )
+        event_text = get_text("hyperborean.spawn.arthur")
     else:
-        event_text = (
-            "⚠️ <b>ОБНАРУЖЕН ГИПЕРБОРЕЙСКИЙ ХУЙ</b>\n\n"
-            "Кто первый схватит — тому решать судьбу своего хуя.\n\n"
-            "Один хуй тебе или два другому?"
-        )
+        event_text = get_text("hyperborean.spawn.hyperboreic")
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "Один мне", callback_data="hyperboreic_huy_self"
+                    get_text("hyperborean.buttons.self"), callback_data="hyperboreic_huy_self"
                 ),
                 InlineKeyboardButton(
-                    "Два другому", callback_data="hyperboreic_huy_other"
+                    get_text("hyperborean.buttons.other"), callback_data="hyperboreic_huy_other"
                 ),
             ]
         ]
@@ -86,6 +96,7 @@ async def _spawn_hyperboreic_huy(
         "message_id": message.message_id,
         "event_type": event_type,
     }
+    HYPERBOREAN_HUY_DAILY_SPAWNS[chat_id] = (today, daily_count + 1)
 
 
 async def hyperboreic_huy_daily_job(
@@ -292,7 +303,7 @@ async def hyperboreic_huy_callback(
 
     if not event:
         await query.answer(
-            "Хуй уже унесли.",
+            get_text("hyperborean.alerts.taken"),
             show_alert=True,
         )
         return
@@ -321,7 +332,7 @@ async def hyperboreic_huy_callback(
         ACTIVE_HYPERBOREAN_EVENTS[chat_id] = event
 
         await query.answer(
-            "Хуй отказался определяться. Попробуй ещё раз.",
+            get_text("hyperborean.alerts.error"),
             show_alert=True,
         )
         return
@@ -330,7 +341,7 @@ async def hyperboreic_huy_callback(
         ACTIVE_HYPERBOREAN_EVENTS[chat_id] = event
 
         await query.answer(
-            "Гном ещё не зарегистрирован в этом чате.",
+            get_text("hyperborean.alerts.missing"),
             show_alert=True,
         )
         return
@@ -352,34 +363,16 @@ async def hyperboreic_huy_callback(
 
         if result == "exploded":
             if event_type == "arthur":
-                text = (
-                    f"⚔️ Выбор пал на <b>{title}</b>.\n\n"
-                    "Хуй Короля Артура увидел, что у гнома уже нет хуя, "
-                    "и разорвал его на величественные хуйные молекулы.\n\n"
-                    "💀 Очки: <b>0 / 100</b>\n"
-                    "🍆 Хуй: <b>потерян</b>"
-                )
+                text = get_text("hyperborean.other.exploded.arthur", title=title)
             else:
-                text = (
-                    f"🍆 Выбор пал на <b>{title}</b>.\n\n"
-                    "У гнома уже не было хуя, поэтому гиперборейский хуй "
-                    "разорвал его на хуйные молекулы.\n\n"
-                    "💀 Очки: <b>0 / 100</b>\n"
-                    "🍆 Хуй: <b>потерян</b>"
-                )
-            await query.answer("Два другому. Выбор сделан.")
+                text = get_text("hyperborean.other.exploded.hyperboreic", title=title)
+            await query.answer(get_text("hyperborean.other.answer.exploded"))
         else:
             if event_type == "arthur":
-                text = (
-                    f"⚔️ Выбор пал на <b>{title}</b>, но ничего не произошло.\n\n"
-                    "Хуй Короля Артура остался в камне."
-                )
+                text = get_text("hyperborean.other.unchanged.arthur", title=title)
             else:
-                text = (
-                    f"🍆 Выбор пал на <b>{title}</b>, но ничего не произошло.\n\n"
-                    "Гиперборейский хуй молча исчез."
-                )
-            await query.answer("Два другому. Ничего не произошло.")
+                text = get_text("hyperborean.other.unchanged.hyperboreic", title=title)
+            await query.answer(get_text("hyperborean.other.answer.unchanged"))
 
         try:
             await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
@@ -418,21 +411,14 @@ async def hyperboreic_huy_callback(
 
         if event_type == "arthur":
             await query.answer(
-                "НЕ СМОГ ВЫТАЩИТЬ ХУЙ КОРОЛЯ АРТУРА. НО ОН ВСЁ РАВНО ВЕРНУЛСЯ! 🍆",
+                get_text("hyperborean.self.restored.arthur.alert"),
                 show_alert=True,
             )
 
             try:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=(
-                        f"⚔️ <b>{title}</b> попытался вытащить "
-                        f"<b>ХУЙ КОРОЛЯ АРТУРА</b>.\n\n"
-                        "❌ Не смог вытащить хуй.\n\n"
-                        "Но легендарный хуй каким-то образом "
-                        "сам вернулся к своему владельцу.\n\n"
-                        "🍆 <b>ХУЙ ВСЁ РАВНО ВОЗВРАЩЁН.</b>"
-                    ),
+                    text=get_text("hyperborean.self.restored.arthur.message", title=title),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -445,17 +431,14 @@ async def hyperboreic_huy_callback(
             return
 
         await query.answer(
-            "ХУЙ ВОЗВРАЩЁН! 🍆",
+            get_text("hyperborean.self.restored.hyperboreic.alert"),
             show_alert=True,
         )
 
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=(
-                    f"🍆 <b>{title}</b> схватил гиперборейский хуй "
-                    f"и вернул себе свой собственный."
-                ),
+                text=get_text("hyperborean.self.restored.hyperboreic.message", title=title),
                 parse_mode="HTML",
             )
         except Exception:
@@ -473,24 +456,14 @@ async def hyperboreic_huy_callback(
 
     if event_type == "arthur":
         await query.answer(
-            "НЕ СМОГ ВЫТАЩИТЬ ХУЙ КОРОЛЯ АРТУРА. ТЕБЯ РАЗОРВАЛО НА ВЕЛИЧЕСТВЕННЫЕ ХУЙНЫЕ МОЛЕКУЛЫ.",
+            get_text("hyperborean.self.exploded.arthur.alert"),
             show_alert=True,
         )
 
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=(
-                    f"⚔️ <b>{title}</b> попытался вытащить "
-                    f"<b>ХУЙ КОРОЛЯ АРТУРА</b>.\n\n"
-                    "❌ Не смог вытащить хуй.\n\n"
-                    "💥 Но Хуй Короля Артура не потерпел "
-                    "такого надругательства над своим величием.\n\n"
-                    "Тело гнома разорвало на "
-                    "<b>величественные хуйные молекулы</b>.\n\n"
-                    "💀 Очки: <b>0 / 100</b>\n"
-                    "🍆 Хуй: <b>УНИЧТОЖЕН</b>"
-                ),
+                text=get_text("hyperborean.self.exploded.arthur.message", title=title),
                 parse_mode="HTML",
             )
         except Exception:
@@ -507,21 +480,14 @@ async def hyperboreic_huy_callback(
     # ========================================================
 
     await query.answer(
-        "ТЕБЯ РАЗОРВАЛО НА ХУЙНЫЕ МОЛЕКУЛЫ.",
+        get_text("hyperborean.self.exploded.hyperboreic.alert"),
         show_alert=True,
     )
 
     try:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=(
-                f"💥 <b>{title}</b> попытался схватить "
-                f"гиперборейский хуй.\n\n"
-                "От передозировки хуев гнома разорвало "
-                "на хуйные молекулы.\n\n"
-                "💀 Очки: <b>0 / 100</b>\n"
-                "🍆 Хуй: <b>потерян</b>"
-            ),
+            text=get_text("hyperborean.self.exploded.hyperboreic.message", title=title),
             parse_mode="HTML",
         )
     except Exception:

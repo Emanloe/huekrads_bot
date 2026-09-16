@@ -65,6 +65,8 @@ from handlers.weather import (
     weather_stub_callback,
 )
 
+from handlers.hyperborean_event import HYPERBOREAN_HUY_CHECK_MINUTES
+
 from handlers.duel import (
     duel_command,
     duel_select_callback,
@@ -195,10 +197,10 @@ async def main():
         )
 
         # Независимое событие:
-        # 4% шанс на каждой проверке, проверка каждые 15 минут.
+        # Шанс и частота проверки задаются в handlers.hyperborean_event.
         application.job_queue.run_repeating(
             hyperboreic_huy_daily_job,
-            interval=15 * 60,
+            interval=HYPERBOREAN_HUY_CHECK_MINUTES * 60,
             first=60,
             name="hyperboreic_huy_job",
         )
