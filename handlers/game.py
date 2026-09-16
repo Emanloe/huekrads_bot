@@ -4,6 +4,7 @@ import logging
 from telegram.ext import ContextTypes
 
 from database import pick_beauty_of_the_day, get_all_chats
+from text_resources import get_text
 
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,12 @@ def get_plural_raz(count: int) -> str:
     last_one = count % 10
 
     if 11 <= last_two <= 19:
-        return "раз"
+        return get_text("game.plural_times.many")
 
     if last_one in [2, 3, 4]:
-        return "раза"
+        return get_text("game.plural_times.few")
 
-    return "раз"
+    return get_text("game.plural_times.one")
 
 
 async def run_pidor_game_in_chat(
@@ -45,14 +46,19 @@ async def run_pidor_game_in_chat(
 
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Выбираем пидора дня...",
+            text=get_text("game.messages.selecting"),
         )
 
         await asyncio.sleep(3)
 
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"Пидор дня — {username}. Он был пидором {count} {word}.",
+            text=get_text(
+                "game.messages.winner",
+                username=username,
+                count=count,
+                word=word,
+            ),
         )
 
         logger.info(
@@ -64,7 +70,7 @@ async def run_pidor_game_in_chat(
     else:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="В этом чате пока нет зарегистрированных участников!",
+            text=get_text("game.messages.no_participants"),
         )
 
         logger.info(

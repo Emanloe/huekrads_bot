@@ -1,0 +1,8 @@
+plural_times:
+  one: раз
+  few: раза
+  many: раз
+messages:
+  selecting: Выбираем пидора дня...
+  winner: Пидор дня — {username}. Он был пидором {count} {word}.
+  no_participants: В этом чате пока нет зарегистрированных участников!

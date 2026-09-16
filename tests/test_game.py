@@ -12,7 +12,39 @@ async def test_run_game_sends_existing_two_message_sequence(monkeypatch, fake_co
     monkeypatch.setattr(game.asyncio, "sleep", AsyncMock())
     await game.run_pidor_game_in_chat(fake_context, -1)
     assert fake_context.bot.send_message.await_count == 2
-    assert "Выбираем" in fake_context.bot.send_message.await_args_list[0].kwargs["text"]
+    assert fake_context.bot.send_message.await_args_list[0].kwargs == {
+        "chat_id": -1,
+        "text": "Выбираем пидора дня...",
+    }
+    assert fake_context.bot.send_message.await_args_list[1].kwargs == {
+        "chat_id": -1,
+        "text": "Пидор дня — alice. Он был пидором 2 раза.",
+    }
+
+
+def test_game_text_resources_preserve_plural_forms_and_placeholders():
+    from handlers import game
+
+    assert [game.get_plural_raz(count) for count in (1, 2, 5, 11)] == [
+        "раз",
+        "раза",
+        "раз",
+        "раз",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_game_no_participants_preserves_message(monkeypatch, fake_context):
+    from handlers import game
+
+    monkeypatch.setattr(game, "pick_beauty_of_the_day", lambda _chat_id: None)
+
+    await game.run_pidor_game_in_chat(fake_context, -1)
+
+    fake_context.bot.send_message.assert_awaited_once_with(
+        chat_id=-1,
+        text="В этом чате пока нет зарегистрированных участников!",
+    )
 
 
 @pytest.mark.asyncio
