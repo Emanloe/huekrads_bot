@@ -1,0 +1,10 @@
+birthday:
+  registration:
+    saved: |-
+      Запомнил! День рождения для {target_username}: {bday_str}
+    missing_user: Пользователь {target_username} ещё не писал в этом чате, не могу сохранить дату.
+  greeting: 🎉 С днём рождения, {user_name}! 🥳🎂
+responses:
+  forwarded: Форварднул тебе за щеку, проверяй
+  "no": Пидора ответ
+  amigo: Может быть ты покинешь чат?

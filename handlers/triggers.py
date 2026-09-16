@@ -17,6 +17,7 @@ from database import (
     is_forward_reply_enabled,
 )
 from handlers.past_pizda import match_yes_no, remember_pizda_candidate
+from text_resources import get_text
 
 _LET_DO_PHRASES_PATH = Path(__file__).resolve().parent.parent / "data" / "let_do_phrases.json"
 
@@ -93,12 +94,19 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if save_custom_birthdate(chat_id, target_username, bday_str):
             await update.message.reply_text(
-                f"Запомнил! День рождения для {target_username}: {bday_str}",
+                get_text(
+                    "triggers.birthday.registration.saved",
+                    target_username=target_username,
+                    bday_str=bday_str,
+                ),
                 reply_to_message_id=update.message.message_id,
             )
         else:
             await update.message.reply_text(
-                f"Пользователь {target_username} ещё не писал в этом чате, не могу сохранить дату.",
+                get_text(
+                    "triggers.birthday.registration.missing_user",
+                    target_username=target_username,
+                ),
                 reply_to_message_id=update.message.message_id,
             )
 
@@ -112,7 +120,7 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.forward_origin is not None and is_forward_reply_enabled(chat_id):
         if random.random() < 0.3:
             await update.message.reply_text(
-                "Форварднул тебе за щеку, проверяй",
+                get_text("triggers.responses.forwarded"),
                 reply_to_message_id=update.message.message_id,
             )
 
@@ -153,7 +161,7 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data[congrat_key] = True
 
             user_name = update.message.from_user.first_name
-            text = f"🎉 С днём рождения, {user_name}! 🥳🎂"
+            text = get_text("triggers.birthday.greeting", user_name=user_name)
 
             if BIRTHDAY_GIF_ID:
                 await update.message.reply_animation(
@@ -209,7 +217,7 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if last_responded is None or roll < response_chance:
         if yes_no == "да":
             await update.message.reply_text(
-                "Пизда",
+                get_text("past_pizda.messages.reply"),
                 reply_to_message_id=update.message.message_id,
             )
 
@@ -220,7 +228,7 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif yes_no == "нет":
             await update.message.reply_text(
-                "Пидора ответ",
+                get_text("triggers.responses.no"),
                 reply_to_message_id=update.message.message_id,
             )
 
@@ -231,7 +239,7 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_first_name == "amigo":
             if random.random() < 0.3:
                 await update.message.reply_text(
-                    "Может быть ты покинешь чат?",
+                    get_text("triggers.responses.amigo"),
                     reply_to_message_id=update.message.message_id,
                 )
 
