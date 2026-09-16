@@ -11,11 +11,22 @@ def callback_data(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
+def button_labels(markup):
+    return [button.text for row in markup.inline_keyboard for button in row]
+
+
 def test_boss_keyboard_callback_data_contract():
     from handlers import duel
 
-    attack = callback_data(duel._boss_attack_keyboard(3))
-    block = callback_data(duel._boss_block_keyboard(3))
+    attack_markup = duel._boss_attack_keyboard(3)
+    block_markup = duel._boss_block_keyboard(3)
+    attack = callback_data(attack_markup)
+    block = callback_data(block_markup)
+
+    assert [len(row) for row in attack_markup.inline_keyboard] == [3]
+    assert [len(row) for row in block_markup.inline_keyboard] == [3]
+    assert button_labels(attack_markup) == ["⚔️ Голова", "⚔️ Торс", "⚔️ Хуй"]
+    assert button_labels(block_markup) == ["🛡 Голова", "🛡 Торс", "🛡 Хуй"]
     assert attack == ["boss_attack_head_3", "boss_attack_body_3", "boss_attack_dick_3"]
     assert block == ["boss_block_head_3", "boss_block_body_3", "boss_block_dick_3"]
     for value in attack + block:

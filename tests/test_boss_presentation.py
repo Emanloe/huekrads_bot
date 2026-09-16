@@ -164,6 +164,11 @@ def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
         survivors=2,
         dead=1,
     ) == "👥 Отряд: <b>3</b> — выжило <b>2</b>, погибло <b>1</b>."
+    assert get_text("boss.report.fallback") == (
+        "💀 <b>БИТВА ОКОНЧЕНА</b>\\n\\n"
+        "Босс больше не сражается. "
+        "Гномская летопись почему-то отказалась писать подробности."
+    )
 
 
 @pytest.mark.parametrize(

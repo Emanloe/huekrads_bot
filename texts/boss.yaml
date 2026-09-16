@@ -66,6 +66,15 @@ phase:
     🛡 Выберите зону защиты:
 join:
   button: ⚔️ Присоединиться
+keyboards:
+  attack:
+    head: ⚔️ Голова
+    body: ⚔️ Торс
+    dick: ⚔️ Хуй
+  block:
+    head: 🛡 Голова
+    body: 🛡 Торс
+    dick: 🛡 Хуй
 registration:
   group_only: ⚔️ Записываться на гномью бойню можно только в группе.
   closed: Извинитесь. Битва уже была, запишитесь завтра до 18:00
@@ -163,6 +172,7 @@ survivor:
   summary: |-
     🛡 <b>{title}</b> — выжил. {phrase}. Попаданий: <b>{hits}</b>, промахов: <b>{misses}</b>, блоков: <b>{blocks}</b>, пережито раундов: <b>{survived}</b>.
 report:
+  fallback: '💀 <b>БИТВА ОКОНЧЕНА</b>\n\nБосс больше не сражается. Гномская летопись почему-то отказалась писать подробности.'
   victory:
     title: 🏆 <b>ЛЕГЕНДА БИТВЫ</b>
     boss_defeated: 👹 <b>{boss_name}</b> пал после <b>{hits}</b> попаданий.

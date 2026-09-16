@@ -1732,15 +1732,15 @@ def _boss_attack_keyboard(round_num: int):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "⚔️ Голова",
+                get_text("boss.keyboards.attack.head"),
                 callback_data=f"boss_attack_head_{round_num}",
             ),
             InlineKeyboardButton(
-                "⚔️ Торс",
+                get_text("boss.keyboards.attack.body"),
                 callback_data=f"boss_attack_body_{round_num}",
             ),
             InlineKeyboardButton(
-                "⚔️ Хуй",
+                get_text("boss.keyboards.attack.dick"),
                 callback_data=f"boss_attack_dick_{round_num}",
             ),
         ]
@@ -1751,15 +1751,15 @@ def _boss_block_keyboard(round_num: int):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🛡 Голова",
+                get_text("boss.keyboards.block.head"),
                 callback_data=f"boss_block_head_{round_num}",
             ),
             InlineKeyboardButton(
-                "🛡 Торс",
+                get_text("boss.keyboards.block.body"),
                 callback_data=f"boss_block_body_{round_num}",
             ),
             InlineKeyboardButton(
-                "🛡 Хуй",
+                get_text("boss.keyboards.block.dick"),
                 callback_data=f"boss_block_dick_{round_num}",
             ),
         ]
@@ -2507,12 +2507,7 @@ async def _boss_send_final_report(
 
         # Финальный отчёт не должен исчезать из-за одной ошибки
         # в красивой статистике.
-        text = (
-            "💀 <b>БИТВА ОКОНЧЕНА</b>\\n\\n"
-            "Босс больше не сражается. "
-            "Гномская летопись почему-то отказалась "
-            "писать подробности."
-        )
+        text = get_text("boss.report.fallback")
 
     chunks = []
     current = ""
