@@ -1283,3 +1283,135 @@ async def test_duel_action_alerts_preserve_all_invalid_callback_outputs(
 
     query.answer.assert_awaited_once_with()
     process_attack.assert_awaited_once_with(fake_context, CHAT_ID, "head")
+
+
+@pytest.mark.asyncio
+async def test_live_duel_templates_preserve_start_transition_and_timeout_output(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    attacker = make_user(901, "attacker")
+    defender = make_user(902, "defender")
+    attacker_data = {"user_id": attacker.id, "title": "Атакующий"}
+    defender_data = {"user_id": defender.id, "title": "Защитник"}
+    monkeypatch.setattr(duel, "format_user_title", lambda user: user["title"])
+    tasks = install_fake_tasks(monkeypatch, duel)
+
+    await duel._start_interactive_fight(
+        fake_context,
+        CHAT_ID,
+        attacker,
+        defender,
+        attacker_data,
+        defender_data,
+    )
+
+    start_kwargs = fake_context.bot.send_message.await_args.kwargs
+    assert start_kwargs["text"] == (
+        "🗡️ <b>Гномья дуэль начинается!</b>\n\n"
+        "⚔️ Атакует: <b>Атакующий</b>\n"
+        "🛡️ Защищается: <b>Защитник</b>\n\n"
+        "⏳ У <b>Атакующий</b> есть 10 секунд, чтобы выбрать точку удара:"
+    )
+    assert [button.callback_data for button in start_kwargs["reply_markup"].inline_keyboard[0]] == [
+        "duel_strike_head_1", "duel_strike_body_1", "duel_strike_dick_1"
+    ]
+
+    await duel._process_attack_choice(fake_context, CHAT_ID, "head")
+
+    state = duel.ACTIVE_DUELS[CHAT_ID]
+    transition_kwargs = fake_context.bot.edit_message_text.await_args.kwargs
+    assert transition_kwargs["text"] == (
+        "🗡️ <b>Гномья дуэль! Раунд 1</b>\n\n"
+        "⚔️ <b>Атакующий</b> наносит замах!\n"
+        "🛡️ <b>Защитник</b>, выберите зону защиты!\n\n"
+        "⏳ У <b>Защитник</b> есть 10 секунд на выбор блока:"
+    )
+    assert state["phase"] == "block"
+    assert state["attack_zone"] == "head"
+    assert state["turn_id"] == 2
+    assert state["turn_task"] is tasks[1]
+
+    fake_context.bot.send_message.reset_mock()
+    sleep = AsyncMock()
+    auto_choice = Mock(return_value="dick")
+    process_block = AsyncMock()
+    monkeypatch.setattr(duel.asyncio, "sleep", sleep)
+    monkeypatch.setattr(duel.random, "choice", auto_choice)
+    monkeypatch.setattr(duel, "_process_block_choice", process_block)
+
+    await duel._auto_move_timer(fake_context, CHAT_ID, 1, "block", 2)
+
+    auto_choice.assert_called_once_with(["head", "body", "dick"])
+    process_block.assert_awaited_once_with(fake_context, CHAT_ID, "dick")
+    assert fake_context.bot.send_message.await_args.kwargs["text"] == (
+        "⏰ <b>Защитник</b> зазевался! Гномий синедрион делает случайный выбор блока..."
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_duel_outcome_wrappers_preserve_exact_text_and_rng_order(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    state = make_block_phase_duel(strike_zone="head", turn_id=7)
+    state["attacker_data"] = {"user_id": 601, "title": "Атакующий"}
+    state["defender_data"] = {"user_id": 602, "title": "Защитник"}
+    duel.ACTIVE_DUELS[CHAT_ID] = state
+    monkeypatch.setattr(duel, "format_user_title", lambda user: user["title"])
+    finish = AsyncMock()
+    events = []
+
+    def suicide_random():
+        events.append("suicide_roll")
+        return 0.0
+
+    def suicide_choice(values):
+        events.append("suicide_phrase")
+        assert values is duel.SUICIDE_PHRASES
+        return "споткнулся"
+
+    monkeypatch.setattr(duel, "_finish_duel", finish)
+    monkeypatch.setattr(duel, "random", SimpleNamespace(random=suicide_random, choice=suicide_choice))
+    await duel._process_block_choice(fake_context, CHAT_ID, "body")
+
+    assert events == ["suicide_roll", "suicide_phrase"]
+    assert finish.await_args.kwargs["custom_text"] == (
+        "💥 <b>НЕВЕРОЯТНЫЙ ИСХОД!</b>\n\n"
+        "<b>Атакующий</b> споткнулся\n\n"
+        "🏆 Победитель по глупости соперника: <b>Защитник</b>!"
+    )
+
+    state = make_block_phase_duel(strike_zone="head", turn_id=7)
+    state["attacker_data"] = {"user_id": 601, "title": "Атакующий"}
+    state["defender_data"] = {"user_id": 602, "title": "Защитник"}
+    duel.ACTIVE_DUELS[CHAT_ID] = state
+    finish.reset_mock()
+    events.clear()
+    rolls = iter((0.5, 0.5))
+
+    def hit_random():
+        events.append("roll")
+        return next(rolls)
+
+    def hit_choice(values):
+        if values is duel.HIT_PHRASES:
+            events.append("hit_phrase")
+            return "попал"
+        events.append("attack_phrase")
+        assert values is duel.ATTACK_PHRASES
+        return "атакует"
+
+    monkeypatch.setattr(duel, "random", SimpleNamespace(random=hit_random, choice=hit_choice))
+    await duel._process_block_choice(fake_context, CHAT_ID, "body")
+
+    assert events == ["roll", "roll", "hit_phrase", "attack_phrase"]
+    assert finish.await_args.kwargs["custom_text"] == (
+        "💥 <b>ТОЧНЫЙ УДАР!</b>\n"
+        "<b>Атакующий</b> атакует в зону (Голова 🧠), а <b>Защитник</b> блокировал (Торс 🛡️).\n"
+        "<b>Атакующий</b> попал\n"
+    )

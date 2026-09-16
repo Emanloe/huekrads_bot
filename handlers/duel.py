@@ -221,15 +221,15 @@ def _get_strike_keyboard(turn_id: int) -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton(
-                "🎯 Голова",
+                get_text("duel.live.keyboards.strike.head"),
                 callback_data=f"duel_strike_head_{turn_id}",
             ),
             InlineKeyboardButton(
-                "🛡️ Торс",
+                get_text("duel.live.keyboards.strike.body"),
                 callback_data=f"duel_strike_body_{turn_id}",
             ),
             InlineKeyboardButton(
-                "🍆 Хуй",
+                get_text("duel.live.keyboards.strike.dick"),
                 callback_data=f"duel_strike_dick_{turn_id}",
             ),
         ]
@@ -246,15 +246,15 @@ def _get_block_keyboard(turn_id: int) -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton(
-                "🛡️ Голова",
+                get_text("duel.live.keyboards.block.head"),
                 callback_data=f"duel_block_head_{turn_id}",
             ),
             InlineKeyboardButton(
-                "🛡️ Торс",
+                get_text("duel.live.keyboards.block.body"),
                 callback_data=f"duel_block_body_{turn_id}",
             ),
             InlineKeyboardButton(
-                "🛡️ Хуй",
+                get_text("duel.live.keyboards.block.dick"),
                 callback_data=f"duel_block_dick_{turn_id}",
             ),
         ]
@@ -312,12 +312,11 @@ async def _start_interactive_fight(
     att_title = format_user_title(attacker_data)
     def_title = format_user_title(defender_data)
 
-    text = (
-        f"🗡️ <b>Гномья дуэль начинается!</b>\n\n"
-        f"⚔️ Атакует: <b>{att_title}</b>\n"
-        f"🛡️ Защищается: <b>{def_title}</b>\n\n"
-        f"⏳ У <b>{att_title}</b> есть {MOVE_TIMEOUT} секунд, "
-        f"чтобы выбрать точку удара:"
+    text = get_text(
+        "duel.live.start",
+        attacker_title=att_title,
+        defender_title=def_title,
+        move_timeout=MOVE_TIMEOUT,
     )
 
     bot_msg = await context.bot.send_message(
@@ -389,11 +388,7 @@ async def _auto_move_timer(
             try:
                 timeout_msg = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=(
-                        f"⏰ <b>{att_title}</b> зазевался! "
-                        f"Гномий синедрион делает случайный "
-                        f"выбор атаки..."
-                    ),
+                    text=get_text("duel.live.timeout.attack", title=att_title),
                     parse_mode="HTML",
                 )
                 schedule_auto_delete(
@@ -419,11 +414,7 @@ async def _auto_move_timer(
             try:
                 timeout_msg = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=(
-                        f"⏰ <b>{def_title}</b> зазевался! "
-                        f"Гномий синедрион делает случайный "
-                        f"выбор блока..."
-                    ),
+                    text=get_text("duel.live.timeout.block", title=def_title),
                     parse_mode="HTML",
                 )
                 schedule_auto_delete(
@@ -669,12 +660,12 @@ async def _process_attack_choice(
         duel["defender_data"]
     )
 
-    text = (
-        f"🗡️ <b>Гномья дуэль! Раунд {duel['round']}</b>\n\n"
-        f"⚔️ <b>{att_title}</b> наносит замах!\n"
-        f"🛡️ <b>{def_title}</b>, выберите зону защиты!\n\n"
-        f"⏳ У <b>{def_title}</b> есть {MOVE_TIMEOUT} секунд "
-        f"на выбор блока:"
+    text = get_text(
+        "duel.live.defense_transition",
+        round=duel["round"],
+        attacker_title=att_title,
+        defender_title=def_title,
+        move_timeout=MOVE_TIMEOUT,
     )
 
     try:
@@ -747,11 +738,11 @@ async def _process_block_choice(
             SUICIDE_PHRASES
         )
 
-        res_text = (
-            f"💥 <b>НЕВЕРОЯТНЫЙ ИСХОД!</b>\n\n"
-            f"<b>{att_title}</b> {suicide_phrase}\n\n"
-            f"🏆 Победитель по глупости соперника: "
-            f"<b>{def_title}</b>!"
+        res_text = get_text(
+            "duel.live.outcomes.suicide",
+            attacker_title=att_title,
+            suicide_phrase=suicide_phrase,
+            defender_title=def_title,
         )
 
         await _finish_duel(
@@ -927,13 +918,14 @@ async def _process_block_choice(
             ATTACK_PHRASES
         )
 
-        res_text = (
-            f"💥 <b>ТОЧНЫЙ УДАР!</b>\n"
-            f"<b>{att_title}</b> {att_action} "
-            f"в зону ({TARGET_NAMES[strike_zone]}), "
-            f"а <b>{def_title}</b> блокировал "
-            f"({TARGET_NAMES[block_zone]}).\n"
-            f"<b>{att_title}</b> {hit_phrase}\n"
+        res_text = get_text(
+            "duel.live.outcomes.hit",
+            attacker_title=att_title,
+            attack_phrase=att_action,
+            strike_target=TARGET_NAMES[strike_zone],
+            defender_title=def_title,
+            block_target=TARGET_NAMES[block_zone],
+            hit_phrase=hit_phrase,
         )
 
         await _finish_duel(

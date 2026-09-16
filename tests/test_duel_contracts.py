@@ -9,9 +9,19 @@ def callback_data(markup):
 def test_duel_keyboard_callback_data_contract():
     from handlers import duel
 
+    assert [
+        button.text
+        for row in duel._get_strike_keyboard(7).inline_keyboard
+        for button in row
+    ] == ["🎯 Голова", "🛡️ Торс", "🍆 Хуй"]
     assert callback_data(duel._get_strike_keyboard(7)) == [
         "duel_strike_head_7", "duel_strike_body_7", "duel_strike_dick_7"
     ]
+    assert [
+        button.text
+        for row in duel._get_block_keyboard(8).inline_keyboard
+        for button in row
+    ] == ["🛡️ Голова", "🛡️ Торс", "🛡️ Хуй"]
     assert callback_data(duel._get_block_keyboard(8)) == [
         "duel_block_head_8", "duel_block_body_8", "duel_block_dick_8"
     ]

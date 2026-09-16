@@ -224,3 +224,41 @@ selection:
   button_label: ⚔️ {title}
   no_opponents: ❌ В чате нет доступных соперников для дуэли (все без очков или без хуев).
   prompt: 🗡️ <b>Выберите соперника для дуэли:</b>
+live:
+  keyboards:
+    strike:
+      head: 🎯 Голова
+      body: 🛡️ Торс
+      dick: 🍆 Хуй
+    block:
+      head: 🛡️ Голова
+      body: 🛡️ Торс
+      dick: 🛡️ Хуй
+  start: |-
+    🗡️ <b>Гномья дуэль начинается!</b>
+
+    ⚔️ Атакует: <b>{attacker_title}</b>
+    🛡️ Защищается: <b>{defender_title}</b>
+
+    ⏳ У <b>{attacker_title}</b> есть {move_timeout} секунд, чтобы выбрать точку удара:
+  defense_transition: |-
+    🗡️ <b>Гномья дуэль! Раунд {round}</b>
+
+    ⚔️ <b>{attacker_title}</b> наносит замах!
+    🛡️ <b>{defender_title}</b>, выберите зону защиты!
+
+    ⏳ У <b>{defender_title}</b> есть {move_timeout} секунд на выбор блока:
+  timeout:
+    attack: ⏰ <b>{title}</b> зазевался! Гномий синедрион делает случайный выбор атаки...
+    block: ⏰ <b>{title}</b> зазевался! Гномий синедрион делает случайный выбор блока...
+  outcomes:
+    suicide: |-
+      💥 <b>НЕВЕРОЯТНЫЙ ИСХОД!</b>
+
+      <b>{attacker_title}</b> {suicide_phrase}
+
+      🏆 Победитель по глупости соперника: <b>{defender_title}</b>!
+    hit: |
+      💥 <b>ТОЧНЫЙ УДАР!</b>
+      <b>{attacker_title}</b> {attack_phrase} в зону ({strike_target}), а <b>{defender_title}</b> блокировал ({block_target}).
+      <b>{attacker_title}</b> {hit_phrase}
