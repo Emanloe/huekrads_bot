@@ -1,4 +1,5 @@
 import importlib
+import logging
 import re
 
 
@@ -34,6 +35,13 @@ def test_bot_public_import_contracts():
     )
     for name in names:
         assert callable(getattr(bot, name))
+
+
+def test_bot_suppresses_http_client_info_logs():
+    import bot  # noqa: F401
+
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING
 
 
 def test_callback_handler_patterns_are_stable():
