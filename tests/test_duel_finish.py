@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from text_resources import get_text
+
 
 CHAT_ID = -4343
 
@@ -70,6 +72,51 @@ def fixed_duel_database(monkeypatch, temp_database):
 
     monkeypatch.setattr(database, "_get_today_date_str", lambda: "2030-01-02")
     return temp_database
+
+
+def test_finish_yaml_templates_preserve_exact_output_structure():
+    result = get_text(
+        "duel.finish.result",
+        custom_text="Финал.\n",
+        winner_title="Победитель",
+        loser_title="Проигравший",
+        winner_points=50,
+        loser_points=15,
+    )
+    stats = get_text(
+        "duel.finish.stats",
+        rounds_count=2,
+        rounds_label="раунда",
+        round_flavor="Вкус дуэли.",
+    )
+    stolen = get_text(
+        "duel.finish.stolen",
+        loser_title="Проигравший",
+        stats_text=stats,
+        fact="Факт.",
+    )
+
+    assert get_text("duel.finish.error") == "⚠️ Ошибка проведения дуэли. Попробуйте снова."
+    assert result == (
+        "Финал.\n\n"
+        "🗡️ <b>Результаты дуэли:</b>\n\n"
+        "Победитель: <b>Победитель</b>\n"
+        "Проигравший: <b>Проигравший</b>\n\n"
+        "<b>Победитель</b>: +10 очков (50/100)\n"
+        "<b>Проигравший</b>: -5 очков (15/100)\n"
+    )
+    assert stats == "\n📊 Длительность: <b>2</b> раунда\nВкус дуэли.\n"
+    assert stolen == (
+        "\n💀 <b>И ВДОБАВОК У НЕГО УКРАЛИ ХУЙ.</b>\n\n"
+        "Сегодня Проигравший больше не может драться.\n"
+        "\n📊 Длительность: <b>2</b> раунда\nВкус дуэли.\n\n"
+        "📖 <i>Факт.</i>"
+    )
+    assert get_text(
+        "duel.finish.max_points_caption",
+        winner_title="Победитель",
+        max_daily_points=100,
+    ) == "🏆 <b>Победитель</b> набрал 100 очков!"
 
 
 @pytest.mark.asyncio

@@ -262,3 +262,26 @@ live:
       💥 <b>ТОЧНЫЙ УДАР!</b>
       <b>{attacker_title}</b> {attack_phrase} в зону ({strike_target}), а <b>{defender_title}</b> блокировал ({block_target}).
       <b>{attacker_title}</b> {hit_phrase}
+finish:
+  error: ⚠️ Ошибка проведения дуэли. Попробуйте снова.
+  result: |
+    {custom_text}
+    🗡️ <b>Результаты дуэли:</b>
+
+    Победитель: <b>{winner_title}</b>
+    Проигравший: <b>{loser_title}</b>
+
+    <b>{winner_title}</b>: +10 очков ({winner_points}/100)
+    <b>{loser_title}</b>: -5 очков ({loser_points}/100)
+  stats: |
+
+    📊 Длительность: <b>{rounds_count}</b> {rounds_label}
+    {round_flavor}
+  stolen: |-
+
+    💀 <b>И ВДОБАВОК У НЕГО УКРАЛИ ХУЙ.</b>
+
+    Сегодня {loser_title} больше не может драться.
+    {stats_text}
+    📖 <i>{fact}</i>
+  max_points_caption: 🏆 <b>{winner_title}</b> набрал {max_daily_points} очков!

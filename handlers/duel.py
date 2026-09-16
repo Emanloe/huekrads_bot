@@ -980,7 +980,7 @@ async def _finish_duel(
 
         bot_msg = await context.bot.send_message(
             chat_id,
-            "⚠️ Ошибка проведения дуэли. Попробуйте снова.",
+            get_text("duel.finish.error"),
         )
 
         schedule_auto_delete(
@@ -993,21 +993,20 @@ async def _finish_duel(
 
     lose_title = format_user_title(loser)
 
-    res_msg = (
-        f"{custom_text}\n"
-        f"🗡️ <b>Результаты дуэли:</b>\n\n"
-        f"Победитель: <b>{win_title}</b>\n"
-        f"Проигравший: <b>{lose_title}</b>\n\n"
-        f"<b>{win_title}</b>: +10 очков "
-        f"({w_after}/100)\n"
-        f"<b>{lose_title}</b>: -5 очков "
-        f"({l_after}/100)\n"
+    res_msg = get_text(
+        "duel.finish.result",
+        custom_text=custom_text,
+        winner_title=win_title,
+        loser_title=lose_title,
+        winner_points=w_after,
+        loser_points=l_after,
     )
 
-    stats_text = (
-        f"\n📊 Длительность: <b>{rounds_count}</b> "
-        f"{_plural_rounds(rounds_count)}\n"
-        f"{get_round_flavor_text(rounds_count)}\n"
+    stats_text = get_text(
+        "duel.finish.stats",
+        rounds_count=rounds_count,
+        rounds_label=_plural_rounds(rounds_count),
+        round_flavor=get_round_flavor_text(rounds_count),
     )
 
     if is_dick_stolen:
@@ -1016,11 +1015,11 @@ async def _finish_duel(
             DWARFS_FACTS
         )
 
-        res_msg += (
-            f"\n💀 <b>И ВДОБАВОК У НЕГО УКРАЛИ ХУЙ.</b>\n\n"
-            f"Сегодня {lose_title} больше не может драться.\n"
-            f"{stats_text}\n"
-            f"📖 <i>{fact}</i>"
+        res_msg += get_text(
+            "duel.finish.stolen",
+            loser_title=lose_title,
+            stats_text=stats_text,
+            fact=fact,
         )
     else:
         res_msg += stats_text
@@ -1068,9 +1067,10 @@ async def _finish_duel(
             await context.bot.send_animation(
                 chat_id=chat_id,
                 animation=WINNER_100_PTS_GIF,
-                caption=(
-                    f"🏆 <b>{win_title}</b> набрал "
-                    f"{MAX_DAILY_POINTS} очков!"
+                caption=get_text(
+                    "duel.finish.max_points_caption",
+                    winner_title=win_title,
+                    max_daily_points=MAX_DAILY_POINTS,
                 ),
                 parse_mode="HTML",
             )
