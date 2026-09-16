@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import pytz
 from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN
+from text_resources import get_text
 
 DB_NAME = "bot_database.db"
 
@@ -41,7 +42,7 @@ def format_user_title(user_data: dict) -> str:
     username = _clean_username(user_data.get('username'))
     if username:
         return username
-    return user_data.get('display_name') or 'Гном'
+    return user_data.get('display_name') or get_text("common.user.default_title")
 
 
 def get_dick_steal_percent(daily_wins: int) -> int:

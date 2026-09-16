@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from text_resources import get_text
+
 
 def make_user(user_id=1, username="alice", first_name="Alice"):
     return SimpleNamespace(id=user_id, username=username, first_name=first_name, is_bot=False)
@@ -296,6 +298,8 @@ def test_public_formatting_and_chance_contracts():
 
     assert db.format_user_title({"username": "@name", "display_name": "Other"}) == "name"
     assert db.format_user_title({"username": None, "display_name": "Other"}) == "Other"
+    assert get_text("common.user.default_title") == "Гном"
+    assert db.format_user_title({"username": None, "display_name": None}) == "Гном"
     assert db.get_dick_steal_percent(0) == 20
     assert db.get_dick_steal_percent(3) == 23
     assert db.get_dick_steal_chance(3) == 0.23
