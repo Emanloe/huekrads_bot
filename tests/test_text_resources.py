@@ -26,6 +26,22 @@ def test_text_resource_missing_key_and_placeholder_have_clear_errors():
         text_resources.get_text("hyperborean.other.exploded.arthur")
 
 
+def test_text_list_preserves_duel_catalog_order_and_unicode():
+    phrases = text_resources.get_text_list("duel.phrases.attack")
+
+    assert phrases[0] == "замахивается засапожным свинорезом"
+    assert phrases[-1] == "крутит подлый финт короткой гномьей заточкой"
+    assert text_resources.get_text_list("duel.round_flavor.one")[0].startswith("⚡")
+
+
+def test_text_list_reports_unknown_key_and_wrong_type():
+    with pytest.raises(KeyError, match="Unknown text key"):
+        text_resources.get_text_list("duel.phrases.unknown")
+
+    with pytest.raises(TypeError, match="list of strings"):
+        text_resources.get_text_list("duel.targets")
+
+
 async def test_hyperborean_handler_uses_text_resource_layer(monkeypatch, fake_context):
     from handlers import hyperborean_event as event
 

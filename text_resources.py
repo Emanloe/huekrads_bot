@@ -27,8 +27,7 @@ def _load_resources() -> dict[str, dict[str, Any]]:
     return resources
 
 
-def get_text(key: str, /, **placeholders: object) -> str:
-    """Return a text value by a dotted key and apply named placeholders."""
+def _get_resource_value(key: str) -> Any:
     parts = key.split(".")
     if len(parts) < 2 or not all(parts):
         raise KeyError(f"Invalid text key: {key!r}")
@@ -39,6 +38,12 @@ def get_text(key: str, /, **placeholders: object) -> str:
             value = value[part]
     except KeyError as exc:
         raise KeyError(f"Unknown text key: {key}") from exc
+    return value
+
+
+def get_text(key: str, /, **placeholders: object) -> str:
+    """Return a text value by a dotted key and apply named placeholders."""
+    value = _get_resource_value(key)
 
     if not isinstance(value, str):
         raise TypeError(f"Text key {key!r} does not resolve to a string.")
@@ -51,3 +56,19 @@ def get_text(key: str, /, **placeholders: object) -> str:
         return value.format(**placeholders)
     except KeyError as exc:
         raise KeyError(f"Missing placeholder {exc.args[0]!r} for text key: {key}") from exc
+
+
+def get_text_list(key: str) -> list[str]:
+    """Return a cached ordered list of user-facing text strings."""
+    value = _get_resource_value(key)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise TypeError(f"Text key {key!r} does not resolve to a list of strings.")
+    return value
+
+
+def get_text_mapping(key: str) -> dict[Any, str]:
+    """Return a cached mapping whose values are user-facing text strings."""
+    value = _get_resource_value(key)
+    if not isinstance(value, dict) or not all(isinstance(item, str) for item in value.values()):
+        raise TypeError(f"Text key {key!r} does not resolve to a mapping of strings.")
+    return value
