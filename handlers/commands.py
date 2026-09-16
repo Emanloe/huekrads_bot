@@ -48,6 +48,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    await reply_or_send(update, context, get_text("commands.donate.message"))
+
+
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /top — статистика пидоров дня"""
     if not update.message:

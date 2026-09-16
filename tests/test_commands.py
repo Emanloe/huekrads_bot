@@ -31,6 +31,20 @@ async def test_top_command_preserves_html_template_and_trailing_newlines(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_donate_command_replies_with_yaml_text(fake_context, tg_user):
+    from handlers import commands
+
+    message = _message(tg_user)
+
+    await commands.donate_command(SimpleNamespace(message=message), fake_context)
+
+    message.reply_text.assert_awaited_once_with(
+        "Поддержать хуекрадство рублём:\nhttps://t.me/tribute/app?startapp=dQyP",
+        parse_mode=None,
+    )
+
+
+@pytest.mark.asyncio
 async def test_set_bday_command_preserves_dynamic_reply(monkeypatch, fake_context, tg_user):
     from handlers import commands
 

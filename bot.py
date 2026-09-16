@@ -35,6 +35,7 @@ from database import (
 from handlers.commands import (
     start_command,
     help_command,
+    donate_command,
     top_command,
     force_pidor_command,
     set_bday_command,
@@ -97,6 +98,7 @@ logger = logging.getLogger(__name__)
 BOT_COMMANDS = [
     BotCommand("start", get_text("menu.commands.start")),
     BotCommand("help", get_text("menu.commands.help")),
+    BotCommand("donate", get_text("menu.commands.donate")),
     BotCommand("top", get_text("menu.commands.top")),
     BotCommand("force_pidor", get_text("menu.commands.force_pidor")),
     BotCommand("setbday", get_text("menu.commands.setbday")),
@@ -239,6 +241,13 @@ async def main():
         CommandHandler(
             "help",
             help_command,
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "donate",
+            donate_command,
         )
     )
 

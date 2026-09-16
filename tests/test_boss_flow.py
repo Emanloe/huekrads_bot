@@ -444,7 +444,7 @@ async def test_boss_join_timeout_removes_empty_battle_and_edits_message(
         text=(
             "💀 <b>Тестовый Босс</b>\n\n"
             "Никто не осмелился вступить в битву.\n\n"
-            "Босс ушёл ждать более храбрых гномов."
+            "Босс постоял, посмотрел на этот позор и ушёл."
         ),
         parse_mode="HTML",
     )

@@ -156,7 +156,7 @@ def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
 
     assert len(epitaphs) == 4
     assert epitaphs[0].startswith("💀 <b>{title}</b> пал в раунде")
-    assert epitaphs[-1].endswith("Совпадение? Нет. Судьба.")
+    assert epitaphs[-1].endswith("Гном просчитался. Босс — нет.")
     assert zones == {"head": "Голова", "body": "Торс", "dick": "Хуй"}
     assert get_text(
         "boss.report.victory.team",
@@ -167,7 +167,7 @@ def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
     assert get_text("boss.report.fallback") == (
         "💀 <b>БИТВА ОКОНЧЕНА</b>\\n\\n"
         "Босс больше не сражается. "
-        "Гномская летопись почему-то отказалась писать подробности."
+        "Летописец посмотрел на произошедшее, охуел и отказался это записывать."
     )
 
 
@@ -176,7 +176,7 @@ def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
     [
         (2, 2, "рубился как настоящий гномий терминатор"),
         (2, 1, "превратил босса в тренировочную мишень"),
-        (0, 2, "оказался подозрительно хорош в умении не умереть"),
+        (0, 2, "каким-то хуем опять не умер"),
         (1, 0, "хотя бы успел оставить на боссе несколько зарубок"),
         (0, 0, "выжил почти исключительно благодаря наглости"),
     ],
@@ -293,7 +293,7 @@ def test_boss_final_report_defeat_preserves_sections_and_dead_order(monkeypatch)
     report = boss_presentation._boss_final_report(battle, victory=False)
 
     assert report.startswith("💀 <b>ПОСМЕРТНАЯ ЛЕТОПИСЬ ОТРЯДА</b>")
-    assert "👹 <b>Непобедимый Босс</b> остался стоять." in report
+    assert "👹 <b>Непобедимый Босс</b> так и остался стоять. Гномы — нет." in report
     assert (
         f"🎯 Гномы нанесли <b>2</b> из "
         f"<b>{boss_presentation.BOSS_REQUIRED_HITS}</b>"
@@ -389,7 +389,7 @@ async def test_boss_send_final_report_uses_current_report_build_fallback(
         text=(
             "💀 <b>БИТВА ОКОНЧЕНА</b>\\n\\n"
             "Босс больше не сражается. "
-            "Гномская летопись почему-то отказалась писать подробности."
+            "Летописец посмотрел на произошедшее, охуел и отказался это записывать."
         ),
         parse_mode="HTML",
     )

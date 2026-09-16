@@ -1383,7 +1383,7 @@ async def test_live_duel_outcome_wrappers_preserve_exact_text_and_rng_order(
     assert finish.await_args.kwargs["custom_text"] == (
         "💥 <b>НЕВЕРОЯТНЫЙ ИСХОД!</b>\n\n"
         "<b>Атакующий</b> споткнулся\n\n"
-        "🏆 Победитель по глупости соперника: <b>Защитник</b>!"
+        "🏆 <b>Защитник</b> победил, просто не мешая сопернику убить себя."
     )
 
     state = make_block_phase_duel(strike_zone="head", turn_id=7)

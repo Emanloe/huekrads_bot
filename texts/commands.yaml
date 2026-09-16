@@ -2,6 +2,10 @@ start:
   greeting: Свобода. Равенство. Пошёл нахуй.
 help:
   link: Хуекрады здесь — https://t.me/huehuehuekrads
+donate:
+  message: |-
+    Поддержать хуекрадство рублём:
+    https://t.me/tribute/app?startapp=dQyP
 top:
   empty: В этом чате пока нет участников или никто ещё не побеждал.
   header: |+

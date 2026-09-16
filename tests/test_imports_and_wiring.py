@@ -25,7 +25,7 @@ def test_bot_public_import_contracts():
     import bot
 
     names = (
-        "init_db", "set_boss_enabled", "start_command", "top_command",
+        "init_db", "set_boss_enabled", "start_command", "donate_command", "top_command",
         "force_pidor_command", "set_bday_command", "toggle_forward_reply_command",
         "toggle_autodelete_command", "daily_beauty_job", "schedule_past_pizda_job",
         "respond_trigger", "get_file_id_handler", "error_handler", "weather_inline_query",
@@ -52,6 +52,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
     assert [(command.command, command.description) for command in bot.BOT_COMMANDS] == [
         ("start", "Запустить бота"),
         ("help", "Хелп по командам"),
+        ("donate", "Поддержать проект"),
         ("top", "Топ пидоров"),
         ("force_pidor", "Назначить пидора"),
         ("setbday", "Установить день рождения"),
@@ -64,6 +65,52 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("boss", "Запустить босса"),
         ("boss_reg", "Записаться на босса"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_donate_command_handler_is_registered(monkeypatch):
+    from telegram.ext import CommandHandler
+    import bot
+
+    registered_handlers = []
+
+    class FakeApplication:
+        job_queue = None
+
+        def add_handler(self, handler):
+            registered_handlers.append(handler)
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def __init__(self):
+            self.application = FakeApplication()
+
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return self.application
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+
+    await bot.main()
+
+    handler = next(
+        item
+        for item in registered_handlers
+        if isinstance(item, CommandHandler) and item.callback is bot.donate_command
+    )
+    assert handler.commands == frozenset({"donate"})
 
 
 def test_callback_handler_patterns_are_stable():
