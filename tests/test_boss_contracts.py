@@ -56,13 +56,13 @@ async def test_boss_registration_closed_message_preserves_current_text(monkeypat
     from handlers import duel
 
     send = AsyncMock()
+    context = object()
     update = SimpleNamespace(
         message=SimpleNamespace(
             from_user=tg_user,
             chat=SimpleNamespace(id=-99, type="group"),
         )
     )
-    context = object()
     monkeypatch.setattr(duel, "_boss_registration_is_open", lambda: False)
     monkeypatch.setattr(duel, "send_and_schedule", send)
 
@@ -73,6 +73,93 @@ async def test_boss_registration_closed_message_preserves_current_text(monkeypat
         context,
         "Извинитесь. Битва уже была, запишитесь завтра до 18:00",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chat_type", "registration_open", "active", "added", "expected", "parse_mode"),
+    [
+        ("private", True, False, True, "⚔️ Записываться на гномью бойню можно только в группе.", None),
+        ("group", False, False, True, "Извинитесь. Битва уже была, запишитесь завтра до 18:00", None),
+        ("group", True, True, True, "⚔️ Битва уже идёт. На неё запись закрыта.", None),
+        ("group", True, False, True, "⚔️ <b>Гном записан на сегодняшнюю бойню.</b>\n\nВ 18:00 твоя борода сама окажется на арене. Нож бери с собой.", "HTML"),
+        ("group", True, False, False, "🍺 Ты уже записан на сегодняшнюю бойню.\n\nВ 18:00 просто приходи рубиться.", "HTML"),
+    ],
+)
+async def test_boss_registration_presentation_branches_are_exact(
+    monkeypatch,
+    tg_user,
+    chat_type,
+    registration_open,
+    active,
+    added,
+    expected,
+    parse_mode,
+):
+    from handlers import duel
+
+    chat_id = -992
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            from_user=tg_user,
+            chat=SimpleNamespace(id=chat_id, type=chat_type),
+        )
+    )
+    send = AsyncMock()
+    context = object()
+    monkeypatch.setattr(duel, "send_and_schedule", send)
+    monkeypatch.setattr(duel, "_boss_registration_is_open", lambda: registration_open)
+    monkeypatch.setattr(duel, "set_boss_enabled", lambda *_: None)
+    monkeypatch.setattr(duel, "_boss_register_user", lambda *_: added)
+    duel.ACTIVE_BOSS_BATTLES.clear()
+    if active:
+        duel.ACTIVE_BOSS_BATTLES[chat_id] = {"phase": "join"}
+
+    await duel.boss_reg_command(update, context)
+
+    kwargs = {"parse_mode": parse_mode} if parse_mode else {}
+    send.assert_awaited_once_with(update, context, expected, **kwargs)
+    duel.ACTIVE_BOSS_BATTLES.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user_id", "chat_id", "active", "expected"),
+    [
+        (0, -993, False, "⛔ Недостаточно прав."),
+        (1, 993, False, "👹 Босс запускается только в групповом чате."),
+        (1, -993, True, "👹 В этом чате уже идет битва с боссом."),
+    ],
+)
+async def test_boss_command_presentation_branches_are_exact(
+    monkeypatch,
+    user_id,
+    chat_id,
+    active,
+    expected,
+):
+    from handlers import duel
+
+    admin_id = 1
+    monkeypatch.setattr(duel, "ADMIN_IDS", {admin_id})
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=chat_id),
+            chat_id=chat_id,
+        )
+    )
+    send = AsyncMock()
+    context = object()
+    monkeypatch.setattr(duel, "send_and_schedule", send)
+    duel.ACTIVE_BOSS_BATTLES.clear()
+    if active:
+        duel.ACTIVE_BOSS_BATTLES[chat_id] = {"phase": "join"}
+
+    await duel.boss_command(update, context)
+
+    send.assert_awaited_once_with(update, context, expected)
+    duel.ACTIVE_BOSS_BATTLES.clear()
 
 
 def test_boss_state_helpers():

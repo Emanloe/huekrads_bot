@@ -2086,7 +2086,7 @@ async def boss_callback(
 
     if not battle:
         await query.answer(
-            "Битва уже закончилась.",
+            get_text("boss.callback.battle_finished"),
             show_alert=True,
         )
         return
@@ -2098,14 +2098,14 @@ async def boss_callback(
         if callback_data == "boss_join":
             if battle["phase"] != "join":
                 await query.answer(
-                    "Битва уже началась.",
+                    get_text("boss.callback.join.already_started"),
                     show_alert=True,
                 )
                 return
 
             if user_id in battle["participants"]:
                 await query.answer(
-                    "Ты уже участвуешь.",
+                    get_text("boss.callback.join.already_participating"),
                     show_alert=True,
                 )
                 return
@@ -2116,25 +2116,23 @@ async def boss_callback(
             )
 
             await query.answer(
-                "Ты вступил в битву! ⚔️"
+                get_text("boss.callback.join.joined")
             )
 
             try:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=battle["message_id"],
-                    text=(
-                        f"💀 <b>{battle['boss']['name']}</b>\n\n"
-                        f"👹 Босс готов к битве!\n\n"
-                        f"👥 Участников: "
-                        f"<b>{len(battle['participants'])}</b>\n\n"
-                        f"⚔️ Присоединяйтесь к бойне."
+                    text=get_text(
+                        "boss.callback.join.progress",
+                        boss_name=battle["boss"]["name"],
+                        participants=len(battle["participants"]),
                     ),
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([
                         [
                             InlineKeyboardButton(
-                                "⚔️ Присоединиться",
+                                get_text("boss.join.button"),
                                 callback_data="boss_join",
                             )
                         ]
@@ -2148,7 +2146,7 @@ async def boss_callback(
         if callback_data.startswith("boss_attack_"):
             if battle["phase"] != "attack":
                 await query.answer(
-                    "Сейчас фаза защиты.",
+                    get_text("boss.callback.attack_phase_closed"),
                     show_alert=True,
                 )
                 return
@@ -2159,14 +2157,14 @@ async def boss_callback(
 
             if not participant:
                 await query.answer(
-                    "Ты не участвуешь в битве.",
+                    get_text("boss.callback.not_participant"),
                     show_alert=True,
                 )
                 return
 
             if not participant["alive"]:
                 await query.answer(
-                    "Ты уже погиб.",
+                    get_text("boss.callback.dead"),
                     show_alert=True,
                 )
                 return
@@ -2175,7 +2173,7 @@ async def boss_callback(
 
             if len(parts) != 4:
                 await query.answer(
-                    "Устаревшая кнопка.",
+                    get_text("boss.callback.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -2186,21 +2184,21 @@ async def boss_callback(
                 button_round = int(parts[3])
             except ValueError:
                 await query.answer(
-                    "Устаревшая кнопка.",
+                    get_text("boss.callback.stale_button"),
                     show_alert=True,
                 )
                 return
 
             if button_round != battle["round"]:
                 await query.answer(
-                    "Этот раунд уже закончился.",
+                    get_text("boss.callback.round_finished"),
                     show_alert=True,
                 )
                 return
 
             if zone not in BOSS_ZONES:
                 await query.answer(
-                    "Неизвестная зона.",
+                    get_text("boss.callback.unknown_zone"),
                     show_alert=True,
                 )
                 return
@@ -2212,7 +2210,7 @@ async def boss_callback(
             )
 
             await query.answer(
-                f"Атака: {BOSS_ZONE_NAMES[zone]} ⚔️"
+                get_text("boss.callback.attack_ack", zone=BOSS_ZONE_NAMES[zone])
             )
 
             await _boss_render_phase(
@@ -2244,7 +2242,7 @@ async def boss_callback(
         if callback_data.startswith("boss_block_"):
             if battle["phase"] != "block":
                 await query.answer(
-                    "Сначала все должны выбрать атаку.",
+                    get_text("boss.callback.block_phase_closed"),
                     show_alert=True,
                 )
                 return
@@ -2255,14 +2253,14 @@ async def boss_callback(
 
             if not participant:
                 await query.answer(
-                    "Ты не участвуешь в битве.",
+                    get_text("boss.callback.not_participant"),
                     show_alert=True,
                 )
                 return
 
             if not participant["alive"]:
                 await query.answer(
-                    "Ты уже погиб.",
+                    get_text("boss.callback.dead"),
                     show_alert=True,
                 )
                 return
@@ -2271,7 +2269,7 @@ async def boss_callback(
 
             if len(parts) != 4:
                 await query.answer(
-                    "Устаревшая кнопка.",
+                    get_text("boss.callback.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -2282,21 +2280,21 @@ async def boss_callback(
                 button_round = int(parts[3])
             except ValueError:
                 await query.answer(
-                    "Устаревшая кнопка.",
+                    get_text("boss.callback.stale_button"),
                     show_alert=True,
                 )
                 return
 
             if button_round != battle["round"]:
                 await query.answer(
-                    "Этот раунд уже закончился.",
+                    get_text("boss.callback.round_finished"),
                     show_alert=True,
                 )
                 return
 
             if zone not in BOSS_ZONES:
                 await query.answer(
-                    "Неизвестная зона.",
+                    get_text("boss.callback.unknown_zone"),
                     show_alert=True,
                 )
                 return
@@ -2308,7 +2306,7 @@ async def boss_callback(
             )
 
             await query.answer(
-                f"Защита: {BOSS_ZONE_NAMES[zone]} 🛡"
+                get_text("boss.callback.block_ack", zone=BOSS_ZONE_NAMES[zone])
             )
 
             await _boss_render_phase(
@@ -2767,7 +2765,7 @@ async def _start_boss_battle(
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    "⚔️ Присоединиться",
+                    get_text("boss.join.button"),
                     callback_data="boss_join",
                 )
             ]
@@ -2864,7 +2862,7 @@ async def boss_reg_command(
         await send_and_schedule(
             update,
             context,
-            "⚔️ Записываться на гномью бойню можно только в группе.",
+            get_text("boss.registration.group_only"),
         )
         return
 
@@ -2874,7 +2872,7 @@ async def boss_reg_command(
         await send_and_schedule(
             update,
             context,
-            "Извинитесь. Битва уже была, запишитесь завтра до 18:00",
+            get_text("boss.registration.closed"),
         )
         return
 
@@ -2882,7 +2880,7 @@ async def boss_reg_command(
         await send_and_schedule(
             update,
             context,
-            "⚔️ Битва уже идёт. На неё запись закрыта.",
+            get_text("boss.registration.active"),
         )
         return
 
@@ -2899,21 +2897,14 @@ async def boss_reg_command(
         await send_and_schedule(
             update,
             context,
-            (
-                "⚔️ <b>Гном записан на сегодняшнюю бойню.</b>\n\n"
-                "В 18:00 твоя борода сама окажется на арене. "
-                "Нож бери с собой."
-            ),
+            get_text("boss.registration.registered"),
             parse_mode="HTML",
         )
     else:
         await send_and_schedule(
             update,
             context,
-            (
-                "🍺 Ты уже записан на сегодняшнюю бойню.\n\n"
-                "В 18:00 просто приходи рубиться."
-            ),
+            get_text("boss.registration.already_registered"),
             parse_mode="HTML",
         )
 
@@ -2937,7 +2928,7 @@ async def boss_command(
         await send_and_schedule(
             update,
             context,
-            "⛔ Недостаточно прав.",
+            get_text("boss.command.forbidden"),
         )
         return
 
@@ -2947,7 +2938,7 @@ async def boss_command(
         await send_and_schedule(
             update,
             context,
-            "👹 Босс запускается только в групповом чате.",
+            get_text("boss.command.group_only"),
         )
         return
 
@@ -2955,7 +2946,7 @@ async def boss_command(
         await send_and_schedule(
             update,
             context,
-            "👹 В этом чате уже идет битва с боссом.",
+            get_text("boss.command.active"),
         )
         return
 

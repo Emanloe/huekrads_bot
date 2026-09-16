@@ -202,6 +202,15 @@ async def test_boss_join_callback_inserts_current_participant_snapshot(
     assert edit_kwargs["chat_id"] == chat_id
     assert edit_kwargs["message_id"] == battle["message_id"]
     assert edit_kwargs["parse_mode"] == "HTML"
+    assert edit_kwargs["text"] == (
+        "💀 <b>Тестовый Босс</b>\n\n"
+        "👹 Босс готов к битве!\n\n"
+        "👥 Участников: <b>1</b>\n\n"
+        "⚔️ Присоединяйтесь к бойне."
+    )
+    assert edit_kwargs["reply_markup"].inline_keyboard[0][0].text == (
+        "⚔️ Присоединиться"
+    )
     assert edit_kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "boss_join"
 
 
@@ -235,6 +244,74 @@ async def test_boss_join_callback_rejects_duplicate_without_db_or_state_change(
     assert battle["participants"][315] is participant_identity
     query.answer.assert_awaited_once_with("Ты уже участвуешь.", show_alert=True)
     fake_context.bot.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_boss_callback_reports_finished_battle_alert():
+    from handlers import duel
+
+    update, query = make_callback_update(-718, 1, "boss_join")
+
+    await duel.boss_callback(update, SimpleNamespace())
+
+    query.answer.assert_awaited_once_with(
+        "Битва уже закончилась.",
+        show_alert=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("phase", "participants", "callback_data", "expected"),
+    [
+        ("attack", [], "boss_join", "Битва уже началась."),
+        ("block", [], "boss_attack_head_4", "Сейчас фаза защиты."),
+        ("attack", [], "boss_attack_head_4", "Ты не участвуешь в битве."),
+        ("attack", [make_participant(1, alive=False)], "boss_attack_head_4", "Ты уже погиб."),
+        ("attack", [make_participant(1)], "boss_attack_head", "Устаревшая кнопка."),
+        ("attack", [make_participant(1)], "boss_attack_head_old", "Устаревшая кнопка."),
+        ("attack", [make_participant(1)], "boss_attack_head_3", "Этот раунд уже закончился."),
+        ("attack", [make_participant(1)], "boss_attack_arm_4", "Неизвестная зона."),
+        ("attack", [make_participant(1)], "boss_block_head_4", "Сначала все должны выбрать атаку."),
+    ],
+)
+async def test_boss_callback_validation_alerts_are_exact(
+    phase,
+    participants,
+    callback_data,
+    expected,
+):
+    from handlers import duel
+
+    chat_id = -716
+    battle = make_battle(participants, phase=phase, round_num=4)
+    duel.ACTIVE_BOSS_BATTLES[chat_id] = battle
+    update, query = make_callback_update(chat_id, 1, callback_data)
+
+    await duel.boss_callback(update, SimpleNamespace())
+
+    query.answer.assert_awaited_once_with(expected, show_alert=True)
+
+
+@pytest.mark.asyncio
+async def test_boss_callback_reports_exact_action_acknowledgements(monkeypatch):
+    from handlers import duel
+
+    chat_id = -717
+    first = make_participant(1)
+    second = make_participant(2)
+    battle = make_battle([first, second], phase="attack", round_num=4)
+    duel.ACTIVE_BOSS_BATTLES[chat_id] = battle
+    monkeypatch.setattr(duel, "_boss_render_phase", AsyncMock())
+
+    update, attack_query = make_callback_update(chat_id, 1, "boss_attack_head_4")
+    await duel.boss_callback(update, SimpleNamespace())
+    attack_query.answer.assert_awaited_once_with("Атака: Голова ⚔️")
+
+    battle["phase"] = "block"
+    update, block_query = make_callback_update(chat_id, 1, "boss_block_body_4")
+    await duel.boss_callback(update, SimpleNamespace())
+    block_query.answer.assert_awaited_once_with("Защита: Торс 🛡")
 
 
 @pytest.fixture(autouse=True)
