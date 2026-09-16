@@ -2,6 +2,8 @@ import importlib
 import logging
 import re
 
+import pytest
+
 
 def test_runtime_modules_import():
     for name in (
@@ -59,3 +61,77 @@ def test_callback_handler_patterns_are_stable():
     }
     for payload, pattern in patterns.items():
         assert re.search(pattern, payload)
+
+
+@pytest.mark.asyncio
+async def test_registered_hyperborean_callback_handler_routes_all_supported_payloads(monkeypatch):
+    from telegram import CallbackQuery, Update, User
+    from telegram.ext import CallbackQueryHandler
+    import bot
+
+    registered_handlers = []
+
+    class FakeApplication:
+        job_queue = None
+
+        def add_handler(self, handler):
+            registered_handlers.append(handler)
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def __init__(self):
+            self.application = FakeApplication()
+
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return self.application
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+
+    await bot.main()
+
+    handler = next(
+        item
+        for item in registered_handlers
+        if isinstance(item, CallbackQueryHandler)
+        and item.callback is bot.hyperboreic_huy_callback
+    )
+    handler_index = registered_handlers.index(handler)
+
+    def update_with(data):
+        return Update(
+            update_id=1,
+            callback_query=CallbackQuery(
+                id="test-callback",
+                from_user=User(id=1, first_name="Tester", is_bot=False),
+                chat_instance="test-chat",
+                data=data,
+            ),
+        )
+
+    for payload in (
+        "hyperboreic_huy",
+        "hyperboreic_huy_self",
+        "hyperboreic_huy_other",
+    ):
+        assert handler.check_update(update_with(payload))
+        assert not any(
+            item.check_update(update_with(payload))
+            for item in registered_handlers[:handler_index]
+            if isinstance(item, CallbackQueryHandler)
+        )
+
+    assert not handler.check_update(update_with("hyperboreic_huy_unknown"))
+    assert not handler.check_update(update_with("duel_strike_head_1"))

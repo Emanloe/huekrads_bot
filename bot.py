@@ -377,7 +377,7 @@ async def main():
     application.add_handler(
         CallbackQueryHandler(
             hyperboreic_huy_callback,
-            pattern=r"^hyperboreic_huy$",
+            pattern=r"^hyperboreic_huy(?:_(?:self|other))?$",
         )
     )
 
