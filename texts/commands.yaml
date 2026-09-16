@@ -1,0 +1,31 @@
+start:
+  greeting: Свобода. Равенство. Пошёл нахуй.
+help:
+  link: Хуекрады здесь — https://t.me/huehuehuekrads
+top:
+  empty: В этом чате пока нет участников или никто ещё не побеждал.
+  header: |+
+    🏆 <b>Топ пидоров чата:</b>
+
+  anonymous: Аноним
+  item: |+
+    {index}. <b>{username}</b> — {count} раз(а)
+admin:
+  only: ⛔ Эта команда доступна только администраторам.
+force_pidor:
+  no_candidates: Нет кандидатов для проведения игры.
+  winner: Пидор дня — {username}! Он был пидором уже {count} раз(а).
+birthday:
+  usage: "Использование: `/setbday @username DD.MM`"
+  saved: День рождения для {username} успешно сохранён ({birthdate}).
+  missing: Пользователь {username} не найден в базе данных этого чата.
+toggle_forward:
+  status:
+    enabled: включен
+    disabled: выключен
+  message: Ответ 'Форвардни себе за щеку' {status}.
+toggle_autodelete:
+  status:
+    enabled: включено
+    disabled: выключено
+  message: Автоудаление команд {status}.

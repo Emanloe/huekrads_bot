@@ -11,6 +11,7 @@ from database import (
     set_auto_delete_enabled,
 )
 from handlers.utils import is_admin, reply_or_send, delete_messages_job
+from text_resources import get_text
 
 
 def schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, message):
@@ -31,7 +32,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_or_update_user(update.message.from_user, update.message.chat_id)
-    await reply_or_send(update, context, "Свобода. Равенство. Пошёл нахуй.")
+    await reply_or_send(update, context, get_text("commands.start.greeting"))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,7 +44,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_or_send(
         update,
         context,
-        "Хуекрады здесь — https://t.me/huehuehuekrads",
+        get_text("commands.help.link"),
     )
 
 
@@ -60,14 +61,14 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_or_send(
             update,
             context,
-            "В этом чате пока нет участников или никто ещё не побеждал.",
+            get_text("commands.top.empty"),
         )
         return
 
-    text = "🏆 <b>Топ пидоров чата:</b>\n\n"
+    text = get_text("commands.top.header")
     for idx, (username, count) in enumerate(top_list, 1):
-        clean_username = username.lstrip("@") if username else "Аноним"
-        text += f"{idx}. <b>{clean_username}</b> — {count} раз(а)\n"
+        clean_username = username.lstrip("@") if username else get_text("commands.top.anonymous")
+        text += get_text("commands.top.item", index=idx, username=clean_username, count=count)
 
     await reply_or_send(update, context, text, parse_mode="HTML")
 
@@ -80,22 +81,22 @@ async def force_pidor_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     schedule_auto_delete(context, update.message)
     if not is_admin(update.message.from_user.id):
         await reply_or_send(
-            update, context, "⛔ Эта команда доступна только администраторам."
+            update, context, get_text("commands.admin.only")
         )
         return
 
     chat_id = update.message.chat_id
     result = pick_beauty_of_the_day(chat_id)
     if not result:
-        await reply_or_send(update, context, "Нет кандидатов для проведения игры.")
+        await reply_or_send(update, context, get_text("commands.force_pidor.no_candidates"))
         return
 
     winner_tag, count = result
-    clean_tag = winner_tag.lstrip("@") if winner_tag else "Аноним"
+    clean_tag = winner_tag.lstrip("@") if winner_tag else get_text("commands.top.anonymous")
     await reply_or_send(
         update,
         context,
-        f"Пидор дня — {clean_tag}! Он был пидором уже {count} раз(а).",
+        get_text("commands.force_pidor.winner", username=clean_tag, count=count),
     )
 
 
@@ -107,7 +108,7 @@ async def set_bday_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     schedule_auto_delete(context, update.message)
     if not is_admin(update.message.from_user.id):
         await reply_or_send(
-            update, context, "⛔ Эта команда доступна только администраторам."
+            update, context, get_text("commands.admin.only")
         )
         return
 
@@ -116,7 +117,7 @@ async def set_bday_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_or_send(
             update,
             context,
-            "Использование: `/setbday @username DD.MM`",
+            get_text("commands.birthday.usage"),
             parse_mode="Markdown",
         )
         return
@@ -129,13 +130,13 @@ async def set_bday_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_or_send(
             update,
             context,
-            f"День рождения для {username} успешно сохранён ({bday_str}).",
+            get_text("commands.birthday.saved", username=username, birthdate=bday_str),
         )
     else:
         await reply_or_send(
             update,
             context,
-            f"Пользователь {username} не найден в базе данных этого чата.",
+            get_text("commands.birthday.missing", username=username),
         )
 
 
@@ -151,7 +152,7 @@ async def toggle_forward_reply_command(
     # ПРОВЕРКА НА АДМИНА
     if not is_admin(update.message.from_user.id):
         await reply_or_send(
-            update, context, "⛔ Эта команда доступна только администраторам."
+            update, context, get_text("commands.admin.only")
         )
         return
 
@@ -160,9 +161,9 @@ async def toggle_forward_reply_command(
     new_state = not current_state
 
     set_forward_reply_enabled(chat_id, new_state)
-    status = "включен" if new_state else "выключен"
+    status = get_text("commands.toggle_forward.status.enabled") if new_state else get_text("commands.toggle_forward.status.disabled")
     await reply_or_send(
-        update, context, f"Ответ 'Форвардни себе за щеку' {status}."
+        update, context, get_text("commands.toggle_forward.message", status=status)
     )
 
 
@@ -182,7 +183,7 @@ async def toggle_autodelete_command(
     # ПРОВЕРКА НА АДМИНА
     if not is_admin(update.message.from_user.id):
         await reply_or_send(
-            update, context, "⛔ Эта команда доступна только администраторам."
+            update, context, get_text("commands.admin.only")
         )
         return
 
@@ -191,5 +192,5 @@ async def toggle_autodelete_command(
     new_state = not current_state
 
     set_auto_delete_enabled(chat_id, new_state)
-    status = "включено" if new_state else "выключено"
-    await reply_or_send(update, context, f"Автоудаление команд {status}.")
+    status = get_text("commands.toggle_autodelete.status.enabled") if new_state else get_text("commands.toggle_autodelete.status.disabled")
+    await reply_or_send(update, context, get_text("commands.toggle_autodelete.message", status=status))
