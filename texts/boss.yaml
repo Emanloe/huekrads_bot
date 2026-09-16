@@ -1,3 +1,24 @@
+catalog:
+  deep_snouted_baron:
+    name: Глубокорылый Барон
+    emoji: 👹
+    description: Древний владыка шахт. У него три подбородка, семь ножей и абсолютно нулевая терпимость к гномам.
+  dick_crusher_face_eater:
+    name: Хуекрушитель Мордогрыз
+    emoji: 💀
+    description: Монстр настолько злой, что однажды укусил собственную бороду и победил.
+  prince_of_underground_chaos:
+    name: Князь Подземного Пиздеца
+    emoji: 👑
+    description: Повелитель нижних штолен. Его корона сделана из сломанных гномьих ножей.
+  great_knife_beard:
+    name: Великий Ножебород
+    emoji: 🧔
+    description: Его борода настолько острая, что ею можно нарезать колбасу и участников.
+  dick_devourer:
+    name: Пожиратель Хуев
+    emoji: 🦷
+    description: Никто не знает, сколько хуев он уже съел. Сам он тоже не знает. Он просто продолжает.
 zones:
   display:
     head: Голова
@@ -84,6 +105,54 @@ callback:
   attack_ack: "Атака: {zone} ⚔️"
   block_phase_closed: Сначала все должны выбрать атаку.
   block_ack: "Защита: {zone} 🛡"
+battle:
+  spawn: |-
+    💀 <b>{boss_name}</b>
+
+    👹 В чат явился босс!
+
+    🎯 Его нужно поразить <b>{required_hits} раз</b>.
+    💀 Босс убивает с одного удара, если игрок не заблокировал нужную зону.
+
+    ⚔️ Нажимайте кнопку ниже, чтобы присоединиться.
+  pre_registered: |-
+    💀 <b>{boss_name}</b>
+
+    👹 Босс явился в подземелье!
+
+    ⚔️ Заранее записались: <b>{participants}</b>
+
+    Другие храбрецы ещё могут вступить в бой.
+  empty_join_timeout: |-
+    💀 <b>{boss_name}</b>
+
+    Никто не осмелился вступить в битву.
+
+    Босс ушёл ждать более храбрых гномов.
+timeout:
+  auto_attack: "⚔️ <b>{title}</b> зазевался. Нож сам пошёл в <b>{zone}</b>."
+  auto_block: "🛡 <b>{title}</b> зазевался. Рука сама прикрыла <b>{zone}</b>."
+round:
+  attack_result:
+    hit: 💥 ПОПАДАНИЕ
+    miss: 💨 ПРОМАХ
+  block_result:
+    survived: 🛡 ЗАБЛОКИРОВАЛ
+    dead: 💀 УБИТ
+  participant_result: |-
+    <b>{title}</b>
+    ⚔️ {attack_zone} → {attack_result}
+    🛡 {block_zone} → {block_result}
+  summary: |-
+    💥 <b>РАУНД {round} — РЕЗУЛЬТАТ</b>
+
+    👹 Босс атаковал: <b>{boss_attack}</b>
+    🛡 Босс защищал: <b>{boss_block}</b>
+
+    {results}
+
+    🎯 Урон боссу: <b>{hits} / {required_hits}</b>
+    👥 В живых: <b>{alive_after}</b> / <b>{total}</b>
 survivor:
   phrases:
     terminator: рубился как настоящий гномий терминатор

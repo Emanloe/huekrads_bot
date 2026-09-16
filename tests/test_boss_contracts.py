@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 import re
 
+from text_resources import get_text
+
 
 def callback_data(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row]
@@ -31,6 +33,29 @@ def test_boss_runtime_constants_and_state_contract():
     assert duel.ACTIVE_BOSS_BATTLES is state
     assert duel.ACTIVE_BOSS_BATTLES[-99] == {"phase": "join"}
     state.clear()
+
+
+def test_boss_catalog_has_stable_order_shape_and_yaml_backed_presentation():
+    from handlers import duel
+
+    catalog_keys = [
+        "deep_snouted_baron",
+        "dick_crusher_face_eater",
+        "prince_of_underground_chaos",
+        "great_knife_beard",
+        "dick_devourer",
+    ]
+
+    assert len(duel.BOSSES) == 5
+    assert all(set(boss) == {"name", "emoji", "description"} for boss in duel.BOSSES)
+    assert duel.BOSSES == [
+        {
+            "name": get_text(f"boss.catalog.{key}.name"),
+            "emoji": get_text(f"boss.catalog.{key}.emoji"),
+            "description": get_text(f"boss.catalog.{key}.description"),
+        }
+        for key in catalog_keys
+    ]
 
 
 def test_boss_registration_uses_isolated_database(tmp_path, monkeypatch, tg_user):

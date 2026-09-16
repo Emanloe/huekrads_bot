@@ -158,44 +158,37 @@ ACTIVE_DUELS = {}
 
 BOSSES = [
     {
-        "name": "Глубокорылый Барон",
-        "emoji": "👹",
-        "description": (
-            "Древний владыка шахт. У него три подбородка, "
-            "семь ножей и абсолютно нулевая терпимость к гномам."
+        "name": get_text("boss.catalog.deep_snouted_baron.name"),
+        "emoji": get_text("boss.catalog.deep_snouted_baron.emoji"),
+        "description": get_text(
+            "boss.catalog.deep_snouted_baron.description"
         ),
     },
     {
-        "name": "Хуекрушитель Мордогрыз",
-        "emoji": "💀",
-        "description": (
-            "Монстр настолько злой, что однажды укусил собственную "
-            "бороду и победил."
+        "name": get_text("boss.catalog.dick_crusher_face_eater.name"),
+        "emoji": get_text("boss.catalog.dick_crusher_face_eater.emoji"),
+        "description": get_text(
+            "boss.catalog.dick_crusher_face_eater.description"
         ),
     },
     {
-        "name": "Князь Подземного Пиздеца",
-        "emoji": "👑",
-        "description": (
-            "Повелитель нижних штолен. Его корона сделана из "
-            "сломанных гномьих ножей."
+        "name": get_text("boss.catalog.prince_of_underground_chaos.name"),
+        "emoji": get_text("boss.catalog.prince_of_underground_chaos.emoji"),
+        "description": get_text(
+            "boss.catalog.prince_of_underground_chaos.description"
         ),
     },
     {
-        "name": "Великий Ножебород",
-        "emoji": "🧔",
-        "description": (
-            "Его борода настолько острая, что ею можно нарезать "
-            "колбасу и участников."
+        "name": get_text("boss.catalog.great_knife_beard.name"),
+        "emoji": get_text("boss.catalog.great_knife_beard.emoji"),
+        "description": get_text(
+            "boss.catalog.great_knife_beard.description"
         ),
     },
     {
-        "name": "Пожиратель Хуев",
-        "emoji": "🦷",
-        "description": (
-            "Никто не знает, сколько хуев он уже съел. "
-            "Сам он тоже не знает. Он просто продолжает."
-        ),
+        "name": get_text("boss.catalog.dick_devourer.name"),
+        "emoji": get_text("boss.catalog.dick_devourer.emoji"),
+        "description": get_text("boss.catalog.dick_devourer.description"),
     },
 ]
 
@@ -1866,18 +1859,20 @@ async def _boss_auto_choose_for_zazevasha(
             return
 
         participant["attack"] = zone
-        action_text = (
-            f"⚔️ <b>{title}</b> зазевался. "
-            f"Нож сам пошёл в <b>{BOSS_ZONE_NAMES[zone]}</b>."
+        action_text = get_text(
+            "boss.timeout.auto_attack",
+            title=title,
+            zone=BOSS_ZONE_NAMES[zone],
         )
     else:
         if participant.get("block") is not None:
             return
 
         participant["block"] = zone
-        action_text = (
-            f"🛡 <b>{title}</b> зазевался. "
-            f"Рука сама прикрыла <b>{BOSS_ZONE_NAMES[zone]}</b>."
+        action_text = get_text(
+            "boss.timeout.auto_block",
+            title=title,
+            zone=BOSS_ZONE_NAMES[zone],
         )
 
     try:
@@ -2384,42 +2379,42 @@ async def _boss_resolve_round(
             participant = participant_result["participant"]
             attack = participant_result["attack"]
             block = participant_result["block"]
-            attack_result = (
-                "💥 ПОПАДАНИЕ"
+            attack_result = get_text(
+                "boss.round.attack_result.hit"
                 if participant_result["hit"]
-                else "💨 ПРОМАХ"
+                else "boss.round.attack_result.miss"
             )
-            block_result = (
-                "🛡 ЗАБЛОКИРОВАЛ"
+            block_result = get_text(
+                "boss.round.block_result.survived"
                 if participant_result["survived"]
-                else "💀 УБИТ"
+                else "boss.round.block_result.dead"
             )
 
             title = _boss_player_title(participant)
 
             results.append(
-                f"<b>{title}</b>\n"
-                f"⚔️ {BOSS_ZONE_NAMES[attack]} → "
-                f"{attack_result}\n"
-                f"🛡 {BOSS_ZONE_NAMES[block]} → "
-                f"{block_result}"
+                get_text(
+                    "boss.round.participant_result",
+                    title=title,
+                    attack_zone=BOSS_ZONE_NAMES[attack],
+                    attack_result=attack_result,
+                    block_zone=BOSS_ZONE_NAMES[block],
+                    block_result=block_result,
+                )
             )
 
         alive_after = round_result["alive_after"]
 
-        text = (
-            f"💥 <b>РАУНД {battle['round']} — РЕЗУЛЬТАТ</b>\n\n"
-            f"👹 Босс атаковал: "
-            f"<b>{BOSS_ZONE_NAMES[boss_attack]}</b>\n"
-            f"🛡 Босс защищал: "
-            f"<b>{BOSS_ZONE_NAMES[boss_block]}</b>\n\n"
-            + "\n\n".join(results)
-            + "\n\n"
-            f"🎯 Урон боссу: "
-            f"<b>{battle['hits']} / {BOSS_REQUIRED_HITS}</b>\n"
-            f"👥 В живых: "
-            f"<b>{alive_after}</b> / "
-            f"<b>{len(battle['participants'])}</b>"
+        text = get_text(
+            "boss.round.summary",
+            round=battle["round"],
+            boss_attack=BOSS_ZONE_NAMES[boss_attack],
+            boss_block=BOSS_ZONE_NAMES[boss_block],
+            results="\n\n".join(results),
+            hits=battle["hits"],
+            required_hits=BOSS_REQUIRED_HITS,
+            alive_after=alive_after,
+            total=len(battle["participants"]),
         )
 
         outcome = round_result["outcome"]
@@ -2751,15 +2746,10 @@ async def _start_boss_battle(
 
     bot_msg = await context.bot.send_message(
         chat_id=chat_id,
-        text=(
-            f"💀 <b>{boss['name']}</b>\n\n"
-            f"👹 В чат явился босс!\n\n"
-            f"🎯 Его нужно поразить "
-            f"<b>{BOSS_REQUIRED_HITS} раз</b>.\n"
-            f"💀 Босс убивает с одного удара, "
-            f"если игрок не заблокировал нужную зону.\n\n"
-            f"⚔️ Нажимайте кнопку ниже, "
-            f"чтобы присоединиться."
+        text=get_text(
+            "boss.battle.spawn",
+            boss_name=boss["name"],
+            required_hits=BOSS_REQUIRED_HITS,
         ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -2811,18 +2801,16 @@ async def _start_boss_battle(
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=battle["message_id"],
-                text=(
-                    f"💀 <b>{boss['name']}</b>\n\n"
-                    f"👹 Босс явился в подземелье!\n\n"
-                    f"⚔️ Заранее записались: "
-                    f"<b>{len(battle['participants'])}</b>\n\n"
-                    f"Другие храбрецы ещё могут вступить в бой."
+                text=get_text(
+                    "boss.battle.pre_registered",
+                    boss_name=boss["name"],
+                    participants=len(battle["participants"]),
                 ),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton(
-                            "⚔️ Присоединиться",
+                            get_text("boss.join.button"),
                             callback_data="boss_join",
                         )
                     ]
@@ -3063,12 +3051,9 @@ async def _boss_join_timer(
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=battle["message_id"],
-                    text=(
-                        f"💀 <b>{battle['boss']['name']}</b>\n\n"
-                        f"Никто не осмелился вступить "
-                        f"в битву.\n\n"
-                        f"Босс ушёл ждать более "
-                        f"храбрых гномов."
+                    text=get_text(
+                        "boss.battle.empty_join_timeout",
+                        boss_name=battle["boss"]["name"],
                     ),
                     parse_mode="HTML",
                 )
