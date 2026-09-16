@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 import re
 
 
@@ -46,6 +49,30 @@ def test_boss_registration_uses_isolated_database(tmp_path, monkeypatch, tg_user
     assert duel._boss_get_registered_chat_ids() == {-99}
     duel._boss_clear_registrations(-99)
     assert duel._boss_get_registered_users(-99) == []
+
+
+@pytest.mark.asyncio
+async def test_boss_registration_closed_message_preserves_current_text(monkeypatch, tg_user):
+    from handlers import duel
+
+    send = AsyncMock()
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            from_user=tg_user,
+            chat=SimpleNamespace(id=-99, type="group"),
+        )
+    )
+    context = object()
+    monkeypatch.setattr(duel, "_boss_registration_is_open", lambda: False)
+    monkeypatch.setattr(duel, "send_and_schedule", send)
+
+    await duel.boss_reg_command(update, context)
+
+    send.assert_awaited_once_with(
+        update,
+        context,
+        "Извинитесь. Битва уже была, запишитесь завтра до 18:00",
+    )
 
 
 def test_boss_state_helpers():

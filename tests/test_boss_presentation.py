@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
+from text_resources import get_text, get_text_list, get_text_mapping
+
 
 def make_participant(
     username,
@@ -60,6 +62,22 @@ def test_boss_death_epitaph_uses_player_result_and_one_random_choice(monkeypatch
     )
     choose.assert_called_once()
     assert len(choose.call_args.args[0]) == 4
+
+
+def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
+    epitaphs = get_text_list("boss.death_epitaphs")
+    zones = get_text_mapping("boss.zones.display")
+
+    assert len(epitaphs) == 4
+    assert epitaphs[0].startswith("💀 <b>{title}</b> пал в раунде")
+    assert epitaphs[-1].endswith("Совпадение? Нет. Судьба.")
+    assert zones == {"head": "Голова", "body": "Торс", "dick": "Хуй"}
+    assert get_text(
+        "boss.report.victory.team",
+        total=3,
+        survivors=2,
+        dead=1,
+    ) == "👥 Отряд: <b>3</b> — выжило <b>2</b>, погибло <b>1</b>."
 
 
 @pytest.mark.parametrize(
