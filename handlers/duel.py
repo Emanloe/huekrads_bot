@@ -7,6 +7,7 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
+from text_resources import get_text
 from config import (
     TOP_SORT_BY,
     ADMIN_IDS,
@@ -1533,9 +1534,9 @@ async def duel_stats_command(update, context):
     title = format_user_title(user)
 
     status = (
-        "Без хуя 💀"
+        get_text("duel.stats.status.no_dick")
         if user["dick_stolen_today"]
-        else "С хуем 🍆"
+        else get_text("duel.stats.status.has_dick")
     )
 
     bosses_defeated = get_bosses_defeated(
@@ -1553,33 +1554,38 @@ async def duel_stats_command(update, context):
 
     if win_title:
         huyanie_titles.append(
-            f"{win_title} ({user['wins']})"
+            get_text("duel.stats.title_item", title=win_title, count=user["wins"])
         )
 
     if loss_title:
         huyanie_titles.append(
-            f"{loss_title} ({user['losses']})"
+            get_text("duel.stats.title_item", title=loss_title, count=user["losses"])
         )
 
     if stolen_title:
         huyanie_titles.append(
-            f"{stolen_title} ({user['stolen_dicks_count']})"
+            get_text(
+                "duel.stats.title_item",
+                title=stolen_title,
+                count=user["stolen_dicks_count"],
+            )
         )
 
     huyanie_text = (
         "\n".join(huyanie_titles)
         if huyanie_titles
-        else "Нет званий"
+        else get_text("duel.stats.no_titles")
     )
 
-    text = (
-        f"📊 <b>Статистика дуэлей: {title}</b>\n\n"
-        f"Очки: <b>{user['points']} / 100</b>\n"
-        f"Побед: <b>{user['wins']}</b>\n"
-        f"Поражений: <b>{user['losses']}</b>\n"
-        f"Хуяние:\n<b>{huyanie_text}</b>\n"
-        f"👹 Побеждено боссов: <b>{bosses_defeated}</b>\n"
-        f"Статус на сегодня: <b>{status}</b>"
+    text = get_text(
+        "duel.stats.summary",
+        title=title,
+        points=user["points"],
+        wins=user["wins"],
+        losses=user["losses"],
+        huyanie_text=huyanie_text,
+        bosses_defeated=bosses_defeated,
+        status=status,
     )
 
     await send_and_schedule(
@@ -1616,20 +1622,20 @@ async def duel_top_command(
         await send_and_schedule(
             update,
             context,
-            "🏆 Таблица лидеров чата пока пуста.",
+            get_text("duel.top.empty"),
         )
 
         return
 
     sort_label = (
-        "очкам"
+        get_text("duel.top.sort_by_points")
         if TOP_SORT_BY == "points"
-        else "победам"
+        else get_text("duel.top.sort_by_wins")
     )
 
-    text = (
-        f"🏆 <b>Топ-10 гномьих дуэлянтов "
-        f"чата (по {sort_label}):</b>\n\n"
+    text = get_text(
+        "duel.top.header",
+        sort_label=sort_label,
     )
 
     for idx, row in enumerate(top, 1):
@@ -1639,15 +1645,18 @@ async def duel_top_command(
         raw_name = (
             display_name
             or username
-            or "Гном"
+            or get_text("common.user.default_title")
         )
 
         clean_name = raw_name.lstrip("@")
 
-        text += (
-            f"{idx}. <b>{clean_name}</b> — "
-            f"{points} очков "
-            f"({wins}W / {losses}L)\n"
+        text += get_text(
+            "duel.top.row",
+            index=idx,
+            title=clean_name,
+            points=points,
+            wins=wins,
+            losses=losses,
         )
 
     await send_and_schedule(
@@ -1680,7 +1689,7 @@ async def duel_delete_command(
         await send_and_schedule(
             update,
             context,
-            "⛔ Недостаточно прав.",
+            get_text("duel.admin.delete.no_permission"),
         )
 
         return
@@ -1695,10 +1704,7 @@ async def duel_delete_command(
         await send_and_schedule(
             update,
             context,
-            (
-                "⚠️ Укажите ник: "
-                "<code>/duel_delete username</code>"
-            ),
+            get_text("duel.admin.delete.usage"),
         )
 
         return
@@ -1717,10 +1723,7 @@ async def duel_delete_command(
         await send_and_schedule(
             update,
             context,
-            (
-                f"✅ Пользователь {clean_target} "
-                f"удален из базы дуэлей этого чата."
-            ),
+            get_text("duel.admin.delete.success", username=clean_target),
         )
 
     else:
@@ -1728,10 +1731,7 @@ async def duel_delete_command(
         await send_and_schedule(
             update,
             context,
-            (
-                f"❌ Пользователь {clean_target} "
-                f"не найден в базе этого чата."
-            ),
+            get_text("duel.admin.delete.not_found", username=clean_target),
         )
 
 

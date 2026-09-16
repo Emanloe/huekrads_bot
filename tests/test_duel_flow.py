@@ -999,3 +999,161 @@ async def test_duel_command_no_dick_fast_fails_before_target_resolution(
     assert send_and_schedule.await_args.args[:2] == (update, fake_context)
     assert "Ты сегодня уже без хуя" in send_and_schedule.await_args.args[2]
     assert CHAT_ID not in duel.ACTIVE_DUELS
+
+
+@pytest.mark.asyncio
+async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake_context):
+    from handlers import duel
+
+    user_tg = make_user(601, "stats_user")
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            from_user=user_tg,
+            chat=SimpleNamespace(id=CHAT_ID),
+            chat_id=CHAT_ID,
+        )
+    )
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    user_data = {
+        "points": 37,
+        "wins": 12,
+        "losses": 8,
+        "stolen_dicks_count": 3,
+        "dick_stolen_today": False,
+    }
+    monkeypatch.setattr(
+        duel,
+        "get_or_create_duel_user",
+        Mock(return_value=user_data),
+    )
+    monkeypatch.setattr(duel, "format_user_title", lambda _user: "<b>Статист</b>")
+    monkeypatch.setattr(duel, "get_bosses_defeated", lambda **_kwargs: 4)
+    monkeypatch.setattr(duel, "get_win_title", lambda _count: "🍆 Победитель")
+    monkeypatch.setattr(duel, "get_loss_title", lambda _count: "💀 Лузер")
+    monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: "🔪 Вор")
+
+    await duel.duel_stats_command(update, fake_context)
+
+    sent.assert_awaited_once_with(
+        update,
+        fake_context,
+        "📊 <b>Статистика дуэлей: <b>Статист</b></b>\n\n"
+        "Очки: <b>37 / 100</b>\n"
+        "Побед: <b>12</b>\n"
+        "Поражений: <b>8</b>\n"
+        "Хуяние:\n<b>🍆 Победитель (12)\n💀 Лузер (8)\n🔪 Вор (3)</b>\n"
+        "👹 Побеждено боссов: <b>4</b>\n"
+        "Статус на сегодня: <b>С хуем 🍆</b>",
+    )
+
+    sent.reset_mock()
+    user_data["dick_stolen_today"] = True
+    monkeypatch.setattr(duel, "get_win_title", lambda _count: None)
+    monkeypatch.setattr(duel, "get_loss_title", lambda _count: None)
+    monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: None)
+
+    await duel.duel_stats_command(update, fake_context)
+
+    assert sent.await_args.args[2].endswith(
+        "Хуяние:\n<b>Нет званий</b>\n"
+        "👹 Побеждено боссов: <b>4</b>\n"
+        "Статус на сегодня: <b>Без хуя 💀</b>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_duel_top_command_preserves_rows_and_uses_common_default_title(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    update = SimpleNamespace(
+        message=SimpleNamespace(chat=SimpleNamespace(id=CHAT_ID), chat_id=CHAT_ID)
+    )
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    monkeypatch.setattr(duel, "TOP_SORT_BY", "points")
+    monkeypatch.setattr(
+        duel,
+        "get_duel_top",
+        Mock(return_value=[("alpha", "@Альфа", 7, 2, 65), (None, None, 1, 9, 5)]),
+    )
+
+    await duel.duel_top_command(update, fake_context)
+
+    sent.assert_awaited_once_with(
+        update,
+        fake_context,
+        "🏆 <b>Топ-10 гномьих дуэлянтов чата (по очкам):</b>\n\n"
+        "1. <b>Альфа</b> — 65 очков (7W / 2L)\n"
+        "2. <b>Гном</b> — 5 очков (1W / 9L)\n",
+    )
+
+    sent.reset_mock()
+    monkeypatch.setattr(duel, "get_duel_top", Mock(return_value=[]))
+
+    await duel.duel_top_command(update, fake_context)
+
+    sent.assert_awaited_once_with(
+        update,
+        fake_context,
+        "🏆 Таблица лидеров чата пока пуста.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_duel_delete_command_preserves_presentation_branches(monkeypatch, fake_context):
+    from handlers import duel
+
+    def update_for(user_id):
+        return SimpleNamespace(
+            message=SimpleNamespace(
+                from_user=make_user(user_id, f"user_{user_id}"),
+                chat=SimpleNamespace(id=CHAT_ID),
+                chat_id=CHAT_ID,
+            )
+        )
+
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    monkeypatch.setattr(duel, "ADMIN_IDS", {1})
+
+    denied_update = update_for(2)
+    await duel.duel_delete_command(denied_update, fake_context)
+    sent.assert_awaited_once_with(denied_update, fake_context, "⛔ Недостаточно прав.")
+
+    sent.reset_mock()
+    monkeypatch.setattr(duel, "_extract_username", lambda *_args: None)
+    usage_update = update_for(1)
+    await duel.duel_delete_command(usage_update, fake_context)
+    sent.assert_awaited_once_with(
+        usage_update,
+        fake_context,
+        "⚠️ Укажите ник: <code>/duel_delete username</code>",
+    )
+
+    sent.reset_mock()
+    monkeypatch.setattr(duel, "_extract_username", lambda *_args: "@victim")
+    delete_user = Mock(return_value=True)
+    monkeypatch.setattr(duel, "delete_duel_user_by_username", delete_user)
+    success_update = update_for(1)
+    await duel.duel_delete_command(success_update, fake_context)
+    delete_user.assert_called_once_with("@victim", CHAT_ID)
+    sent.assert_awaited_once_with(
+        success_update,
+        fake_context,
+        "✅ Пользователь victim удален из базы дуэлей этого чата.",
+    )
+
+    sent.reset_mock()
+    delete_user.reset_mock(return_value=True)
+    delete_user.return_value = False
+    missing_update = update_for(1)
+    await duel.duel_delete_command(missing_update, fake_context)
+    sent.assert_awaited_once_with(
+        missing_update,
+        fake_context,
+        "❌ Пользователь victim не найден в базе этого чата.",
+    )
