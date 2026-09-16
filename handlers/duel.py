@@ -460,7 +460,7 @@ async def duel_strike_callback(
 
     if not duel:
         await query.answer(
-            "Дуэль не найдена или уже завершена.",
+            get_text("duel.action_alert.no_active_duel"),
             show_alert=True,
         )
         return
@@ -486,7 +486,7 @@ async def duel_strike_callback(
             # Сейчас не фаза атаки.
             if duel["phase"] != "attack":
                 await query.answer(
-                    "Сейчас не ваш ход. Ждите защиты соперника.",
+                    get_text("duel.action_alert.strike.wrong_phase"),
                     show_alert=True,
                 )
                 return
@@ -494,7 +494,7 @@ async def duel_strike_callback(
             # Только атакующий может выбирать атаку.
             if user_id != duel["attacker_tg"].id:
                 await query.answer(
-                    "Сейчас не ваш ход для атаки!",
+                    get_text("duel.action_alert.strike.wrong_actor"),
                     show_alert=True,
                 )
                 return
@@ -508,7 +508,7 @@ async def duel_strike_callback(
 
             if len(parts) != 4:
                 await query.answer(
-                    "Эта кнопка устарела.",
+                    get_text("duel.action_alert.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -519,7 +519,7 @@ async def duel_strike_callback(
                 button_turn_id = int(parts[3])
             except ValueError:
                 await query.answer(
-                    "Эта кнопка устарела.",
+                    get_text("duel.action_alert.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -527,14 +527,14 @@ async def duel_strike_callback(
             # Кнопка должна принадлежать именно текущему ходу.
             if button_turn_id != duel["turn_id"]:
                 await query.answer(
-                    "Этот ход уже закончился.",
+                    get_text("duel.action_alert.turn_ended"),
                     show_alert=True,
                 )
                 return
 
             if strike_zone not in TARGET_NAMES:
                 await query.answer(
-                    "Неизвестная зона атаки.",
+                    get_text("duel.action_alert.strike.unknown_zone"),
                     show_alert=True,
                 )
                 return
@@ -566,7 +566,7 @@ async def duel_strike_callback(
             # Сейчас не фаза защиты.
             if duel["phase"] != "block":
                 await query.answer(
-                    "Сейчас не ваш ход. Ждите атаки соперника.",
+                    get_text("duel.action_alert.block.wrong_phase"),
                     show_alert=True,
                 )
                 return
@@ -574,7 +574,7 @@ async def duel_strike_callback(
             # Только защищающийся может выбирать защиту.
             if user_id != duel["defender_tg"].id:
                 await query.answer(
-                    "Сейчас не ваш ход для защиты!",
+                    get_text("duel.action_alert.block.wrong_actor"),
                     show_alert=True,
                 )
                 return
@@ -588,7 +588,7 @@ async def duel_strike_callback(
 
             if len(parts) != 4:
                 await query.answer(
-                    "Эта кнопка устарела.",
+                    get_text("duel.action_alert.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -599,7 +599,7 @@ async def duel_strike_callback(
                 button_turn_id = int(parts[3])
             except ValueError:
                 await query.answer(
-                    "Эта кнопка устарела.",
+                    get_text("duel.action_alert.stale_button"),
                     show_alert=True,
                 )
                 return
@@ -607,14 +607,14 @@ async def duel_strike_callback(
             # Кнопка должна принадлежать текущему ходу.
             if button_turn_id != duel["turn_id"]:
                 await query.answer(
-                    "Этот ход уже закончился.",
+                    get_text("duel.action_alert.turn_ended"),
                     show_alert=True,
                 )
                 return
 
             if block_zone not in TARGET_NAMES:
                 await query.answer(
-                    "Неизвестная зона защиты.",
+                    get_text("duel.action_alert.block.unknown_zone"),
                     show_alert=True,
                 )
                 return
@@ -1102,8 +1102,7 @@ async def _process_duel_fight(
 
         bot_msg = await context.bot.send_message(
             chat_id,
-            "⚔️ В этом чате уже идет дуэль! "
-            "Дождитесь ее окончания.",
+            get_text("duel.admission.active_duel"),
         )
 
         schedule_auto_delete(
@@ -1122,7 +1121,7 @@ async def _process_duel_fight(
 
         bot_msg = await context.bot.send_message(
             chat_id,
-            "⚔️ Нельзя вызвать на дуэль самого себя!",
+            get_text("duel.admission.self_target"),
         )
 
         schedule_auto_delete(
@@ -1151,8 +1150,7 @@ async def _process_duel_fight(
         bot_msg = await context.bot.send_message(
             chat_id,
             (
-                f"💀 <b>{init_title}</b> сегодня уже "
-                f"без хуя. До завтра драться нельзя."
+                get_text("duel.admission.participant.no_dick", title=init_title)
             ),
             parse_mode="HTML",
         )
@@ -1169,8 +1167,7 @@ async def _process_duel_fight(
 
         bot_msg = await context.bot.send_message(
             chat_id,
-            "⚔️ У вас 0 очков. "
-            "Вы больше не можете драться сегодня.",
+            get_text("duel.admission.initiator.no_points"),
         )
 
         schedule_auto_delete(
@@ -1191,8 +1188,7 @@ async def _process_duel_fight(
         bot_msg = await context.bot.send_message(
             chat_id,
             (
-                f"❌ Пользователь <b>{target_username}</b> "
-                f"не найден в базе этого чата."
+                get_text("duel.admission.opponent.not_found", username=target_username)
             ),
             parse_mode="HTML",
         )
@@ -1209,7 +1205,7 @@ async def _process_duel_fight(
 
         bot_msg = await context.bot.send_message(
             chat_id,
-            "⚔️ Нельзя вызвать на дуэль самого себя!",
+            get_text("duel.admission.self_target"),
         )
 
         schedule_auto_delete(
@@ -1233,8 +1229,7 @@ async def _process_duel_fight(
         bot_msg = await context.bot.send_message(
             chat_id,
             (
-                f"💀 <b>{opp_title}</b> сегодня уже "
-                f"без хуя. До завтра драться нельзя."
+                get_text("duel.admission.participant.no_dick", title=opp_title)
             ),
             parse_mode="HTML",
         )
@@ -1252,8 +1247,7 @@ async def _process_duel_fight(
         bot_msg = await context.bot.send_message(
             chat_id,
             (
-                f"⚔️ <b>{opp_title}</b> больше не может "
-                f"драться сегодня — у него 0 очков."
+                get_text("duel.admission.opponent.no_points", title=opp_title)
             ),
             parse_mode="HTML",
         )
@@ -1333,10 +1327,7 @@ async def duel_command(
         await send_and_schedule(
             update,
             context,
-            (
-                "💀 <b>Ты сегодня уже без хуя.</b> "
-                "До завтра драться нельзя."
-            ),
+            get_text("duel.command.no_dick"),
         )
         return
 
@@ -1390,7 +1381,7 @@ async def duel_command(
                 display_name or username
             ).lstrip("@")
 
-            label = f"⚔️ {clean_label}"
+            label = get_text("duel.selection.button_label", title=clean_label)
 
             keyboard.append(
                 [
@@ -1407,8 +1398,7 @@ async def duel_command(
                 update,
                 context,
                 (
-                    "❌ В чате нет доступных соперников "
-                    "для дуэли (все без очков или без хуев)."
+                    get_text("duel.selection.no_opponents")
                 ),
             )
 
@@ -1421,7 +1411,7 @@ async def duel_command(
         await send_and_schedule(
             update,
             context,
-            "🗡️ <b>Выберите соперника для дуэли:</b>",
+            get_text("duel.selection.prompt"),
             reply_markup=reply_markup,
         )
 

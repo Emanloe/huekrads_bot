@@ -1157,3 +1157,129 @@ async def test_duel_delete_command_preserves_presentation_branches(monkeypatch, 
         fake_context,
         "❌ Пользователь victim не найден в базе этого чата.",
     )
+
+
+@pytest.mark.asyncio
+async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    initiator_tg = make_user(701, "initiator")
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            from_user=initiator_tg,
+            chat=SimpleNamespace(id=CHAT_ID),
+            chat_id=CHAT_ID,
+            message_id=701,
+            text="/duel",
+        )
+    )
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    monkeypatch.setattr(
+        duel,
+        "get_or_create_duel_user",
+        Mock(return_value=admission_user(initiator_tg.id, initiator_tg.username)),
+    )
+    monkeypatch.setattr(duel, "_extract_username", lambda *_args: None)
+    monkeypatch.setattr(
+        duel,
+        "get_duel_top",
+        Mock(return_value=[("initiator", "Initiator", 0, 0, 20), ("opponent", "@Оппонент", 0, 0, 20)]),
+    )
+    monkeypatch.setattr(
+        duel,
+        "get_duel_user_by_username",
+        lambda username, _chat_id: admission_user(702, username),
+    )
+
+    await duel.duel_command(update, fake_context)
+
+    sent.assert_awaited_once()
+    sent_args = sent.await_args.args
+    assert sent_args[:2] == (update, fake_context)
+    assert sent_args[2] == "🗡️ <b>Выберите соперника для дуэли:</b>"
+    keyboard = sent.await_args.kwargs["reply_markup"].inline_keyboard
+    assert [(button.text, button.callback_data) for row in keyboard for button in row] == [
+        ("⚔️ Оппонент", "start_duel_opponent"),
+    ]
+
+    sent.reset_mock()
+    monkeypatch.setattr(duel, "get_duel_top", Mock(return_value=[]))
+    await duel.duel_command(update, fake_context)
+    sent.assert_awaited_once_with(
+        update,
+        fake_context,
+        "❌ В чате нет доступных соперников для дуэли (все без очков или без хуев).",
+    )
+
+
+@pytest.mark.asyncio
+async def test_duel_action_alerts_preserve_all_invalid_callback_outputs(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    attacker = make_user(801, "attacker")
+    defender = make_user(802, "defender")
+
+    def battle(phase, turn_id=7):
+        return {
+            "lock": asyncio.Lock(),
+            "phase": phase,
+            "attacker_tg": attacker,
+            "defender_tg": defender,
+            "turn_id": turn_id,
+            "turn_task": None,
+        }
+
+    cases = [
+        (None, "duel_strike_head_7", attacker, "Дуэль не найдена или уже завершена."),
+        (battle("block"), "duel_strike_head_7", attacker, "Сейчас не ваш ход. Ждите защиты соперника."),
+        (battle("attack"), "duel_strike_head_7", defender, "Сейчас не ваш ход для атаки!"),
+        (battle("attack"), "duel_strike_head", attacker, "Эта кнопка устарела."),
+        (battle("attack"), "duel_strike_head_x", attacker, "Эта кнопка устарела."),
+        (battle("attack"), "duel_strike_head_6", attacker, "Этот ход уже закончился."),
+        (battle("attack"), "duel_strike_unknown_7", attacker, "Неизвестная зона атаки."),
+        (battle("attack"), "duel_block_head_7", defender, "Сейчас не ваш ход. Ждите атаки соперника."),
+        (battle("block"), "duel_block_head_7", attacker, "Сейчас не ваш ход для защиты!"),
+        (battle("block"), "duel_block_head", defender, "Эта кнопка устарела."),
+        (battle("block"), "duel_block_head_x", defender, "Эта кнопка устарела."),
+        (battle("block"), "duel_block_head_6", defender, "Этот ход уже закончился."),
+        (battle("block"), "duel_block_unknown_7", defender, "Неизвестная зона защиты."),
+    ]
+
+    for active_battle, callback_data, user, expected_text in cases:
+        duel.ACTIVE_DUELS.clear()
+        if active_battle is not None:
+            duel.ACTIVE_DUELS[CHAT_ID] = active_battle
+        query = SimpleNamespace(data=callback_data, from_user=user, answer=AsyncMock())
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_chat=SimpleNamespace(id=CHAT_ID),
+        )
+
+        await duel.duel_strike_callback(update, fake_context)
+
+        query.answer.assert_awaited_once_with(expected_text, show_alert=True)
+
+    duel.ACTIVE_DUELS[CHAT_ID] = battle("attack")
+    process_attack = AsyncMock()
+    monkeypatch.setattr(duel, "_process_attack_choice", process_attack)
+    query = SimpleNamespace(
+        data="duel_strike_head_7",
+        from_user=attacker,
+        answer=AsyncMock(),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_chat=SimpleNamespace(id=CHAT_ID),
+    )
+
+    await duel.duel_strike_callback(update, fake_context)
+
+    query.answer.assert_awaited_once_with()
+    process_attack.assert_awaited_once_with(fake_context, CHAT_ID, "head")
