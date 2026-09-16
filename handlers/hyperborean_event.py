@@ -42,25 +42,27 @@ async def _spawn_hyperboreic_huy(
     )
 
     if event_type == "arthur":
-        button_text = "⚔️ ХУЙ КОРОЛЯ АРТУРА"
         event_text = (
             "⚔️ <b>ОБНАРУЖЕН ХУЙ КОРОЛЯ АРТУРА</b>\n\n"
-            "Кто осмелится вытащить его из камня?"
+            "Кто осмелится вытащить его из камня?\n\n"
+            "Один хуй тебе или два другому?"
         )
     else:
-        button_text = "🍆 ОБНАРУЖЕН ГИПЕРБОРЕЙСКИЙ ХУЙ"
         event_text = (
             "⚠️ <b>ОБНАРУЖЕН ГИПЕРБОРЕЙСКИЙ ХУЙ</b>\n\n"
-            "Кто первый схватит — тому решать судьбу своего хуя."
+            "Кто первый схватит — тому решать судьбу своего хуя.\n\n"
+            "Один хуй тебе или два другому?"
         )
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    button_text,
-                    callback_data="hyperboreic_huy",
-                )
+                    "Один мне", callback_data="hyperboreic_huy_self"
+                ),
+                InlineKeyboardButton(
+                    "Два другому", callback_data="hyperboreic_huy_other"
+                ),
             ]
         ]
     )
@@ -216,13 +218,73 @@ def _claim_hyperboreic_huy(
         return "error"
 
 
+def _claim_hyperboreic_huy_for_other(
+    chat_id: int,
+    tg_user,
+):
+    """Resolve the "two for another" action for one user of this chat."""
+    try:
+        # This preserves the existing claim behaviour: the player pressing a
+        # button is registered before an event can be resolved.
+        get_or_create_duel_user(tg_user, chat_id)
+
+        with sqlite3.connect(str(_HYPERBOREAN_DB_PATH), timeout=10) as conn:
+            candidates = conn.execute(
+                """
+                SELECT user_id, username, display_name, points, dick_stolen_today
+                FROM duel_users
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            ).fetchall()
+
+            if not candidates:
+                return "missing", None, False
+
+            selected = random.choice(candidates)
+            user_id, username, display_name, points, dick_stolen_today = selected
+            had_no_dick = bool(dick_stolen_today)
+            selected_user = {
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "username": username,
+                "display_name": display_name,
+                "points": points,
+                "dick_stolen_today": had_no_dick,
+            }
+
+            if had_no_dick:
+                conn.execute(
+                    """
+                    UPDATE duel_users
+                    SET points = 0, dick_stolen_today = 1
+                    WHERE chat_id = ? AND user_id = ?
+                    """,
+                    (chat_id, user_id),
+                )
+                selected_user["points"] = 0
+                return "exploded", selected_user, True
+
+            return "unchanged", selected_user, False
+    except Exception:
+        logging.exception(
+            "Ошибка выбора игрока для гиперборейского хуя в чате %s",
+            chat_id,
+        )
+        return "error", None, False
+
+
 async def hyperboreic_huy_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
     query = update.callback_query
 
-    if not query or query.data != "hyperboreic_huy":
+    if not query or query.data not in {
+        "hyperboreic_huy",
+        "hyperboreic_huy_self",
+        "hyperboreic_huy_other",
+    }:
         return
 
     chat_id = update.effective_chat.id
@@ -241,10 +303,19 @@ async def hyperboreic_huy_callback(
 
     event_type = event.get("event_type", "hyperboreic")
 
-    result = _claim_hyperboreic_huy(
-        chat_id,
-        query.from_user,
-    )
+    action = "other" if query.data == "hyperboreic_huy_other" else "self"
+    selected_user = None
+
+    if action == "other":
+        result, selected_user, _had_no_dick = _claim_hyperboreic_huy_for_other(
+            chat_id,
+            query.from_user,
+        )
+    else:
+        result = _claim_hyperboreic_huy(
+            chat_id,
+            query.from_user,
+        )
 
     if result == "error":
         ACTIVE_HYPERBOREAN_EVENTS[chat_id] = event
@@ -256,10 +327,67 @@ async def hyperboreic_huy_callback(
         return
 
     if result == "missing":
+        ACTIVE_HYPERBOREAN_EVENTS[chat_id] = event
+
         await query.answer(
             "Гном ещё не зарегистрирован в этом чате.",
             show_alert=True,
         )
+        return
+
+    if action == "other":
+        title = format_user_title(selected_user)
+
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=event["message_id"],
+                reply_markup=None,
+            )
+        except Exception:
+            logging.exception(
+                "Не удалось убрать кнопки события в чате %s",
+                chat_id,
+            )
+
+        if result == "exploded":
+            if event_type == "arthur":
+                text = (
+                    f"⚔️ Выбор пал на <b>{title}</b>.\n\n"
+                    "Хуй Короля Артура увидел, что у гнома уже нет хуя, "
+                    "и разорвал его на величественные хуйные молекулы.\n\n"
+                    "💀 Очки: <b>0 / 100</b>\n"
+                    "🍆 Хуй: <b>потерян</b>"
+                )
+            else:
+                text = (
+                    f"🍆 Выбор пал на <b>{title}</b>.\n\n"
+                    "У гнома уже не было хуя, поэтому гиперборейский хуй "
+                    "разорвал его на хуйные молекулы.\n\n"
+                    "💀 Очки: <b>0 / 100</b>\n"
+                    "🍆 Хуй: <b>потерян</b>"
+                )
+            await query.answer("Два другому. Выбор сделан.")
+        else:
+            if event_type == "arthur":
+                text = (
+                    f"⚔️ Выбор пал на <b>{title}</b>, но ничего не произошло.\n\n"
+                    "Хуй Короля Артура остался в камне."
+                )
+            else:
+                text = (
+                    f"🍆 Выбор пал на <b>{title}</b>, но ничего не произошло.\n\n"
+                    "Гиперборейский хуй молча исчез."
+                )
+            await query.answer("Два другому. Ничего не произошло.")
+
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        except Exception:
+            logging.exception(
+                "Не удалось отправить результат выбора другого игрока в чате %s",
+                chat_id,
+            )
         return
 
     title = format_user_title(
