@@ -3,6 +3,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS
 from database import is_auto_delete_enabled
+from text_resources import get_text, get_text_mapping
+
+
+MEDIA_TYPE_LABELS = get_text_mapping("media.types")
 
 
 def is_admin(user_id: int) -> bool:
@@ -68,35 +72,38 @@ async def get_file_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     file_id = None
-    media_type = "File"
+    media_type = MEDIA_TYPE_LABELS["file"]
 
     # 1. Сжатая картинка (Telegram отправляет массив размеров, берем самое высокое качество - последний элемент)
     if msg.photo:
         file_id = msg.photo[-1].file_id
-        media_type = "Photo"
+        media_type = MEDIA_TYPE_LABELS["photo"]
 
     # 2. Анимация / GIF
     elif msg.animation:
         file_id = msg.animation.file_id
-        media_type = "GIF"
+        media_type = MEDIA_TYPE_LABELS["gif"]
 
     # 3. Видео
     elif msg.video:
         file_id = msg.video.file_id
-        media_type = "Video"
+        media_type = MEDIA_TYPE_LABELS["video"]
 
     # 4. Документ (картинка или файл, отправленный "без сжатия")
     elif msg.document:
         file_id = msg.document.file_id
-        media_type = "Document"
+        media_type = MEDIA_TYPE_LABELS["document"]
 
     # 5. Стикер
     elif msg.sticker:
         file_id = msg.sticker.file_id
-        media_type = "Sticker"
+        media_type = MEDIA_TYPE_LABELS["sticker"]
 
     if file_id:
-        await msg.reply_text(f"{media_type} file_id:\n<code>{file_id}</code>", parse_mode="HTML")
+        await msg.reply_text(
+            get_text("media.templates.file_id", media_type=media_type, file_id=file_id),
+            parse_mode="HTML",
+        )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

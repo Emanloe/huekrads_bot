@@ -1,0 +1,11 @@
+types:
+  file: File
+  photo: Photo
+  gif: GIF
+  video: Video
+  document: Document
+  sticker: Sticker
+templates:
+  file_id: |-
+    {media_type} file_id:
+    <code>{file_id}</code>
