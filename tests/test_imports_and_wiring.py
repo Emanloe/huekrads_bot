@@ -46,6 +46,26 @@ def test_bot_suppresses_http_client_info_logs():
     assert logging.getLogger("httpcore").level == logging.WARNING
 
 
+def test_bot_command_menu_preserves_descriptions_and_order():
+    import bot
+
+    assert [(command.command, command.description) for command in bot.BOT_COMMANDS] == [
+        ("start", "Запустить бота"),
+        ("help", "Хелп по командам"),
+        ("top", "Топ пидоров"),
+        ("force_pidor", "Назначить пидора"),
+        ("setbday", "Установить день рождения"),
+        ("toggle_forward", "Переключить пересылку"),
+        ("toggle_autodelete", "Автоудаление сообщений"),
+        ("duel", "Гномья дуэль на ножах"),
+        ("duel_stats", "Статистика дуэлей"),
+        ("duel_top", "Топ дуэлянтов"),
+        ("duel_delete", "Удалить игрока дуэлей"),
+        ("boss", "Запустить босса"),
+        ("boss_reg", "Записаться на босса"),
+    ]
+
+
 def test_callback_handler_patterns_are_stable():
     patterns = {
         "wx": r"^wx",

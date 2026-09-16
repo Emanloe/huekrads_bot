@@ -66,6 +66,7 @@ from handlers.weather import (
 )
 
 from handlers.hyperborean_event import HYPERBOREAN_HUY_CHECK_MINUTES
+from text_resources import get_text
 
 from handlers.duel import (
     duel_command,
@@ -94,19 +95,19 @@ logger = logging.getLogger(__name__)
 
 
 BOT_COMMANDS = [
-    BotCommand("start", "Запустить бота"),
-    BotCommand("help", "Хелп по командам"),
-    BotCommand("top", "Топ пидоров"),
-    BotCommand("force_pidor", "Назначить пидора"),
-    BotCommand("setbday", "Установить день рождения"),
-    BotCommand("toggle_forward", "Переключить пересылку"),
-    BotCommand("toggle_autodelete", "Автоудаление сообщений"),
-    BotCommand("duel", "Гномья дуэль на ножах"),
-    BotCommand("duel_stats", "Статистика дуэлей"),
-    BotCommand("duel_top", "Топ дуэлянтов"),
-    BotCommand("duel_delete", "Удалить игрока дуэлей"),
-    BotCommand("boss", "Запустить босса"),
-    BotCommand("boss_reg", "Записаться на босса"),
+    BotCommand("start", get_text("menu.commands.start")),
+    BotCommand("help", get_text("menu.commands.help")),
+    BotCommand("top", get_text("menu.commands.top")),
+    BotCommand("force_pidor", get_text("menu.commands.force_pidor")),
+    BotCommand("setbday", get_text("menu.commands.setbday")),
+    BotCommand("toggle_forward", get_text("menu.commands.toggle_forward")),
+    BotCommand("toggle_autodelete", get_text("menu.commands.toggle_autodelete")),
+    BotCommand("duel", get_text("menu.commands.duel")),
+    BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
+    BotCommand("duel_top", get_text("menu.commands.duel_top")),
+    BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
+    BotCommand("boss", get_text("menu.commands.boss")),
+    BotCommand("boss_reg", get_text("menu.commands.boss_reg")),
 ]
 
 
