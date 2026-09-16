@@ -21,25 +21,26 @@ from config import (
     NSK_PHOTO_IDS,
     WEATHER_STUB_PHOTO_ID,
 )
+from text_resources import get_text
 
 WEATHER_CODES = {
-    0: ("☀️", "Ясно"),
-    1: ("🌤️", "Преимущественно ясно"),
-    2: ("⛅", "Переменная облачность"),
-    3: ("☁️", "Пасмурно"),
-    45: ("🌫️", "Туман"),
-    48: ("🌫️", "Оседающий туман"),
-    51: ("🌧️", "Лёгкая морось"),
-    53: ("🌧️", "Морось"),
-    55: ("🌧️", "Плотная морось"),
-    61: ("☔", "Слабый дождь"),
-    63: ("☔", "Умеренный дождь"),
-    65: ("🌧️", "Сильный дождь"),
-    71: ("❄️", "Слабый снег"),
-    73: ("❄️", "Снегопад"),
-    75: ("❄️", "Сильный снегопад"),
-    80: ("🌦️", "Ливень"),
-    95: ("⛈️", "Гроза"),
+    0: (get_text("weather.conditions.clear.emoji"), get_text("weather.conditions.clear.description")),
+    1: (get_text("weather.conditions.mostly_clear.emoji"), get_text("weather.conditions.mostly_clear.description")),
+    2: (get_text("weather.conditions.partly_cloudy.emoji"), get_text("weather.conditions.partly_cloudy.description")),
+    3: (get_text("weather.conditions.overcast.emoji"), get_text("weather.conditions.overcast.description")),
+    45: (get_text("weather.conditions.fog.emoji"), get_text("weather.conditions.fog.description")),
+    48: (get_text("weather.conditions.depositing_fog.emoji"), get_text("weather.conditions.depositing_fog.description")),
+    51: (get_text("weather.conditions.light_drizzle.emoji"), get_text("weather.conditions.light_drizzle.description")),
+    53: (get_text("weather.conditions.drizzle.emoji"), get_text("weather.conditions.drizzle.description")),
+    55: (get_text("weather.conditions.dense_drizzle.emoji"), get_text("weather.conditions.dense_drizzle.description")),
+    61: (get_text("weather.conditions.light_rain.emoji"), get_text("weather.conditions.light_rain.description")),
+    63: (get_text("weather.conditions.moderate_rain.emoji"), get_text("weather.conditions.moderate_rain.description")),
+    65: (get_text("weather.conditions.heavy_rain.emoji"), get_text("weather.conditions.heavy_rain.description")),
+    71: (get_text("weather.conditions.light_snow.emoji"), get_text("weather.conditions.light_snow.description")),
+    73: (get_text("weather.conditions.snowfall.emoji"), get_text("weather.conditions.snowfall.description")),
+    75: (get_text("weather.conditions.heavy_snow.emoji"), get_text("weather.conditions.heavy_snow.description")),
+    80: (get_text("weather.conditions.shower.emoji"), get_text("weather.conditions.shower.description")),
+    95: (get_text("weather.conditions.thunderstorm.emoji"), get_text("weather.conditions.thunderstorm.description")),
 }
 
 SPB_ALIASES = (
@@ -137,14 +138,24 @@ def _fetch_weather_html(city: str) -> tuple[str, str] | None:
     wind_speed = round(current.get("windspeed", 0))
     code = current.get("weathercode", 0)
 
-    emoji, desc = WEATHER_CODES.get(code, ("🌡️", "Неизвестно"))
+    emoji, desc = WEATHER_CODES.get(
+        code,
+        (
+            get_text("weather.fallback.emoji"),
+            get_text("weather.fallback.description"),
+        ),
+    )
     apparent = round(w_res.get("hourly", {}).get("apparent_temperature", [temp])[0])
 
-    return (
-        f"<b>Погода в {city_name}</b> {country}\n\n"
-        f"{emoji} <b>{desc}</b>\n"
-        f"🌡️ Температура: <b>{temp}°C</b> (ощущается как {apparent}°C)\n"
-        f"💨 Ветер: <b>{wind_speed} м/с</b>\n"
+    return get_text(
+        "weather.forecast.template",
+        city=city_name,
+        country=country,
+        emoji=emoji,
+        description=desc,
+        temperature=temp,
+        apparent_temperature=apparent,
+        wind_speed=wind_speed,
     ), city_name
 
 
@@ -298,9 +309,9 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
                 [
                     InlineQueryResultArticle(
                         id=_inline_id(),
-                        title=f"Город «{city}» не найден",
+                        title=get_text("weather.inline.not_found.title", city=city),
                         input_message_content=InputTextMessageContent(
-                            f"❌ Город '{city}' не найден."
+                            get_text("weather.inline.not_found.message", city=city)
                         ),
                     )
                 ],
@@ -311,7 +322,7 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
 
         display_name = api_city_name or city
         if not text:
-            text = f"<b>Погода в {display_name}</b>"
+            text = get_text("weather.inline.heading", city=display_name)
 
         result_id = _inline_id()
         easter_kind = None
@@ -326,7 +337,7 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
             result = InlineQueryResultCachedPhoto(
                 id=result_id,
                 photo_file_id=WEATHER_STUB_PHOTO_ID,
-                title=f"Погода в {display_name}",
+                title=get_text("weather.inline.result.title", city=display_name),
                 caption=text,
                 parse_mode="HTML",
                 reply_markup=_stub_keyboard(result_id),
@@ -334,7 +345,7 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             result = InlineQueryResultArticle(
                 id=result_id,
-                title=f"Погода в {display_name}",
+                title=get_text("weather.inline.result.title", city=display_name),
                 input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
             )
         await inline_query.answer([result], cache_time=1, is_personal=True)
@@ -344,9 +355,9 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
             [
                 InlineQueryResultArticle(
                     id=_inline_id(),
-                    title="Не удалось получить погоду",
+                    title=get_text("weather.inline.error.title"),
                     input_message_content=InputTextMessageContent(
-                        "⚠️ Не удалось получить данные о погоде."
+                        get_text("weather.inline.error.message")
                     ),
                 )
             ],

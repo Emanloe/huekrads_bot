@@ -1,0 +1,72 @@
+conditions:
+  clear:
+    emoji: ☀️
+    description: Ясно
+  mostly_clear:
+    emoji: 🌤️
+    description: Преимущественно ясно
+  partly_cloudy:
+    emoji: ⛅
+    description: Переменная облачность
+  overcast:
+    emoji: ☁️
+    description: Пасмурно
+  fog:
+    emoji: 🌫️
+    description: Туман
+  depositing_fog:
+    emoji: 🌫️
+    description: Оседающий туман
+  light_drizzle:
+    emoji: 🌧️
+    description: Лёгкая морось
+  drizzle:
+    emoji: 🌧️
+    description: Морось
+  dense_drizzle:
+    emoji: 🌧️
+    description: Плотная морось
+  light_rain:
+    emoji: ☔
+    description: Слабый дождь
+  moderate_rain:
+    emoji: ☔
+    description: Умеренный дождь
+  heavy_rain:
+    emoji: 🌧️
+    description: Сильный дождь
+  light_snow:
+    emoji: ❄️
+    description: Слабый снег
+  snowfall:
+    emoji: ❄️
+    description: Снегопад
+  heavy_snow:
+    emoji: ❄️
+    description: Сильный снегопад
+  shower:
+    emoji: 🌦️
+    description: Ливень
+  thunderstorm:
+    emoji: ⛈️
+    description: Гроза
+fallback:
+  emoji: 🌡️
+  description: Неизвестно
+forecast:
+  template: |+
+    <b>Погода в {city}</b> {country}
+
+    {emoji} <b>{description}</b>
+    🌡️ Температура: <b>{temperature}°C</b> (ощущается как {apparent_temperature}°C)
+    💨 Ветер: <b>{wind_speed} м/с</b>
+inline:
+  not_found:
+    title: Город «{city}» не найден
+    message: ❌ Город '{city}' не найден.
+  heading: <b>Погода в {city}</b>
+  result:
+    title: Погода в {city}
+  error:
+    title: Не удалось получить погоду
+    message: ⚠️ Не удалось получить данные о погоде.
