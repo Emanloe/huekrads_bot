@@ -10,6 +10,7 @@ from pathlib import Path
 import pytz
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, JobQueue
+from text_resources import get_text
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -222,7 +223,7 @@ async def run_past_pizda_in_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="Пизда",
+                text=get_text("past_pizda.messages.reply"),
                 reply_to_message_id=message_id,
             )
         except BadRequest as exc:
