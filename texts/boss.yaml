@@ -13,6 +13,36 @@ death_epitaphs:
     🪦 Здесь мог бы стоять памятник <b>{title}</b>. Он бил в <b>{attack_zone}</b>, прикрывал <b>{defended_zone}</b> и в раунде <b>{round_num}</b> получил от босса в <b>{death_zone}</b>. Памятник решили не ставить: металл нужен для новых ножей.
   - |-
     💀 <b>{title}</b> совершил тактическое отступление прямо в могилу. Произошло это в раунде <b>{round_num}</b>: атака — <b>{attack_zone}</b>, защита — <b>{defended_zone}</b>, босс — в <b>{death_zone}</b>. Совпадение? Нет. Судьба.
+death:
+  round_fallback: последнем
+phase:
+  player_status: • <b>{title}</b> — {status}
+  attack: |-
+    💀 <b>{boss_name} — РАУНД {round}</b>
+
+    ⚔️ <b>ФАЗА АТАКИ</b>
+    Каждый живой игрок выбирает, куда ударить босса.
+
+    🎯 Урон боссу: <b>{hits} / {required_hits}</b>
+    👥 В живых: <b>{alive_count} / {total_count}</b>
+
+    <b>Игроки:</b>
+    {players_status}
+
+    ⚔️ Выберите зону атаки:
+  block: |-
+    💀 <b>{boss_name} — РАУНД {round}</b>
+
+    🛡 <b>ФАЗА ЗАЩИТЫ</b>
+    Босс сейчас атакует. Каждый живой игрок выбирает, какую зону защищать.
+
+    🎯 Урон боссу: <b>{hits} / {required_hits}</b>
+    👥 В живых: <b>{alive_count} / {total_count}</b>
+
+    <b>Игроки:</b>
+    {players_status}
+
+    🛡 Выберите зону защиты:
 survivor:
   phrases:
     terminator: рубился как настоящий гномий терминатор

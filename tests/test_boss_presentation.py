@@ -64,6 +64,92 @@ def test_boss_death_epitaph_uses_player_result_and_one_random_choice(monkeypatch
     assert len(choose.call_args.args[0]) == 4
 
 
+@pytest.mark.parametrize("death_round", [None, 0, ""])
+def test_boss_death_epitaph_preserves_death_round_truthiness_fallback(
+    monkeypatch,
+    death_round,
+):
+    from handlers import boss_presentation
+
+    choose = Mock(return_value="Раунд: <b>{round_num}</b>.")
+    monkeypatch.setattr(boss_presentation.random, "choice", choose)
+    monkeypatch.setattr(boss_presentation, "_boss_player_title", lambda _: "fallen")
+
+    result = boss_presentation._boss_death_epitaph(
+        make_participant("@fallen", death_round=death_round),
+        "Босс",
+    )
+
+    assert result == "Раунд: <b>последнем</b>."
+    choose.assert_called_once_with(get_text_list("boss.death_epitaphs"))
+
+
+def test_boss_death_epitaph_preserves_nonempty_death_round(monkeypatch):
+    from handlers import boss_presentation
+
+    choose = Mock(return_value="Раунд: <b>{round_num}</b>.")
+    monkeypatch.setattr(boss_presentation.random, "choice", choose)
+    monkeypatch.setattr(boss_presentation, "_boss_player_title", lambda _: "fallen")
+
+    result = boss_presentation._boss_death_epitaph(
+        make_participant("@fallen", death_round=3),
+        "Босс",
+    )
+
+    assert result == "Раунд: <b>3</b>."
+    choose.assert_called_once_with(get_text_list("boss.death_epitaphs"))
+
+
+def test_boss_phase_formatting_preserves_statuses_and_exact_templates(monkeypatch):
+    from handlers import duel_formatting
+
+    monkeypatch.setattr(
+        duel_formatting,
+        "boss_player_title",
+        lambda participant: participant["title"],
+    )
+    battle = {
+        "boss": {"name": "Тестовый Босс"},
+        "round": 4,
+        "hits": 2,
+        "phase": "attack",
+        "participants": {
+            1: {"title": "Первый", "alive": True, "attack": "head"},
+            2: {"title": "Второй", "alive": True, "attack": None},
+        },
+    }
+
+    assert duel_formatting._boss_players_status_text(battle) == (
+        "• <b>Первый</b> — 🟢 выбрал\n"
+        "• <b>Второй</b> — 🟡 выбирает"
+    )
+    assert duel_formatting._boss_phase_text(battle, 5) == (
+        "💀 <b>Тестовый Босс — РАУНД 4</b>\n\n"
+        "⚔️ <b>ФАЗА АТАКИ</b>\n"
+        "Каждый живой игрок выбирает, куда ударить босса.\n\n"
+        "🎯 Урон боссу: <b>2 / 5</b>\n"
+        "👥 В живых: <b>2 / 2</b>\n\n"
+        "<b>Игроки:</b>\n"
+        "• <b>Первый</b> — 🟢 выбрал\n"
+        "• <b>Второй</b> — 🟡 выбирает\n\n"
+        "⚔️ Выберите зону атаки:"
+    )
+
+    battle["phase"] = "block"
+    battle["participants"][1]["block"] = "body"
+    assert duel_formatting._boss_phase_text(battle, 5) == (
+        "💀 <b>Тестовый Босс — РАУНД 4</b>\n\n"
+        "🛡 <b>ФАЗА ЗАЩИТЫ</b>\n"
+        "Босс сейчас атакует. Каждый живой игрок выбирает, какую зону защищать.\n\n"
+        "🎯 Урон боссу: <b>2 / 5</b>\n"
+        "👥 В живых: <b>2 / 2</b>\n\n"
+        "<b>Игроки:</b>\n"
+        "• <b>Первый</b> — 🟢 выбрал\n"
+        "• <b>Второй</b> — 🟡 выбирает\n\n"
+        "🛡 Выберите зону защиты:"
+    )
+
+
 def test_boss_yaml_preserves_catalog_order_placeholders_and_unicode():
     epitaphs = get_text_list("boss.death_epitaphs")
     zones = get_text_mapping("boss.zones.display")

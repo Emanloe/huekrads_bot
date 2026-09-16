@@ -27,7 +27,9 @@ def _boss_death_epitaph(participant, boss_name):
         participant.get("death_defended_zone"),
         _BOSS_UNKNOWN_ZONE,
     )
-    round_num = participant.get("death_round") or "последнем"
+    round_num = participant.get("death_round") or get_text(
+        "boss.death.round_fallback"
+    )
 
     phrase = random.choice(get_text_list("boss.death_epitaphs"))
     return phrase.format(
