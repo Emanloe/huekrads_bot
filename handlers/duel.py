@@ -2875,19 +2875,24 @@ async def boss_reg_command(
         chat_id,
         update.message.from_user,
     )
+    participant_count = len(_boss_get_registered_users(chat_id))
+    participant_count_text = get_text(
+        "boss.registration.participant_count",
+        count=participant_count,
+    )
 
     if added:
         await send_and_schedule(
             update,
             context,
-            get_text("boss.registration.registered"),
+            f'{get_text("boss.registration.registered")}\n\n{participant_count_text}',
             parse_mode="HTML",
         )
     else:
         await send_and_schedule(
             update,
             context,
-            get_text("boss.registration.already_registered"),
+            f'{get_text("boss.registration.already_registered")}\n\n{participant_count_text}',
             parse_mode="HTML",
         )
 
