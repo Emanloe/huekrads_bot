@@ -4,6 +4,7 @@ from handlers.duel_state import (
     _get_duel_participant_ineligibility,
     _is_miss_roll,
     _is_berserk_roll,
+    _is_duel_post_message_roll,
     _is_suicide_roll,
     _resolve_zone_outcome,
     _set_attack_choice,
@@ -170,6 +171,14 @@ def test_miss_roll_boundary():
 def test_berserk_roll_boundary():
     assert _is_berserk_roll(0.000999) is True
     assert _is_berserk_roll(0.001) is False
+
+
+def test_duel_post_message_chance_and_roll_boundary():
+    from config import DUEL_POST_MESSAGE_CHANCE
+
+    assert DUEL_POST_MESSAGE_CHANCE == 0.10
+    assert _is_duel_post_message_roll(0.099999) is True
+    assert _is_duel_post_message_roll(0.10) is False
 
 
 def test_zone_outcome_distinguishes_block_and_hit():

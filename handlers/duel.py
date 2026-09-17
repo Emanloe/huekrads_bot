@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import random
+from html import escape
 from pathlib import Path
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +15,7 @@ from config import (
     WINNER_100_PTS_GIF,
     MAX_DAILY_POINTS,
     BERSERK_CHANCE,
+    DUEL_POST_MESSAGE_CHANCE,
 )
 from database import (
     get_or_create_duel_user,
@@ -79,6 +81,7 @@ from handlers.duel_state import (
     _get_duel_participant_ineligibility,
     _is_miss_roll,
     _is_berserk_roll,
+    _is_duel_post_message_roll,
     _is_suicide_roll,
     _resolve_zone_outcome,
     _set_attack_choice,
@@ -107,6 +110,29 @@ MOVE_TIMEOUT = 10  # 10 секунд на ход
 _DWARFS_FACTS_PATH = Path(__file__).resolve().parent.parent / "data" / "dwarfs_facts.json"
 with open(_DWARFS_FACTS_PATH, encoding="utf-8") as _facts_file:
     DWARFS_FACTS = tuple(json.load(_facts_file)["facts"])
+
+_DUEL_POST_MESSAGES_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "duel_post_messages.json"
+)
+
+
+def _load_duel_post_messages(path=_DUEL_POST_MESSAGES_PATH):
+    try:
+        with open(path, encoding="utf-8") as messages_file:
+            messages = json.load(messages_file)
+    except (OSError, json.JSONDecodeError):
+        logging.exception("Не удалось загрузить каталог post-duel сообщений")
+        return ()
+
+    if not isinstance(messages, list) or not messages or not all(
+        isinstance(message, str) for message in messages
+    ):
+        logging.error("Каталог post-duel сообщений пуст или некорректен")
+        return ()
+    return tuple(messages)
+
+
+DUEL_POST_MESSAGES = _load_duel_post_messages()
 
 
 # ============================================================
@@ -1041,6 +1067,9 @@ async def _finish_duel(
                 victim_title,
                 already_stolen=not berserk_applied,
             )
+
+    if DUEL_POST_MESSAGES and _is_duel_post_message_roll(random.random()):
+        res_msg += f"\n\n{escape(random.choice(DUEL_POST_MESSAGES))}"
 
     if duel and duel.get("message_id"):
 

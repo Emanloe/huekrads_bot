@@ -164,7 +164,9 @@ async def test_finish_duel_no_steal_caps_points_and_completes_after_delete_error
         "original_msg_id": 702,
     }
 
-    steal_roll = Mock(side_effect=(0.99, duel.BERSERK_CHANCE))
+    steal_roll = Mock(
+        side_effect=(0.99, duel.BERSERK_CHANCE, duel.DUEL_POST_MESSAGE_CHANCE)
+    )
     choices = []
 
     def choose(values):
@@ -212,7 +214,7 @@ async def test_finish_duel_no_steal_caps_points_and_completes_after_delete_error
         refreshed_loser["last_stolen_by"],
     ) == (0, 2, 7, 0, 4, 7, False, "old_loser_thief")
     assert CHAT_ID not in duel.ACTIVE_DUELS
-    assert steal_roll.call_count == 2
+    assert steal_roll.call_count == 3
     assert len(choices) == 1
 
     fake_context.bot.delete_message.assert_awaited_once_with(
@@ -228,6 +230,7 @@ async def test_finish_duel_no_steal_caps_points_and_completes_after_delete_error
     assert "(100/100)" in final_call.kwargs["text"]
     assert "(0/100)" in final_call.kwargs["text"]
     assert "БЕРСЕРК" not in final_call.kwargs["text"]
+    assert duel.DUEL_POST_MESSAGES[0] not in final_call.kwargs["text"]
     assert fake_context.job_queue.calls == [
         (
             duel.delete_messages_job,
@@ -288,7 +291,9 @@ async def test_finish_duel_steal_keeps_final_message_and_schedules_original_only
         "original_msg_id": 802,
     }
 
-    steal_roll = Mock(side_effect=(0.0, duel.BERSERK_CHANCE))
+    steal_roll = Mock(
+        side_effect=(0.0, duel.BERSERK_CHANCE, duel.DUEL_POST_MESSAGE_CHANCE)
+    )
     choices = []
 
     def choose(values):
@@ -329,7 +334,7 @@ async def test_finish_duel_steal_keeps_final_message_and_schedules_original_only
         refreshed_loser["last_stolen_by"],
     ) == (15, 5, 5, 2, 7, True, "steal_winner")
     assert CHAT_ID not in duel.ACTIVE_DUELS
-    assert steal_roll.call_count == 2
+    assert steal_roll.call_count == 3
     assert len(choices) == 2
     assert choices[1] is duel.DWARFS_FACTS
 
@@ -394,7 +399,13 @@ async def test_finish_duel_berserk_can_select_either_participant_without_changin
     )
     winner = database.get_duel_user_by_username("berserk_winner", CHAT_ID)
     loser = database.get_duel_user_by_username("berserk_loser", CHAT_ID)
-    rolls = Mock(side_effect=(0.99, duel.BERSERK_CHANCE - 0.000001))
+    rolls = Mock(
+        side_effect=(
+            0.99,
+            duel.BERSERK_CHANCE - 0.000001,
+            duel.DUEL_POST_MESSAGE_CHANCE,
+        )
+    )
     choice_inputs = []
 
     def choose(values):
@@ -444,7 +455,7 @@ async def test_finish_duel_berserk_can_select_either_participant_without_changin
         assert refreshed_winner["dick_stolen_today"] is True
         assert refreshed_winner["last_stolen_by"] == "berserk_loser"
 
-    assert rolls.call_count == 2
+    assert rolls.call_count == 3
     assert choice_inputs[1] == (winner, loser)
     assert choice_inputs[2] is duel_text.BERSERK_TRIGGERS
     assert choice_inputs[3] is duel_text.BERSERK_RESULTS
@@ -495,7 +506,7 @@ async def test_finish_duel_berserk_already_stolen_has_no_reroll_or_extra_stat(
     )
     winner = database.get_duel_user_by_username("fallback_winner", CHAT_ID)
     loser = database.get_duel_user_by_username("fallback_loser", CHAT_ID)
-    rolls = Mock(side_effect=(0.0, 0.0))
+    rolls = Mock(side_effect=(0.0, 0.0, duel.DUEL_POST_MESSAGE_CHANCE))
     choice_inputs = []
 
     def choose(values):
@@ -530,6 +541,53 @@ async def test_finish_duel_berserk_already_stolen_has_no_reroll_or_extra_stat(
 
 
 @pytest.mark.asyncio
+async def test_finish_duel_post_message_is_escaped_and_appended_last(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    winner = {"user_id": 551, "username": "post_winner", "points": 20}
+    loser = {
+        "user_id": 552,
+        "username": "post_loser",
+        "points": 20,
+        "daily_wins": 0,
+    }
+    catalog = ("raw <tag> & message",)
+    choices = []
+
+    def choose(values):
+        choices.append(values)
+        return values[0]
+
+    monkeypatch.setattr(duel, "DUEL_POST_MESSAGES", catalog)
+    monkeypatch.setattr(
+        duel.random,
+        "random",
+        Mock(side_effect=(0.99, duel.BERSERK_CHANCE, 0.099999)),
+    )
+    monkeypatch.setattr(duel.random, "choice", choose)
+    monkeypatch.setattr(duel, "apply_duel_result_plan", lambda *_: (30, 15))
+    fake_context.bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1004)
+    )
+
+    await duel._finish_duel(
+        fake_context,
+        CHAT_ID,
+        winner,
+        loser,
+        custom_text="Обычный финал.\n",
+    )
+
+    output = fake_context.bot.send_message.await_args.kwargs["text"]
+    assert choices.count(catalog) == 1
+    assert catalog[0] not in output
+    assert output.endswith("\n\nraw &lt;tag&gt; &amp; message")
+
+
+@pytest.mark.asyncio
 async def test_finish_duel_rng_orders_berserk_after_all_existing_finish_rng(
     monkeypatch,
     fake_context,
@@ -544,16 +602,19 @@ async def test_finish_duel_rng_orders_berserk_after_all_existing_finish_rng(
         "daily_wins": 0,
     }
     events = []
-    rolls = iter((0.0, 0.0))
+    rolls = iter((0.0, 0.0, 0.0))
+    roll_names = iter(("regular_steal_roll", "berserk_roll", "post_message_roll"))
 
     def random_roll():
         value = next(rolls)
-        events.append("regular_steal_roll" if not events else "berserk_roll")
+        events.append(next(roll_names))
         return value
 
     def choose(values):
         if values is duel.DWARFS_FACTS:
             events.append("ordinary_fact_choice")
+        elif values is duel.DUEL_POST_MESSAGES:
+            events.append("post_message_choice")
         elif isinstance(values, tuple):
             events.append("berserker_choice")
         elif values is duel_text.BERSERK_TRIGGERS:
@@ -598,7 +659,12 @@ async def test_finish_duel_rng_orders_berserk_after_all_existing_finish_rng(
         "berserk_applied",
         "berserk_trigger_choice",
         "berserk_result_choice",
+        "post_message_roll",
+        "post_message_choice",
     ]
+    assert fake_context.bot.send_message.await_args.kwargs["text"].endswith(
+        f"\n\n{duel.DUEL_POST_MESSAGES[0]}"
+    )
 
 
 @pytest.mark.asyncio
