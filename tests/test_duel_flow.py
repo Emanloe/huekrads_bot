@@ -1347,7 +1347,7 @@ async def test_live_duel_templates_preserve_start_transition_and_timeout_output(
     auto_choice.assert_called_once_with(["head", "body", "dick"])
     process_block.assert_awaited_once_with(fake_context, CHAT_ID, "dick")
     assert fake_context.bot.send_message.await_args.kwargs["text"] == (
-        "⏰ <b>Защитник</b> зазевался! Гномий синедрион делает случайный выбор блока..."
+        "⏰ <b>Защитник</b> зазевался, муха принимает решение..."
     )
 
 
