@@ -54,5 +54,6 @@ WIN_POINTS = 10
 LOSS_POINTS = 5
 DICK_STEAL_CHANCE = 0.20  # 20%
 DICK_STEAL_CHANCE_PER_WIN = 0.01  # +1% за победу победителя в течение дня
+BERSERK_CHANCE = 0.001  # 0.1% на завершённую дуэль
 DUEL_WIN_CHANCE = 0.50    # 50%
 TOP_SORT_BY = "wins"      # "wins" | "net_wins" | "points"

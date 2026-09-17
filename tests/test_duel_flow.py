@@ -90,7 +90,7 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
 
     tasks = install_fake_tasks(monkeypatch, duel)
     monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
-    random_values = iter((0.5, 0.5, 0.5, 0.5, 0.0))
+    random_values = iter((0.5, 0.5, 0.5, 0.5, 0.0, 1.0))
     monkeypatch.setattr(duel.random, "random", lambda: next(random_values))
 
     selection_message = SimpleNamespace(delete=AsyncMock())
@@ -237,7 +237,7 @@ async def test_suicide_skips_miss_roll_and_awards_defender(
     defender = database.get_or_create_duel_user(defender_tg, CHAT_ID)
     tasks = install_fake_tasks(monkeypatch, duel)
     monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
-    pending_rolls = iter((0.0, 1.0))
+    pending_rolls = iter((0.0, 1.0, 1.0))
     observed_rolls = []
 
     def random_roll():
@@ -269,7 +269,7 @@ async def test_suicide_skips_miss_roll_and_awards_defender(
     block_update, _ = callback_update("duel_block_body_2", defender_tg)
     await duel.duel_strike_callback(block_update, fake_context)
 
-    assert observed_rolls == [0.0, 1.0]
+    assert observed_rolls == [0.0, 1.0, 1.0]
     assert len(persistence_calls) == 1
     assert persistence_calls[0][0] == CHAT_ID
     result_plan = persistence_calls[0][1]

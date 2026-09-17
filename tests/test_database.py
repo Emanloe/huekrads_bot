@@ -176,6 +176,65 @@ def test_apply_duel_result_plan_applies_steal_fields_and_increments(
     ) == (11, 12, 14, True, "prepared_winner_title")
 
 
+def test_apply_duel_berserk_uses_existing_dick_state_and_statistics(temp_database):
+    import database as db
+
+    chat_id = -104
+    berserker = db.get_or_create_duel_user(make_user(41, "berserker"), chat_id)
+    victim = db.get_or_create_duel_user(make_user(42, "victim"), chat_id)
+    with sqlite3.connect(temp_database) as connection:
+        connection.execute(
+            """
+            UPDATE duel_users
+            SET points = 55, wins = 7, losses = 3, stolen_dicks_count = 4
+            WHERE user_id = ? AND chat_id = ?
+            """,
+            (berserker["user_id"], chat_id),
+        )
+        connection.execute(
+            """
+            UPDATE duel_users
+            SET points = 35, wins = 2, losses = 8, dick_stolen_count = 6,
+                dick_stolen_today = 0, last_stolen_by = NULL
+            WHERE user_id = ? AND chat_id = ?
+            """,
+            (victim["user_id"], chat_id),
+        )
+
+    assert db.apply_duel_berserk(
+        chat_id,
+        berserker["user_id"],
+        victim["user_id"],
+        "Berserker Title",
+    ) is True
+
+    refreshed_berserker = db.get_duel_user_by_username("berserker", chat_id)
+    refreshed_victim = db.get_duel_user_by_username("victim", chat_id)
+    assert (
+        refreshed_berserker["points"],
+        refreshed_berserker["wins"],
+        refreshed_berserker["losses"],
+        refreshed_berserker["stolen_dicks_count"],
+    ) == (55, 7, 3, 5)
+    assert (
+        refreshed_victim["points"],
+        refreshed_victim["wins"],
+        refreshed_victim["losses"],
+        refreshed_victim["dick_stolen_count"],
+        refreshed_victim["dick_stolen_today"],
+        refreshed_victim["last_stolen_by"],
+    ) == (35, 2, 8, 7, True, "Berserker Title")
+
+    assert db.apply_duel_berserk(
+        chat_id,
+        berserker["user_id"],
+        victim["user_id"],
+        "Berserker Title",
+    ) is False
+    assert db.get_duel_user_by_username("berserker", chat_id) == refreshed_berserker
+    assert db.get_duel_user_by_username("victim", chat_id) == refreshed_victim
+
+
 @pytest.mark.parametrize("failing_update", [1, 2])
 def test_apply_duel_result_plan_rolls_back_both_users_on_update_error(
     temp_database,

@@ -503,6 +503,37 @@ def apply_duel_result_plan(
         return winner["points"], loser["points"]
 
 
+def apply_duel_berserk(
+    chat_id: int,
+    berserker_user_id: int,
+    victim_user_id: int,
+    berserker_title: str,
+) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE duel_users
+            SET dick_stolen_count = dick_stolen_count + 1,
+                dick_stolen_today = 1, last_stolen_by = ?
+            WHERE user_id = ? AND chat_id = ? AND dick_stolen_today = 0
+            """,
+            (berserker_title, victim_user_id, chat_id),
+        )
+        if cursor.rowcount == 0:
+            return False
+
+        cursor.execute(
+            """
+            UPDATE duel_users
+            SET stolen_dicks_count = stolen_dicks_count + 1
+            WHERE user_id = ? AND chat_id = ?
+            """,
+            (berserker_user_id, chat_id),
+        )
+        return True
+
+
 def get_duel_top(chat_id: int, sort_by: str = "wins", limit: int = 10) -> list:
     valid_cols = {"wins": "wins", "points": "points"}
     sort_column = valid_cols.get(sort_by, "wins")

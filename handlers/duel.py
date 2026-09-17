@@ -13,12 +13,14 @@ from config import (
     ADMIN_IDS,
     WINNER_100_PTS_GIF,
     MAX_DAILY_POINTS,
+    BERSERK_CHANCE,
 )
 from database import (
     get_or_create_duel_user,
     get_duel_user_by_username,
     delete_duel_user_by_username,
     apply_duel_result_plan,
+    apply_duel_berserk,
     get_duel_top,
     format_user_title,
     get_dick_steal_chance,
@@ -48,6 +50,7 @@ from handlers.duel_text import (
     TARGET_NAMES,
     _build_duel_block_text,
     _build_duel_miss_text,
+    _build_berserk_text,
     get_round_flavor_text,
 )
 from handlers.duel_formatting import (
@@ -75,6 +78,7 @@ from handlers.duel_state import (
     _build_duel_result_plan,
     _get_duel_participant_ineligibility,
     _is_miss_roll,
+    _is_berserk_roll,
     _is_suicide_roll,
     _resolve_zone_outcome,
     _set_attack_choice,
@@ -1016,6 +1020,27 @@ async def _finish_duel(
         )
     else:
         res_msg += stats_text
+
+    if _is_berserk_roll(random.random()):
+        berserker = random.choice((winner, loser))
+        victim = loser if berserker is winner else winner
+        berserker_title = win_title if berserker is winner else lose_title
+        victim_title = lose_title if victim is loser else win_title
+        try:
+            berserk_applied = apply_duel_berserk(
+                chat_id,
+                berserker["user_id"],
+                victim["user_id"],
+                berserker_title,
+            )
+        except Exception:
+            logging.exception("Не удалось применить berserk event в чате %s", chat_id)
+        else:
+            res_msg += _build_berserk_text(
+                berserker_title,
+                victim_title,
+                already_stolen=not berserk_applied,
+            )
 
     if duel and duel.get("message_id"):
 

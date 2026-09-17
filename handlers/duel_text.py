@@ -1,4 +1,5 @@
 import random
+from html import escape
 
 from text_resources import get_text, get_text_list, get_text_mapping
 
@@ -15,6 +16,9 @@ HIT_PHRASES = get_text_list("duel.phrases.hit")
 BLOCK_PHRASES = get_text_list("duel.phrases.block")
 MISS_PHRASES = get_text_list("duel.phrases.miss")
 SUICIDE_PHRASES = get_text_list("duel.phrases.suicide")
+BERSERK_TRIGGERS = get_text_list("duel.berserk.triggers")
+BERSERK_RESULTS = get_text_list("duel.berserk.results")
+BERSERK_ALREADY_STOLEN = get_text_list("duel.berserk.already_stolen")
 _BOSS_PHASE_STATUSES = get_text_mapping("duel.boss.phase_status")
 
 
@@ -164,3 +168,24 @@ def get_round_flavor_text(rounds_count: int) -> str:
     else:
         phrases = get_text_list("duel.round_flavor.many")
     return random.choice(phrases)
+
+
+def _build_berserk_text(
+    berserker_title: str,
+    victim_title: str,
+    already_stolen: bool,
+) -> str:
+    berserker_title = escape(berserker_title)
+    victim_title = escape(victim_title)
+    trigger = random.choice(BERSERK_TRIGGERS)
+    result_catalog = BERSERK_ALREADY_STOLEN if already_stolen else BERSERK_RESULTS
+    result = random.choice(result_catalog)
+    return get_text(
+        "duel.berserk.block",
+        header=get_text("duel.berserk.header"),
+        trigger=trigger.format(berserker=berserker_title),
+        result=result.format(
+            berserker=berserker_title,
+            victim=victim_title,
+        ),
+    )
