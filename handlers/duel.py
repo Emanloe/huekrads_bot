@@ -1069,7 +1069,10 @@ async def _finish_duel(
             )
 
     if DUEL_POST_MESSAGES and _is_duel_post_message_roll(random.random()):
-        res_msg += f"\n\n{escape(random.choice(DUEL_POST_MESSAGES))}"
+        res_msg += (
+            f"\n\n{get_text('duel.finish.post_message.prefix')}\n"
+            f"{escape(random.choice(DUEL_POST_MESSAGES))}"
+        )
 
     if duel and duel.get("message_id"):
 

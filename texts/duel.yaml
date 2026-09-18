@@ -284,6 +284,8 @@ finish:
     Сегодня {loser_title} больше не может драться.
     {stats_text}
     📖 <i>{fact}</i>
+  post_message:
+    prefix: "На теле проигравшего обнаружили записку:"
   max_points_caption: 🏆 <b>{winner_title}</b> набрал {max_daily_points} очков!
 berserk:
   header: " <b>БЕРСЕРК</b>"

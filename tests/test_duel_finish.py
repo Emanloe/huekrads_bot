@@ -230,6 +230,7 @@ async def test_finish_duel_no_steal_caps_points_and_completes_after_delete_error
     assert "(100/100)" in final_call.kwargs["text"]
     assert "(0/100)" in final_call.kwargs["text"]
     assert "БЕРСЕРК" not in final_call.kwargs["text"]
+    assert "На теле проигравшего обнаружили записку:" not in final_call.kwargs["text"]
     assert duel.DUEL_POST_MESSAGES[0] not in final_call.kwargs["text"]
     assert fake_context.job_queue.calls == [
         (
@@ -584,7 +585,10 @@ async def test_finish_duel_post_message_is_escaped_and_appended_last(
     output = fake_context.bot.send_message.await_args.kwargs["text"]
     assert choices.count(catalog) == 1
     assert catalog[0] not in output
-    assert output.endswith("\n\nraw &lt;tag&gt; &amp; message")
+    assert output.endswith(
+        "\n\nНа теле проигравшего обнаружили записку:\n"
+        "raw &lt;tag&gt; &amp; message"
+    )
 
 
 @pytest.mark.asyncio
@@ -663,7 +667,8 @@ async def test_finish_duel_rng_orders_berserk_after_all_existing_finish_rng(
         "post_message_choice",
     ]
     assert fake_context.bot.send_message.await_args.kwargs["text"].endswith(
-        f"\n\n{duel.DUEL_POST_MESSAGES[0]}"
+        "\n\nНа теле проигравшего обнаружили записку:\n"
+        f"{duel.DUEL_POST_MESSAGES[0]}"
     )
 
 
