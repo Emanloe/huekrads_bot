@@ -29,7 +29,13 @@ def test_duel_item_catalog_has_exact_stable_contract():
         DUEL_ITEM_EVENT_CHANCE,
         DUEL_ITEM_EVENT_CHECK_MINUTES,
     )
-    from handlers.duel_items import DUEL_ITEMS, DUEL_ITEM_NAMES, get_duel_item_name
+    from handlers.duel_items import (
+        BASE_DUEL_ITEM_IDS,
+        BASE_DUEL_ITEMS,
+        DUEL_ITEMS,
+        DUEL_ITEM_NAMES,
+        get_duel_item_name,
+    )
     from handlers import duel
     from text_resources import get_text_list
 
@@ -38,6 +44,16 @@ def test_duel_item_catalog_has_exact_stable_contract():
     assert items == list(DUEL_ITEMS)
     assert duel.DUEL_ITEMS is DUEL_ITEMS
     assert len(items) == 40
+    assert len(BASE_DUEL_ITEMS) == 2
+    assert BASE_DUEL_ITEM_IDS == ("oiled_vest", "knife")
+    assert [item["name"] for item in BASE_DUEL_ITEMS] == [
+        "Промасленная жилетка",
+        "Нож",
+    ]
+    assert set(BASE_DUEL_ITEM_IDS).isdisjoint(item["id"] for item in DUEL_ITEMS)
+    assert {"vevangel_wing", "formangnome_whisker"} <= {
+        item["id"] for item in DUEL_ITEMS
+    }
     assert all(set(item) == {"id", "name"} for item in items)
     assert len({item["id"] for item in items}) == 40
     assert len({item["name"] for item in items}) == 40
@@ -236,11 +252,50 @@ async def test_duel_stats_inventory_grouping_html_safety_unknown_and_read_only(
     assert "legacy_unknown" not in output
     assert db.get_duel_inventory(chat_id, user.id) == before
 
-    assert duel_items.format_duel_inventory([]) == "пусто"
+    assert duel_items.format_duel_inventory([]) == "Промасленная жилетка, Нож"
+    assert duel_items.format_duel_inventory(
+        [
+            {"item_id": "oiled_vest"},
+            {"item_id": "knife"},
+            {"item_id": "vevangel_wing"},
+            {"item_id": "vevangel_wing"},
+        ]
+    ) == "Промасленная жилетка, Нож, Крыло Вевангела ×2"
     monkeypatch.setitem(duel_items.DUEL_ITEM_NAMES, "unsafe_item", "<loot & thing>")
     assert duel_items.format_duel_inventory([{"item_id": "unsafe_item"}]) == (
-        "&lt;loot &amp; thing&gt;"
+        "Промасленная жилетка, Нож, &lt;loot &amp; thing&gt;"
     )
+
+
+@pytest.mark.asyncio
+async def test_old_and_new_dwarfs_see_virtual_base_items_without_database_rows(
+    monkeypatch,
+    temp_database,
+    fake_context,
+):
+    import database as db
+    from handlers import duel
+
+    chat_id = -31
+    users = [make_user(31, "old_dwarf"), make_user(32, "new_dwarf")]
+    db.get_or_create_duel_user(users[0], chat_id)
+    assert db.get_duel_inventory(chat_id, users[0].id) == []
+
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    for user in users:
+        update = SimpleNamespace(
+            message=SimpleNamespace(
+                from_user=user,
+                chat=SimpleNamespace(id=chat_id),
+                chat_id=chat_id,
+            )
+        )
+        await duel.duel_stats_command(update, fake_context)
+        assert sent.await_args.args[2].endswith(
+            "<b>Инвентарь:</b> Промасленная жилетка, Нож"
+        )
+        assert db.get_duel_inventory(chat_id, user.id) == []
 
 
 def item_event_update(chat_id, user, event_id):

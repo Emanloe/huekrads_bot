@@ -189,6 +189,9 @@ inventory:
   empty: пусто
   unknown_item: Неизвестная находка
   counted_item: "{item} ×{count}"
+  base_items:
+    oiled_vest: Промасленная жилетка
+    knife: Нож
 top:
   empty: 🏆 Таблица лидеров чата пока пуста.
   sort_by_points: очкам

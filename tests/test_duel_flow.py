@@ -1175,7 +1175,7 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
         "Хуяние:\n<b>🍆 Победитель (12)\n💀 Лузер (8)\n🔪 Вор (3)</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
         "Статус на сегодня: <b>С хуем 🍆</b>\n"
-        "<b>Инвентарь:</b> пусто",
+        "<b>Инвентарь:</b> Промасленная жилетка, Нож",
     )
 
     sent.reset_mock()
@@ -1190,7 +1190,7 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
         "Хуяние:\n<b>Нет званий</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
         "Статус на сегодня: <b>Без хуя 💀</b>\n"
-        "<b>Инвентарь:</b> пусто"
+        "<b>Инвентарь:</b> Промасленная жилетка, Нож"
     )
 
 

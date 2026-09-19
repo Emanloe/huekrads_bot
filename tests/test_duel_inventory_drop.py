@@ -8,7 +8,7 @@ import pytest
 CHAT_ID = -5151
 
 
-def test_empty_inventory_skips_drop_roll_and_choice(monkeypatch):
+def test_only_virtual_base_inventory_skips_drop_roll_and_choice(monkeypatch):
     from handlers import duel
 
     roll = Mock(side_effect=AssertionError("empty inventory consumed drop roll"))
@@ -20,6 +20,49 @@ def test_empty_inventory_skips_drop_roll_and_choice(monkeypatch):
     assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) is None
     roll.assert_not_called()
     choice.assert_not_called()
+
+
+def test_base_item_rows_are_never_drop_candidates_or_rng_triggers(monkeypatch):
+    from handlers import duel
+
+    inventory = [
+        {"id": 1, "item_id": "oiled_vest"},
+        {"id": 2, "item_id": "knife"},
+    ]
+    roll = Mock(side_effect=AssertionError("base items consumed drop roll"))
+    choice = Mock(side_effect=AssertionError("base item was selected"))
+    monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: inventory)
+    monkeypatch.setattr(duel.random, "random", roll)
+    monkeypatch.setattr(duel.random, "choice", choice)
+
+    assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) is None
+    roll.assert_not_called()
+    choice.assert_not_called()
+
+
+def test_drop_choice_receives_only_collectible_instances(monkeypatch):
+    from handlers import duel
+
+    collectible = [
+        {"id": 3, "item_id": "vevangel_wing"},
+        {"id": 4, "item_id": "formangnome_whisker"},
+    ]
+    inventory = [
+        {"id": 1, "item_id": "oiled_vest"},
+        collectible[0],
+        {"id": 2, "item_id": "knife"},
+        collectible[1],
+    ]
+    choice = Mock(return_value=collectible[1])
+    remove = Mock(return_value=True)
+    monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: inventory)
+    monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
+    monkeypatch.setattr(duel.random, "choice", choice)
+    monkeypatch.setattr(duel, "remove_duel_inventory_instance", remove)
+
+    assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) == "Ус Формангнома"
+    choice.assert_called_once_with(collectible)
+    remove.assert_called_once_with(CHAT_ID, 2, 4)
 
 
 def test_nonempty_inventory_miss_does_not_choose_or_delete(monkeypatch):
@@ -65,6 +108,25 @@ def test_drop_removes_one_loser_duplicate_only_and_creates_no_event(temp_databas
     ]
     with sqlite3.connect(temp_database) as connection:
         assert connection.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 0
+
+
+def test_losing_last_collectible_leaves_virtual_base_inventory(temp_database):
+    import database as db
+    from handlers import duel, duel_items
+
+    loser_id = 22
+    db.add_duel_inventory_item(CHAT_ID, loser_id, "vevangel_wing")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
+        monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
+        assert duel._maybe_drop_loser_inventory_item(CHAT_ID, loser_id) == (
+            "Крыло Вевангела"
+        )
+
+    remaining = db.get_duel_inventory(CHAT_ID, loser_id)
+    assert remaining == []
+    assert duel_items.format_duel_inventory(remaining) == "Промасленная жилетка, Нож"
 
 
 @pytest.mark.asyncio

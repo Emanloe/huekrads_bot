@@ -21,12 +21,13 @@ from database import (
     get_duel_item_event_chat_ids,
     set_duel_item_event_message,
 )
-from text_resources import get_text, get_text_list
+from text_resources import get_text, get_text_list, get_text_mapping
 
 
 _DUEL_ITEMS_PATH = Path(__file__).resolve().parent.parent / "data" / "duel_items.json"
 _ITEM_ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 DUEL_ITEM_EVENT_CALLBACK_PREFIX = "duel_item_claim_"
+BASE_DUEL_ITEM_IDS = ("oiled_vest", "knife")
 
 
 def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
@@ -58,7 +59,17 @@ def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
 
 
 DUEL_ITEMS = _load_duel_items()
-DUEL_ITEM_NAMES = {item["id"]: item["name"] for item in DUEL_ITEMS}
+_BASE_DUEL_ITEM_NAMES = get_text_mapping("duel.inventory.base_items")
+if tuple(_BASE_DUEL_ITEM_NAMES) != BASE_DUEL_ITEM_IDS:
+    raise ValueError("Base duel item ids or order do not match the permanent inventory")
+BASE_DUEL_ITEMS = tuple(
+    {"id": item_id, "name": _BASE_DUEL_ITEM_NAMES[item_id]}
+    for item_id in BASE_DUEL_ITEM_IDS
+)
+DUEL_ITEM_NAMES = {
+    **_BASE_DUEL_ITEM_NAMES,
+    **{item["id"]: item["name"] for item in DUEL_ITEMS},
+}
 _DUEL_ITEM_ORDER = {item["id"]: index for index, item in enumerate(DUEL_ITEMS)}
 
 
@@ -67,10 +78,11 @@ def get_duel_item_name(item_id: str) -> str:
 
 
 def format_duel_inventory(instances: list[dict]) -> str:
-    if not instances:
-        return get_text("duel.inventory.empty")
-
-    counts = Counter(instance["item_id"] for instance in instances)
+    counts = Counter(
+        instance["item_id"]
+        for instance in instances
+        if instance["item_id"] not in BASE_DUEL_ITEM_IDS
+    )
     item_ids = sorted(
         counts,
         key=lambda item_id: (
@@ -78,7 +90,7 @@ def format_duel_inventory(instances: list[dict]) -> str:
             item_id,
         ),
     )
-    formatted = []
+    formatted = [escape(item["name"]) for item in BASE_DUEL_ITEMS]
     for item_id in item_ids:
         name = escape(get_duel_item_name(item_id))
         count = counts[item_id]

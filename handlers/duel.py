@@ -110,6 +110,7 @@ from handlers.boss_registration import (
     _boss_registration_is_open,
 )
 from handlers.duel_items import (
+    BASE_DUEL_ITEM_IDS,
     DUEL_ITEMS,
     format_duel_inventory,
     get_duel_item_name,
@@ -147,6 +148,12 @@ DUEL_POST_MESSAGES = _load_duel_post_messages()
 
 def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
     inventory = get_duel_inventory(chat_id, loser_id)
+    if any(instance["item_id"] in BASE_DUEL_ITEM_IDS for instance in inventory):
+        inventory = [
+            instance
+            for instance in inventory
+            if instance["item_id"] not in BASE_DUEL_ITEM_IDS
+        ]
     if not inventory:
         return None
     if random.random() >= DUEL_ITEM_DROP_CHANCE:
