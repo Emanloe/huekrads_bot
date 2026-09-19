@@ -16,6 +16,8 @@ from config import (
     MAX_DAILY_POINTS,
     BERSERK_CHANCE,
     DUEL_POST_MESSAGE_CHANCE,
+    DUEL_ITEM_DROP_CHANCE,
+    BOSS_ITEM_DROP_CHANCE,
 )
 from database import (
     get_or_create_duel_user,
@@ -31,6 +33,9 @@ from database import (
     get_bosses_defeated,
     is_boss_enabled,
     set_boss_enabled,
+    add_duel_inventory_item,
+    get_duel_inventory,
+    remove_duel_inventory_instance,
 )
 from handlers.duel_text import (
     _boss_alive_players,
@@ -104,6 +109,11 @@ from handlers.boss_registration import (
     _boss_register_user,
     _boss_registration_is_open,
 )
+from handlers.duel_items import (
+    DUEL_ITEMS,
+    format_duel_inventory,
+    get_duel_item_name,
+)
 
 MOVE_TIMEOUT = 10  # 10 секунд на ход
 
@@ -133,6 +143,36 @@ def _load_duel_post_messages(path=_DUEL_POST_MESSAGES_PATH):
 
 
 DUEL_POST_MESSAGES = _load_duel_post_messages()
+
+
+def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
+    inventory = get_duel_inventory(chat_id, loser_id)
+    if not inventory:
+        return None
+    if random.random() >= DUEL_ITEM_DROP_CHANCE:
+        return None
+
+    instance = random.choice(inventory)
+    if not remove_duel_inventory_instance(chat_id, loser_id, instance["id"]):
+        return None
+    return get_duel_item_name(instance["item_id"])
+
+
+def _maybe_award_boss_item(chat_id: int, battle: dict) -> str | None:
+    survivors = _boss_alive_players(battle)
+    if not survivors:
+        return None
+    if random.random() >= BOSS_ITEM_DROP_CHANCE:
+        return None
+
+    survivor = random.choice(survivors)
+    item = random.choice(DUEL_ITEMS)
+    add_duel_inventory_item(chat_id, survivor["tg_user"].id, item["id"])
+    return get_text(
+        "boss.report.item_loot",
+        item_name=escape(item["name"]),
+        survivor=escape(_boss_player_title(survivor)),
+    )
 
 
 # ============================================================
@@ -1074,6 +1114,20 @@ async def _finish_duel(
             f"{escape(random.choice(DUEL_POST_MESSAGES))}"
         )
 
+    try:
+        dropped_item_name = _maybe_drop_loser_inventory_item(
+            chat_id,
+            loser["user_id"],
+        )
+    except Exception:
+        logging.exception("Ошибка потери предмета после дуэли в чате %s", chat_id)
+    else:
+        if dropped_item_name is not None:
+            res_msg += "\n\n" + get_text(
+                "duel.finish.item_drop",
+                item_name=escape(dropped_item_name),
+            )
+
     if duel and duel.get("message_id"):
 
         try:
@@ -1611,13 +1665,21 @@ async def duel_stats_command(update, context):
 
     text = get_text(
         "duel.stats.summary",
-        title=title,
+        title=escape(title),
         points=user["points"],
         wins=user["wins"],
         losses=user["losses"],
         huyanie_text=huyanie_text,
         bosses_defeated=bosses_defeated,
         status=status,
+    )
+    inventory = get_duel_inventory(
+        chat_id,
+        update.message.from_user.id,
+    )
+    text += "\n" + get_text(
+        "duel.inventory.line",
+        items=format_duel_inventory(inventory),
     )
 
     await send_and_schedule(
@@ -2565,6 +2627,14 @@ async def _boss_send_final_report(
         # Финальный отчёт не должен исчезать из-за одной ошибки
         # в красивой статистике.
         text = get_text("boss.report.fallback")
+
+    try:
+        item_loot_text = _maybe_award_boss_item(chat_id, battle)
+    except Exception:
+        logging.exception("Ошибка item loot после боя с боссом в чате %s", chat_id)
+    else:
+        if item_loot_text is not None:
+            text += f"\n\n{item_loot_text}"
 
     chunks = []
     current = ""

@@ -183,6 +183,38 @@ def init_db():
                 "ALTER TABLE duel_users ADD COLUMN bosses_defeated INTEGER DEFAULT 0"
             )
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS duel_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                item_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_duel_inventory_owner
+            ON duel_inventory (chat_id, user_id, id)
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS duel_item_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER,
+                claimed INTEGER NOT NULL DEFAULT 0,
+                claimed_by INTEGER,
+                item_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claimed_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_duel_item_events_active_chat
+            ON duel_item_events (chat_id)
+            WHERE claimed = 0
+        """)
+
         # Fix broken initial data where points=0 and losses=20 from prior seed bug
         cursor.execute("""
             UPDATE duel_users 
@@ -532,6 +564,212 @@ def apply_duel_berserk(
             (berserker_user_id, chat_id),
         )
         return True
+
+
+# ==========================================
+# 🎒 ГНОМИЙ ИНВЕНТАРЬ И ITEM EVENTS
+# ==========================================
+
+def add_duel_inventory_item(chat_id: int, user_id: int, item_id: str) -> dict:
+    """Добавляет один отдельный экземпляр предмета."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO duel_inventory (chat_id, user_id, item_id)
+            VALUES (?, ?, ?)
+            """,
+            (chat_id, user_id, item_id),
+        )
+        return {
+            "id": cursor.lastrowid,
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "item_id": item_id,
+        }
+
+
+def get_duel_inventory(chat_id: int, user_id: int) -> list[dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, chat_id, user_id, item_id, created_at
+            FROM duel_inventory
+            WHERE chat_id = ? AND user_id = ?
+            ORDER BY id
+            """,
+            (chat_id, user_id),
+        )
+        return [
+            {
+                "id": row[0],
+                "chat_id": row[1],
+                "user_id": row[2],
+                "item_id": row[3],
+                "created_at": row[4],
+            }
+            for row in cursor.fetchall()
+        ]
+
+
+def remove_duel_inventory_instance(
+    chat_id: int,
+    user_id: int,
+    instance_id: int,
+) -> bool:
+    """Удаляет только указанный instance, не все дубликаты item_id."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM duel_inventory
+            WHERE id = ? AND chat_id = ? AND user_id = ?
+            """,
+            (instance_id, chat_id, user_id),
+        )
+        return cursor.rowcount == 1
+
+
+def get_duel_item_event_chat_ids() -> list[int]:
+    """Возвращает групповые чаты с хотя бы одним duel-user."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT chat_id FROM duel_users WHERE chat_id < 0 ORDER BY chat_id"
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def create_duel_item_event(chat_id: int) -> int | None:
+    """Создаёт event, если в чате нет другого unclaimed event."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO duel_item_events (chat_id) VALUES (?)",
+            (chat_id,),
+        )
+        return cursor.lastrowid if cursor.rowcount == 1 else None
+
+
+def set_duel_item_event_message(event_id: int, message_id: int) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE duel_item_events
+            SET message_id = ?
+            WHERE event_id = ? AND claimed = 0
+            """,
+            (message_id, event_id),
+        )
+        return cursor.rowcount == 1
+
+
+def discard_unpublished_duel_item_event(event_id: int) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM duel_item_events
+            WHERE event_id = ? AND claimed = 0 AND message_id IS NULL
+            """,
+            (event_id,),
+        )
+        return cursor.rowcount == 1
+
+
+def get_duel_item_event(event_id: int) -> dict | None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT event_id, chat_id, message_id, claimed, claimed_by,
+                   item_id, created_at, claimed_at
+            FROM duel_item_events
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "event_id": row[0],
+            "chat_id": row[1],
+            "message_id": row[2],
+            "claimed": bool(row[3]),
+            "claimed_by": row[4],
+            "item_id": row[5],
+            "created_at": row[6],
+            "claimed_at": row[7],
+        }
+
+
+def claim_duel_item_event(
+    event_id: int,
+    chat_id: int,
+    user_id: int,
+    item_selector,
+) -> tuple[str, dict | None]:
+    """
+    Атомарно бронирует event и выдаёт один item instance.
+
+    item_selector вызывается только после успешной атомарной брони;
+    проигравший race не тратит item-choice RNG.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            SELECT claimed
+            FROM duel_item_events
+            WHERE event_id = ? AND chat_id = ?
+            """,
+            (event_id, chat_id),
+        )
+        event = cursor.fetchone()
+        if not event or event[0]:
+            return "already_claimed", None
+
+        cursor.execute(
+            "SELECT 1 FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        )
+        if not cursor.fetchone():
+            return "not_registered", None
+
+        cursor.execute(
+            """
+            UPDATE duel_item_events
+            SET claimed = 1, claimed_by = ?, claimed_at = CURRENT_TIMESTAMP
+            WHERE event_id = ? AND chat_id = ? AND claimed = 0
+            """,
+            (user_id, event_id, chat_id),
+        )
+        if cursor.rowcount != 1:
+            return "already_claimed", None
+
+        item_id = item_selector()
+        cursor.execute(
+            """
+            INSERT INTO duel_inventory (chat_id, user_id, item_id)
+            VALUES (?, ?, ?)
+            """,
+            (chat_id, user_id, item_id),
+        )
+        instance_id = cursor.lastrowid
+        cursor.execute(
+            "UPDATE duel_item_events SET item_id = ? WHERE event_id = ?",
+            (item_id, event_id),
+        )
+        return "claimed", {
+            "id": instance_id,
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "item_id": item_id,
+        }
 
 
 def get_duel_top(chat_id: int, sort_by: str = "wins", limit: int = 10) -> list:

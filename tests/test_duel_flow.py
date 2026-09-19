@@ -1161,19 +1161,21 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     monkeypatch.setattr(duel, "get_win_title", lambda _count: "🍆 Победитель")
     monkeypatch.setattr(duel, "get_loss_title", lambda _count: "💀 Лузер")
     monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: "🔪 Вор")
+    monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: [])
 
     await duel.duel_stats_command(update, fake_context)
 
     sent.assert_awaited_once_with(
         update,
         fake_context,
-        "📊 <b>Статистика дуэлей: <b>Статист</b></b>\n\n"
+        "📊 <b>Статистика дуэлей: &lt;b&gt;Статист&lt;/b&gt;</b>\n\n"
         "Очки: <b>37 / 100</b>\n"
         "Побед: <b>12</b>\n"
         "Поражений: <b>8</b>\n"
         "Хуяние:\n<b>🍆 Победитель (12)\n💀 Лузер (8)\n🔪 Вор (3)</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
-        "Статус на сегодня: <b>С хуем 🍆</b>",
+        "Статус на сегодня: <b>С хуем 🍆</b>\n"
+        "<b>Инвентарь:</b> пусто",
     )
 
     sent.reset_mock()
@@ -1187,7 +1189,8 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     assert sent.await_args.args[2].endswith(
         "Хуяние:\n<b>Нет званий</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
-        "Статус на сегодня: <b>Без хуя 💀</b>"
+        "Статус на сегодня: <b>Без хуя 💀</b>\n"
+        "<b>Инвентарь:</b> пусто"
     )
 
 

@@ -16,6 +16,7 @@ def test_runtime_modules_import():
         "handlers.utils",
         "handlers.weather",
         "handlers.duel",
+        "handlers.duel_items",
         "bot",
     ):
         assert importlib.import_module(name)
@@ -34,6 +35,7 @@ def test_bot_public_import_contracts():
         "duel_top_command", "duel_delete_command", "boss_daily_job", "boss_callback",
         "boss_command", "boss_reg_command", "hyperboreic_huy_daily_job",
         "hyperboreic_huy_callback",
+        "duel_item_event_job", "duel_item_event_callback",
     )
     for name in names:
         assert callable(getattr(bot, name))
@@ -119,6 +121,7 @@ def test_callback_handler_patterns_are_stable():
         "start_duel_tester": r"^start_duel_",
         "duel_strike_head_1": r"^duel_(strike|block)_",
         "duel_block_dick_99": r"^duel_(strike|block)_",
+        "duel_item_claim_123": r"^duel_item_claim_\d+$",
         "boss_join": r"^boss_(join|attack_|block_)",
         "boss_attack_body_3": r"^boss_(join|attack_|block_)",
         "boss_block_dick_3": r"^boss_(join|attack_|block_)",
@@ -128,6 +131,109 @@ def test_callback_handler_patterns_are_stable():
     }
     for payload, pattern in patterns.items():
         assert re.search(pattern, payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_registered", [False, True])
+async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
+    monkeypatch,
+    already_registered,
+):
+    import bot
+
+    repeating = []
+
+    class FakeJobQueue:
+        def run_daily(self, *_args, **_kwargs):
+            pass
+
+        def run_repeating(self, callback, **kwargs):
+            repeating.append((callback, kwargs))
+
+        def get_jobs_by_name(self, name):
+            if name == "duel_item_event_job" and already_registered:
+                return [object()]
+            return []
+
+    class FakeApplication:
+        job_queue = FakeJobQueue()
+
+        def add_handler(self, _handler):
+            pass
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return FakeApplication()
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+    monkeypatch.setattr(bot, "schedule_past_pizda_job", lambda _queue: None)
+    await bot.main()
+
+    item_jobs = [entry for entry in repeating if entry[0] is bot.duel_item_event_job]
+    assert len(item_jobs) == (0 if already_registered else 1)
+    if item_jobs:
+        assert item_jobs[0][1] == {
+            "interval": bot.DUEL_ITEM_EVENT_CHECK_MINUTES * 60,
+            "first": 120,
+            "name": "duel_item_event_job",
+        }
+
+
+@pytest.mark.asyncio
+async def test_duel_item_callback_handler_is_registered(monkeypatch):
+    from telegram.ext import CallbackQueryHandler
+    import bot
+
+    handlers = []
+
+    class FakeApplication:
+        job_queue = None
+
+        def add_handler(self, handler):
+            handlers.append(handler)
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return FakeApplication()
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+    await bot.main()
+
+    item_handler = next(
+        handler
+        for handler in handlers
+        if isinstance(handler, CallbackQueryHandler)
+        and handler.callback is bot.duel_item_event_callback
+    )
+    assert item_handler.pattern.pattern == r"^duel_item_claim_\d+$"
 
 
 @pytest.mark.asyncio

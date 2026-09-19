@@ -1,0 +1,201 @@
+"""Shared duel-item catalog, inventory presentation, and chat item events."""
+
+import json
+import logging
+import random
+import re
+from collections import Counter
+from html import escape
+from pathlib import Path
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
+
+from config import DUEL_ITEM_EVENT_CHANCE
+from database import (
+    claim_duel_item_event,
+    create_duel_item_event,
+    discard_unpublished_duel_item_event,
+    format_user_title,
+    get_duel_item_event,
+    get_duel_item_event_chat_ids,
+    set_duel_item_event_message,
+)
+from text_resources import get_text, get_text_list
+
+
+_DUEL_ITEMS_PATH = Path(__file__).resolve().parent.parent / "data" / "duel_items.json"
+_ITEM_ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+DUEL_ITEM_EVENT_CALLBACK_PREFIX = "duel_item_claim_"
+
+
+def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
+    with open(path, encoding="utf-8") as items_file:
+        items = json.load(items_file)
+
+    if not isinstance(items, list) or len(items) != 40:
+        raise ValueError("duel_items.json must contain exactly 40 items")
+
+    normalized = []
+    ids = set()
+    names = set()
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"id", "name"}:
+            raise ValueError("Every duel item must contain only id and name")
+        item_id = item["id"]
+        name = item["name"]
+        if not isinstance(item_id, str) or not _ITEM_ID_PATTERN.fullmatch(item_id):
+            raise ValueError(f"Invalid duel item id: {item_id!r}")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Invalid duel item name for {item_id!r}")
+        if item_id in ids or name in names:
+            raise ValueError("Duel item ids and names must be unique")
+        ids.add(item_id)
+        names.add(name)
+        normalized.append({"id": item_id, "name": name})
+
+    return tuple(normalized)
+
+
+DUEL_ITEMS = _load_duel_items()
+DUEL_ITEM_NAMES = {item["id"]: item["name"] for item in DUEL_ITEMS}
+_DUEL_ITEM_ORDER = {item["id"]: index for index, item in enumerate(DUEL_ITEMS)}
+
+
+def get_duel_item_name(item_id: str) -> str:
+    return DUEL_ITEM_NAMES.get(item_id, get_text("duel.inventory.unknown_item"))
+
+
+def format_duel_inventory(instances: list[dict]) -> str:
+    if not instances:
+        return get_text("duel.inventory.empty")
+
+    counts = Counter(instance["item_id"] for instance in instances)
+    item_ids = sorted(
+        counts,
+        key=lambda item_id: (
+            _DUEL_ITEM_ORDER.get(item_id, len(_DUEL_ITEM_ORDER)),
+            item_id,
+        ),
+    )
+    formatted = []
+    for item_id in item_ids:
+        name = escape(get_duel_item_name(item_id))
+        count = counts[item_id]
+        formatted.append(
+            get_text("duel.inventory.counted_item", item=name, count=count)
+            if count > 1
+            else name
+        )
+    return ", ".join(formatted)
+
+
+async def _spawn_duel_item_event(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+):
+    if random.random() >= DUEL_ITEM_EVENT_CHANCE:
+        return
+
+    event_id = create_duel_item_event(chat_id)
+    if event_id is None:
+        return
+
+    intro = random.choice(get_text_list("duel.item_event.intros"))
+    keyboard = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(
+                get_text("duel.item_event.button"),
+                callback_data=f"{DUEL_ITEM_EVENT_CALLBACK_PREFIX}{event_id}",
+            )
+        ]]
+    )
+
+    try:
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=intro,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        discard_unpublished_duel_item_event(event_id)
+        logging.exception("Не удалось отправить item event в чат %s", chat_id)
+        return
+
+    set_duel_item_event_message(event_id, message.message_id)
+
+
+async def duel_item_event_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        chat_ids = get_duel_item_event_chat_ids()
+    except Exception:
+        logging.exception("Не удалось получить чаты для item event")
+        return
+
+    for chat_id in chat_ids:
+        try:
+            await _spawn_duel_item_event(context, chat_id)
+        except Exception:
+            logging.exception("Ошибка item event в чате %s", chat_id)
+
+
+async def duel_item_event_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    query = update.callback_query
+    if not query or not query.data or not query.from_user:
+        return
+
+    try:
+        event_id = int(query.data.removeprefix(DUEL_ITEM_EVENT_CALLBACK_PREFIX))
+    except ValueError:
+        await query.answer(get_text("duel.item_event.already_claimed"), show_alert=True)
+        return
+
+    chat_id = update.effective_chat.id
+    event = get_duel_item_event(event_id)
+    if not event or event["chat_id"] != chat_id or event["claimed"]:
+        await query.answer(get_text("duel.item_event.already_claimed"), show_alert=True)
+        return
+
+    status, instance = claim_duel_item_event(
+        event_id,
+        chat_id,
+        query.from_user.id,
+        lambda: random.choice(DUEL_ITEMS)["id"],
+    )
+    if status == "not_registered":
+        await query.answer(get_text("duel.item_event.not_registered"), show_alert=True)
+        return
+    if status != "claimed":
+        await query.answer(get_text("duel.item_event.already_claimed"), show_alert=True)
+        return
+
+    await query.answer()
+    title = escape(
+        format_user_title(
+            {
+                "username": query.from_user.username,
+                "display_name": query.from_user.first_name,
+            }
+        )
+    )
+    item_name = escape(get_duel_item_name(instance["item_id"]))
+    text = get_text(
+        "duel.item_event.claimed",
+        user=title,
+        item=item_name,
+    )
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=event["message_id"],
+            text=text,
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        logging.exception("Не удалось обновить claimed item event %s", event_id)

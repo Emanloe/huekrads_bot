@@ -26,6 +26,7 @@ from config import (
     GAME_HOUR,
     GAME_MINUTE,
     DUEL_TIMEZONE,
+    DUEL_ITEM_EVENT_CHECK_MINUTES,
 )
 from database import (
     init_db,
@@ -82,6 +83,10 @@ from handlers.duel import (
     boss_reg_command,
     hyperboreic_huy_daily_job,
     hyperboreic_huy_callback,
+)
+from handlers.duel_items import (
+    duel_item_event_callback,
+    duel_item_event_job,
 )
 
 
@@ -210,6 +215,14 @@ async def main():
             name="hyperboreic_huy_job",
         )
 
+        if not application.job_queue.get_jobs_by_name("duel_item_event_job"):
+            application.job_queue.run_repeating(
+                duel_item_event_job,
+                interval=DUEL_ITEM_EVENT_CHECK_MINUTES * 60,
+                first=120,
+                name="duel_item_event_job",
+            )
+
         # Старое событие «прошлая пизда»
         schedule_past_pizda_job(
             application.job_queue
@@ -331,6 +344,13 @@ async def main():
         CallbackQueryHandler(
             duel_action_callback,
             pattern=r"^duel_(strike|block)_",
+        )
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(
+            duel_item_event_callback,
+            pattern=r"^duel_item_claim_\d+$",
         )
     )
 
