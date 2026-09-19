@@ -1,6 +1,8 @@
 import importlib
 import logging
 import re
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -113,6 +115,115 @@ async def test_donate_command_handler_is_registered(monkeypatch):
         if isinstance(item, CommandHandler) and item.callback is bot.donate_command
     )
     assert handler.commands == frozenset({"donate"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_item_ids", "expected_inventory", "forbidden_inventory"),
+    [
+        ([], "Промасленная жилетка, Нож", "Инвентарь:</b> пусто"),
+        (
+            ["vevangel_wing"],
+            "Промасленная жилетка, Нож, Крыло Вевангела",
+            "Инвентарь:</b> пусто",
+        ),
+        (
+            ["vevangel_wing", "vevangel_wing"],
+            "Промасленная жилетка, Нож, Крыло Вевангела ×2",
+            "Инвентарь:</b> пусто",
+        ),
+        (
+            ["oiled_vest", "knife"],
+            "Промасленная жилетка, Нож",
+            "Промасленная жилетка ×2",
+        ),
+    ],
+)
+async def test_registered_duel_stats_handler_sends_virtual_base_inventory(
+    monkeypatch,
+    temp_database,
+    fake_context,
+    stored_item_ids,
+    expected_inventory,
+    forbidden_inventory,
+):
+    from telegram.ext import CommandHandler
+    import bot
+    import database as db
+
+    registered_handlers = []
+
+    class FakeApplication:
+        job_queue = None
+
+        def add_handler(self, handler):
+            registered_handlers.append(handler)
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return FakeApplication()
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+    await bot.main()
+
+    handlers = [
+        handler
+        for handler in registered_handlers
+        if isinstance(handler, CommandHandler)
+        and handler.commands == frozenset({"duel_stats"})
+    ]
+    assert len(handlers) == 1
+    assert handlers[0].callback is bot.duel_stats_command
+
+    chat_id = -707
+    user = SimpleNamespace(
+        id=707,
+        username="runtime_dwarf",
+        first_name="Runtime",
+        last_name=None,
+        is_bot=False,
+    )
+    db.get_or_create_duel_user(user, chat_id)
+    for item_id in stored_item_ids:
+        db.add_duel_inventory_item(chat_id, user.id, item_id)
+    if not stored_item_ids:
+        assert db.get_duel_inventory(chat_id, user.id) == []
+
+    reply_text = AsyncMock(return_value=SimpleNamespace(message_id=9001))
+    message = SimpleNamespace(
+        from_user=user,
+        chat=SimpleNamespace(id=chat_id),
+        chat_id=chat_id,
+        message_id=9000,
+        reply_text=reply_text,
+    )
+    update = SimpleNamespace(
+        message=message,
+        effective_chat=message.chat,
+    )
+
+    await handlers[0].callback(update, fake_context)
+
+    reply_text.assert_awaited_once()
+    final_output = reply_text.await_args.args[0]
+    assert f"<b>Инвентарь:</b> {expected_inventory}" in final_output
+    assert forbidden_inventory not in final_output
+    assert "Промасленная жилетка ×2" not in final_output
+    assert "Нож ×2" not in final_output
 
 
 def test_callback_handler_patterns_are_stable():

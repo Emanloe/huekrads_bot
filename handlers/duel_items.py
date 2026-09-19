@@ -77,10 +77,11 @@ def get_duel_item_name(item_id: str) -> str:
     return DUEL_ITEM_NAMES.get(item_id, get_text("duel.inventory.unknown_item"))
 
 
-def format_duel_inventory(instances: list[dict]) -> str:
+def format_duel_display_inventory(collectible_instances: list[dict]) -> str:
+    """Format permanent base items followed by stored collectible instances."""
     counts = Counter(
         instance["item_id"]
-        for instance in instances
+        for instance in collectible_instances
         if instance["item_id"] not in BASE_DUEL_ITEM_IDS
     )
     item_ids = sorted(
@@ -100,6 +101,21 @@ def format_duel_inventory(instances: list[dict]) -> str:
             else name
         )
     return ", ".join(formatted)
+
+
+def get_droppable_duel_inventory(instances: list[dict]) -> list[dict]:
+    """Return only stored collectible instances eligible for duel loss."""
+    if all(instance["item_id"] not in BASE_DUEL_ITEM_IDS for instance in instances):
+        return instances
+    return [
+        instance
+        for instance in instances
+        if instance["item_id"] not in BASE_DUEL_ITEM_IDS
+    ]
+
+
+# Compatibility name for callers that only need inventory presentation.
+format_duel_inventory = format_duel_display_inventory
 
 
 async def _spawn_duel_item_event(
