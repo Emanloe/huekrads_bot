@@ -117,6 +117,9 @@ def test_finish_yaml_templates_preserve_exact_output_structure():
         winner_title="Победитель",
         max_daily_points=100,
     ) == "🏆 <b>Победитель</b> набрал 100 очков!"
+    assert get_text("duel.finish.post_message.prefix") == (
+        "На теле проигравшего обнаружили записку:"
+    )
 
 
 @pytest.mark.asyncio

@@ -222,6 +222,135 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
     }
 
 
+@pytest.mark.parametrize(
+    ("post_message", "telegram_post_message"),
+    [
+        (
+            "твоя мать на мой член с 5 этажа падала",
+            "твоя мать на мой член с 5 этажа падала",
+        ),
+        (
+            "записка <tag> & хвост",
+            "записка &lt;tag&gt; &amp; хвост",
+        ),
+    ],
+    ids=("known-production-message", "html-escaped-message"),
+)
+@pytest.mark.asyncio
+async def test_completed_duel_callback_sends_prefixed_post_message_last(
+    monkeypatch,
+    fixed_duel_database,
+    fake_context,
+    post_message,
+    telegram_post_message,
+):
+    import database
+    from handlers import duel, duel_text
+    from text_resources import get_text_list
+
+    attacker_tg = make_user(3, "post_attacker")
+    defender_tg = make_user(4, "post_defender")
+    database.get_or_create_duel_user(attacker_tg, CHAT_ID)
+    database.get_or_create_duel_user(defender_tg, CHAT_ID)
+    install_fake_tasks(monkeypatch, duel)
+
+    catalog = (post_message,)
+    round_flavors = get_text_list("duel.round_flavor.one")
+    round_flavor = next(
+        phrase for phrase in round_flavors if "Яйцом по голове" in phrase
+    )
+    prefix = "На теле проигравшего обнаружили записку:"
+    expected_tail = f"\n\n{prefix}\n{telegram_post_message}"
+    rng_events = []
+    rolls = iter(
+        (
+            ("suicide_roll", 0.5),
+            ("miss_roll", 0.5),
+            ("regular_steal_roll", 0.99),
+            ("berserk_roll", duel.BERSERK_CHANCE - 0.000001),
+            ("post_message_roll", duel.DUEL_POST_MESSAGE_CHANCE - 0.000001),
+        )
+    )
+
+    def random_roll():
+        event, value = next(rolls)
+        rng_events.append(event)
+        return value
+
+    def choose(values):
+        if values == [True, False]:
+            rng_events.append("initial_attacker_choice")
+            return True
+        if values is duel.HIT_PHRASES:
+            rng_events.append("hit_phrase_choice")
+            return values[0]
+        if values is duel.ATTACK_PHRASES:
+            rng_events.append("attack_phrase_choice")
+            return values[0]
+        if values is round_flavors:
+            rng_events.append("round_flavor_choice")
+            return round_flavor
+        if values is catalog:
+            rng_events.append("post_message_choice")
+            return values[0]
+        if isinstance(values, tuple):
+            rng_events.append("berserker_choice")
+            return values[0]
+        if values is duel_text.BERSERK_TRIGGERS:
+            rng_events.append("berserk_trigger_choice")
+            return values[0]
+        if values is duel_text.BERSERK_RESULTS:
+            rng_events.append("berserk_result_choice")
+            return values[0]
+        raise AssertionError(f"Unexpected random.choice input: {values!r}")
+
+    monkeypatch.setattr(duel, "DUEL_POST_MESSAGES", catalog)
+    monkeypatch.setattr(duel.random, "random", random_roll)
+    monkeypatch.setattr(duel.random, "choice", choose)
+
+    selection_message = SimpleNamespace(delete=AsyncMock())
+    select_update, _ = callback_update(
+        "start_duel_post_defender",
+        attacker_tg,
+        selection_message,
+    )
+    await duel.duel_select_callback(select_update, fake_context)
+
+    strike_update, _ = callback_update("duel_strike_head_1", attacker_tg)
+    await duel.duel_action_callback(strike_update, fake_context)
+    block_update, _ = callback_update("duel_block_body_2", defender_tg)
+    await duel.duel_action_callback(block_update, fake_context)
+
+    assert CHAT_ID not in duel.ACTIVE_DUELS
+    assert rng_events == [
+        "initial_attacker_choice",
+        "suicide_roll",
+        "miss_roll",
+        "hit_phrase_choice",
+        "attack_phrase_choice",
+        "regular_steal_roll",
+        "round_flavor_choice",
+        "berserk_roll",
+        "berserker_choice",
+        "berserk_trigger_choice",
+        "berserk_result_choice",
+        "post_message_roll",
+        "post_message_choice",
+    ]
+
+    final_call = fake_context.bot.send_message.await_args_list[-1]
+    assert final_call.kwargs["chat_id"] == CHAT_ID
+    assert final_call.kwargs["parse_mode"] == "HTML"
+    output = final_call.kwargs["text"]
+    assert output.endswith(expected_tail)
+    assert output.count(prefix) == 1
+    assert output.count(telegram_post_message) == 1
+    assert output.index(prefix) > output.index(round_flavor)
+    assert output.index(prefix) > output.index(" <b>БЕРСЕРК</b>")
+    if post_message != telegram_post_message:
+        assert post_message not in output
+
+
 @pytest.mark.asyncio
 async def test_suicide_skips_miss_roll_and_awards_defender(
     monkeypatch,
