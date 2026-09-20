@@ -149,6 +149,34 @@ def _load_duel_post_messages(path=_DUEL_POST_MESSAGES_PATH):
 DUEL_POST_MESSAGES = _load_duel_post_messages()
 
 
+async def gnomed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    if not message or not update.effective_chat:
+        return
+
+    target_message = message.reply_to_message
+    if target_message is None:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=get_text("duel.gnomed.reply_required"),
+        )
+        return
+
+    if not DUEL_POST_MESSAGES:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=get_text("duel.gnomed.catalog_unavailable"),
+        )
+        return
+
+    phrase = random.choice(DUEL_POST_MESSAGES)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=phrase,
+        reply_to_message_id=target_message.message_id,
+    )
+
+
 def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
     inventory = get_droppable_duel_inventory(
         get_duel_inventory(chat_id, loser_id)

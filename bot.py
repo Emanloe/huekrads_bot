@@ -77,6 +77,7 @@ from handlers.duel import (
     duel_stats_command,
     duel_top_command,
     duel_delete_command,
+    gnomed_command,
     boss_daily_job,
     boss_callback,
     boss_command,
@@ -296,6 +297,13 @@ async def main():
         CommandHandler(
             "toggle_autodelete",
             toggle_autodelete_command,
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "gnomed",
+            gnomed_command,
         )
     )
 

@@ -34,7 +34,7 @@ def test_bot_public_import_contracts():
         "respond_trigger", "get_file_id_handler", "error_handler", "weather_inline_query",
         "weather_chosen_inline_result", "weather_stub_callback", "duel_command",
         "duel_select_callback", "duel_action_callback", "duel_stats_command",
-        "duel_top_command", "duel_delete_command", "boss_daily_job", "boss_callback",
+        "duel_top_command", "duel_delete_command", "gnomed_command", "boss_daily_job", "boss_callback",
         "boss_command", "boss_reg_command", "hyperboreic_huy_daily_job",
         "hyperboreic_huy_callback",
         "duel_item_event_job", "duel_item_event_callback",
@@ -72,7 +72,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
 
 
 @pytest.mark.asyncio
-async def test_donate_command_handler_is_registered(monkeypatch):
+async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatch):
     from telegram.ext import CommandHandler
     import bot
 
@@ -109,12 +109,17 @@ async def test_donate_command_handler_is_registered(monkeypatch):
 
     await bot.main()
 
-    handler = next(
-        item
-        for item in registered_handlers
-        if isinstance(item, CommandHandler) and item.callback is bot.donate_command
-    )
-    assert handler.commands == frozenset({"donate"})
+    for callback, command in (
+        (bot.donate_command, "donate"),
+        (bot.gnomed_command, "gnomed"),
+    ):
+        handlers = [
+            item
+            for item in registered_handlers
+            if isinstance(item, CommandHandler) and item.callback is callback
+        ]
+        assert len(handlers) == 1
+        assert handlers[0].commands == frozenset({command})
 
 
 @pytest.mark.asyncio
