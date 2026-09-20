@@ -40,5 +40,6 @@
   {"id": "bottle_with_underground_air", "name": "Бутылка подземного воздуха"},
   {"id": "miners_lunch_fossil", "name": "Окаменевший обед шахтёра"},
   {"id": "green_pimple", "name": "Зеленая пимпочка"},
-  {"id": "cheesestool", "name": "Чизистул"}
+  {"id": "cheesestool", "name": "Чизистул"},
+  {"id": "ural_mountain_parmesan", "name": "Уральский горный пармезан"}
 ]

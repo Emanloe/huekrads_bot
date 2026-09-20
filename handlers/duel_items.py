@@ -34,8 +34,8 @@ def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
     with open(path, encoding="utf-8") as items_file:
         items = json.load(items_file)
 
-    if not isinstance(items, list) or len(items) != 42:
-        raise ValueError("duel_items.json must contain exactly 42 items")
+    if not isinstance(items, list) or len(items) != 43:
+        raise ValueError("duel_items.json must contain exactly 43 items")
 
     normalized = []
     ids = set()

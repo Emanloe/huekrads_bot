@@ -78,11 +78,11 @@ def test_boss_loot_hit_selects_one_living_survivor_then_full_catalog(monkeypatch
     )
 
 
-def test_boss_loot_pool_is_exactly_the_42_collectibles():
+def test_boss_loot_pool_is_exactly_the_43_collectibles():
     from handlers import duel, duel_items
 
     assert duel.DUEL_ITEMS is duel_items.DUEL_ITEMS
-    assert len(duel.DUEL_ITEMS) == 42
+    assert len(duel.DUEL_ITEMS) == 43
     assert {"oiled_vest", "knife"}.isdisjoint(
         item["id"] for item in duel.DUEL_ITEMS
     )
