@@ -1,6 +1,6 @@
 """Deterministic state transitions for an interactive duel."""
 
-from config import BERSERK_CHANCE, DUEL_POST_MESSAGE_CHANCE
+from config import BERSERK_CHANCE, DUEL_ITEM_STEAL_CHANCE, DUEL_POST_MESSAGE_CHANCE
 
 
 def _is_suicide_roll(suicide_roll: float) -> bool:
@@ -17,6 +17,10 @@ def _is_berserk_roll(berserk_roll: float) -> bool:
 
 def _is_duel_post_message_roll(post_message_roll: float) -> bool:
     return post_message_roll < DUEL_POST_MESSAGE_CHANCE
+
+
+def _is_duel_item_steal_roll(item_steal_roll: float) -> bool:
+    return item_steal_roll < DUEL_ITEM_STEAL_CHANCE
 
 
 def _resolve_zone_outcome(strike_zone: str, block_zone: str) -> str:

@@ -4,6 +4,7 @@ from handlers.duel_state import (
     _get_duel_participant_ineligibility,
     _is_miss_roll,
     _is_berserk_roll,
+    _is_duel_item_steal_roll,
     _is_duel_post_message_roll,
     _is_suicide_roll,
     _resolve_zone_outcome,
@@ -171,6 +172,14 @@ def test_miss_roll_boundary():
 def test_berserk_roll_boundary():
     assert _is_berserk_roll(0.000999) is True
     assert _is_berserk_roll(0.001) is False
+
+
+def test_duel_item_steal_chance_and_roll_boundary():
+    from config import DUEL_ITEM_STEAL_CHANCE
+
+    assert DUEL_ITEM_STEAL_CHANCE == 0.05
+    assert _is_duel_item_steal_roll(0.049999) is True
+    assert _is_duel_item_steal_roll(0.05) is False
 
 
 def test_duel_post_message_chance_and_roll_boundary():

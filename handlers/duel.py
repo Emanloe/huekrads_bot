@@ -16,6 +16,7 @@ from config import (
     MAX_DAILY_POINTS,
     BERSERK_CHANCE,
     DUEL_POST_MESSAGE_CHANCE,
+    DUEL_ITEM_STEAL_CHANCE,
     DUEL_ITEM_DROP_CHANCE,
     BOSS_ITEM_DROP_CHANCE,
 )
@@ -36,6 +37,7 @@ from database import (
     add_duel_inventory_item,
     get_duel_inventory,
     remove_duel_inventory_instance,
+    transfer_duel_inventory_item,
 )
 from handlers.duel_text import (
     _boss_alive_players,
@@ -86,6 +88,7 @@ from handlers.duel_state import (
     _get_duel_participant_ineligibility,
     _is_miss_roll,
     _is_berserk_roll,
+    _is_duel_item_steal_roll,
     _is_duel_post_message_roll,
     _is_suicide_roll,
     _resolve_zone_outcome,
@@ -157,6 +160,30 @@ def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
 
     instance = random.choice(inventory)
     if not remove_duel_inventory_instance(chat_id, loser_id, instance["id"]):
+        return None
+    return get_duel_item_name(instance["item_id"])
+
+
+def _maybe_steal_loser_inventory_item(
+    chat_id: int,
+    winner_id: int,
+    loser_id: int,
+) -> str | None:
+    inventory = get_droppable_duel_inventory(
+        get_duel_inventory(chat_id, loser_id)
+    )
+    if not inventory:
+        return None
+    if not _is_duel_item_steal_roll(random.random()):
+        return None
+
+    instance = random.choice(inventory)
+    if not transfer_duel_inventory_item(
+        chat_id,
+        loser_id,
+        winner_id,
+        instance["id"],
+    ):
         return None
     return get_duel_item_name(instance["item_id"])
 
@@ -1057,6 +1084,17 @@ async def _finish_duel(
 
         return
 
+    stolen_item_name = None
+    if is_dick_stolen:
+        try:
+            stolen_item_name = _maybe_steal_loser_inventory_item(
+                chat_id,
+                winner["user_id"],
+                loser["user_id"],
+            )
+        except Exception:
+            logging.exception("Ошибка кражи предмета после дуэли в чате %s", chat_id)
+
     lose_title = format_user_title(loser)
 
     res_msg = get_text(
@@ -1076,6 +1114,12 @@ async def _finish_duel(
     )
 
     if is_dick_stolen:
+
+        if stolen_item_name is not None:
+            res_msg += get_text(
+                "duel.finish.item_stolen",
+                item_name=escape(stolen_item_name),
+            )
 
         fact = random.choice(
             DWARFS_FACTS

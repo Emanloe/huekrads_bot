@@ -28,6 +28,7 @@ def test_duel_item_catalog_has_exact_stable_contract():
         DUEL_ITEM_DROP_CHANCE,
         DUEL_ITEM_EVENT_CHANCE,
         DUEL_ITEM_EVENT_CHECK_MINUTES,
+        DUEL_ITEM_STEAL_CHANCE,
     )
     from handlers.duel_items import (
         BASE_DUEL_ITEM_IDS,
@@ -65,6 +66,7 @@ def test_duel_item_catalog_has_exact_stable_contract():
     assert get_duel_item_name("legacy_missing_id") == "Неизвестная находка"
     assert len(get_text_list("duel.item_event.intros")) == 8
     assert DUEL_ITEM_DROP_CHANCE == 0.50
+    assert DUEL_ITEM_STEAL_CHANCE == 0.05
     assert BOSS_ITEM_DROP_CHANCE == 0.50
     assert DUEL_ITEM_EVENT_CHANCE == 0.10
     assert DUEL_ITEM_EVENT_CHECK_MINUTES == 60

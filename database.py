@@ -631,6 +631,49 @@ def remove_duel_inventory_instance(
         return cursor.rowcount == 1
 
 
+def transfer_duel_inventory_item(
+    chat_id: int,
+    from_user_id: int,
+    to_user_id: int,
+    inventory_instance_id: int,
+) -> bool:
+    """Атомарно передаёт один конкретный inventory instance."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            SELECT item_id
+            FROM duel_inventory
+            WHERE id = ? AND chat_id = ? AND user_id = ?
+            """,
+            (inventory_instance_id, chat_id, from_user_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        item_id = row[0]
+        cursor.execute(
+            """
+            DELETE FROM duel_inventory
+            WHERE id = ? AND chat_id = ? AND user_id = ?
+            """,
+            (inventory_instance_id, chat_id, from_user_id),
+        )
+        if cursor.rowcount != 1:
+            return False
+
+        cursor.execute(
+            """
+            INSERT INTO duel_inventory (chat_id, user_id, item_id)
+            VALUES (?, ?, ?)
+            """,
+            (chat_id, to_user_id, item_id),
+        )
+        return True
+
+
 def get_duel_item_event_chat_ids() -> list[int]:
     """Возвращает групповые чаты с хотя бы одним duel-user."""
     with get_db() as conn:

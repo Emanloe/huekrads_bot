@@ -294,6 +294,7 @@ finish:
     📖 <i>{fact}</i>
   post_message:
     prefix: "На теле проигравшего обнаружили записку:"
+  item_stolen: "\n<b>Заодно спиздил:</b> {item_name}"
   item_drop: "<b>Карман порвался, выпало:</b> {item_name}"
   max_points_caption: 🏆 <b>{winner_title}</b> набрал {max_daily_points} очков!
 item_event:
