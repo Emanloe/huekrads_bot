@@ -71,11 +71,13 @@ async def test_gnomed_sends_one_catalog_phrase_as_reply_to_original_message(
 ):
     from handlers import duel
 
-    phrase = duel.DUEL_POST_MESSAGES[0]
+    phrase = "тестовая фраза"
+    catalog = (phrase,)
     choice = Mock(return_value=phrase)
     random_roll = Mock(side_effect=AssertionError("/gnomed consumed random.random"))
     monkeypatch.setattr(duel.random, "choice", choice)
     monkeypatch.setattr(duel.random, "random", random_roll)
+    monkeypatch.setattr(duel, "DUEL_POST_MESSAGES", catalog)
     events = []
     bot_response = SimpleNamespace(delete=AsyncMock())
     fake_context.bot.send_message = AsyncMock(
@@ -86,11 +88,14 @@ async def test_gnomed_sends_one_catalog_phrase_as_reply_to_original_message(
 
     await duel.gnomed_command(update, fake_context)
 
-    choice.assert_called_once_with(duel.DUEL_POST_MESSAGES)
+    choice.assert_called_once_with(catalog)
     random_roll.assert_not_called()
     fake_context.bot.send_message.assert_awaited_once_with(
         chat_id=-700,
-        text=phrase,
+        text=(
+            "Ты схватил гнома за бороду. Гном посмотрел тебе прямо в глаза и "
+            "дрожащим голосом произнёс: «тестовая фраза»"
+        ),
         reply_to_message_id=100,
     )
     sent = fake_context.bot.send_message.await_args.kwargs
@@ -173,7 +178,10 @@ async def test_gnomed_html_sensitive_phrase_is_sent_as_plain_text(
     choice.assert_called_once_with(catalog)
     fake_context.bot.send_message.assert_awaited_once_with(
         chat_id=-700,
-        text="<гном> & хуй",
+        text=(
+            "Ты схватил гнома за бороду. Гном посмотрел тебе прямо в глаза и "
+            "дрожащим голосом произнёс: «<гном> & хуй»"
+        ),
         reply_to_message_id=100,
     )
     assert "parse_mode" not in fake_context.bot.send_message.await_args.kwargs
@@ -199,7 +207,7 @@ async def test_gnomed_delete_error_does_not_remove_sent_response_or_fail(
     choice.assert_called_once_with(duel.DUEL_POST_MESSAGES)
     fake_context.bot.send_message.assert_awaited_once_with(
         chat_id=-700,
-        text=phrase,
+        text=get_text("duel.gnomed.response", phrase=phrase),
         reply_to_message_id=100,
     )
     update.message.delete.assert_awaited_once_with()

@@ -173,7 +173,7 @@ async def gnomed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         phrase = random.choice(DUEL_POST_MESSAGES)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=phrase,
+            text=get_text("duel.gnomed.response", phrase=phrase),
             reply_to_message_id=target_message_id,
         )
 

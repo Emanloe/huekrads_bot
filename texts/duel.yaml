@@ -298,6 +298,7 @@ finish:
   item_drop: "<b>Карман порвался, выпало:</b> {item_name}"
   max_points_caption: 🏆 <b>{winner_title}</b> набрал {max_daily_points} очков!
 gnomed:
+  response: "Ты схватил гнома за бороду. Гном посмотрел тебе прямо в глаза и дрожащим голосом произнёс: «{phrase}»"
   reply_required: Ответь командой /gnomed на сообщение.
   catalog_unavailable: Гномьи записи куда-то проебались.
 item_event:
