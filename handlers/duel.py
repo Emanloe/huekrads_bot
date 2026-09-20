@@ -154,27 +154,33 @@ async def gnomed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or not update.effective_chat:
         return
 
-    target_message = message.reply_to_message
-    if target_message is None:
+    target_message_id = (
+        message.reply_to_message.message_id
+        if message.reply_to_message is not None
+        else None
+    )
+    if target_message_id is None:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=get_text("duel.gnomed.reply_required"),
         )
-        return
-
-    if not DUEL_POST_MESSAGES:
+    elif not DUEL_POST_MESSAGES:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=get_text("duel.gnomed.catalog_unavailable"),
         )
-        return
+    else:
+        phrase = random.choice(DUEL_POST_MESSAGES)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=phrase,
+            reply_to_message_id=target_message_id,
+        )
 
-    phrase = random.choice(DUEL_POST_MESSAGES)
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=phrase,
-        reply_to_message_id=target_message.message_id,
-    )
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:

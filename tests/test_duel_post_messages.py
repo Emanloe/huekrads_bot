@@ -50,12 +50,16 @@ def test_duel_post_message_loader_rejects_empty_and_invalid_catalogs(tmp_path):
 
 def gnomed_update(reply_to_message_id):
     target = (
-        SimpleNamespace(message_id=reply_to_message_id)
+        SimpleNamespace(message_id=reply_to_message_id, delete=AsyncMock())
         if reply_to_message_id is not None
         else None
     )
     return SimpleNamespace(
-        message=SimpleNamespace(message_id=101, reply_to_message=target),
+        message=SimpleNamespace(
+            message_id=101,
+            reply_to_message=target,
+            delete=AsyncMock(),
+        ),
         effective_chat=SimpleNamespace(id=-700),
     )
 
@@ -72,9 +76,15 @@ async def test_gnomed_sends_one_catalog_phrase_as_reply_to_original_message(
     random_roll = Mock(side_effect=AssertionError("/gnomed consumed random.random"))
     monkeypatch.setattr(duel.random, "choice", choice)
     monkeypatch.setattr(duel.random, "random", random_roll)
-    fake_context.bot.send_message = AsyncMock()
+    events = []
+    bot_response = SimpleNamespace(delete=AsyncMock())
+    fake_context.bot.send_message = AsyncMock(
+        side_effect=lambda **_kwargs: events.append("response_sent") or bot_response
+    )
+    update = gnomed_update(100)
+    update.message.delete = AsyncMock(side_effect=lambda: events.append("command_deleted"))
 
-    await duel.gnomed_command(gnomed_update(100), fake_context)
+    await duel.gnomed_command(update, fake_context)
 
     choice.assert_called_once_with(duel.DUEL_POST_MESSAGES)
     random_roll.assert_not_called()
@@ -85,6 +95,10 @@ async def test_gnomed_sends_one_catalog_phrase_as_reply_to_original_message(
     )
     sent = fake_context.bot.send_message.await_args.kwargs
     assert sent["reply_to_message_id"] != 101
+    assert events == ["response_sent", "command_deleted"]
+    update.message.delete.assert_awaited_once_with()
+    update.message.reply_to_message.delete.assert_not_awaited()
+    bot_response.delete.assert_not_awaited()
     assert get_text("duel.finish.post_message.prefix") == (
         "На теле проигравшего обнаружили записку:"
     )
@@ -100,15 +114,19 @@ async def test_gnomed_without_reply_uses_resource_hint_without_rng(
 
     choice = Mock(side_effect=AssertionError("no-reply /gnomed consumed choice"))
     monkeypatch.setattr(duel.random, "choice", choice)
-    fake_context.bot.send_message = AsyncMock()
+    bot_response = SimpleNamespace(delete=AsyncMock())
+    fake_context.bot.send_message = AsyncMock(return_value=bot_response)
+    update = gnomed_update(None)
 
-    await duel.gnomed_command(gnomed_update(None), fake_context)
+    await duel.gnomed_command(update, fake_context)
 
     choice.assert_not_called()
     fake_context.bot.send_message.assert_awaited_once_with(
         chat_id=-700,
         text=get_text("duel.gnomed.reply_required"),
     )
+    update.message.delete.assert_awaited_once_with()
+    bot_response.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,15 +139,20 @@ async def test_gnomed_empty_catalog_uses_resource_fallback_without_rng(
     choice = Mock(side_effect=AssertionError("empty /gnomed catalog consumed choice"))
     monkeypatch.setattr(duel, "DUEL_POST_MESSAGES", ())
     monkeypatch.setattr(duel.random, "choice", choice)
-    fake_context.bot.send_message = AsyncMock()
+    bot_response = SimpleNamespace(delete=AsyncMock())
+    fake_context.bot.send_message = AsyncMock(return_value=bot_response)
+    update = gnomed_update(100)
 
-    await duel.gnomed_command(gnomed_update(100), fake_context)
+    await duel.gnomed_command(update, fake_context)
 
     choice.assert_not_called()
     fake_context.bot.send_message.assert_awaited_once_with(
         chat_id=-700,
         text=get_text("duel.gnomed.catalog_unavailable"),
     )
+    update.message.delete.assert_awaited_once_with()
+    update.message.reply_to_message.delete.assert_not_awaited()
+    bot_response.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -154,3 +177,31 @@ async def test_gnomed_html_sensitive_phrase_is_sent_as_plain_text(
         reply_to_message_id=100,
     )
     assert "parse_mode" not in fake_context.bot.send_message.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_gnomed_delete_error_does_not_remove_sent_response_or_fail(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    phrase = duel.DUEL_POST_MESSAGES[0]
+    choice = Mock(return_value=phrase)
+    bot_response = SimpleNamespace(delete=AsyncMock())
+    update = gnomed_update(100)
+    update.message.delete = AsyncMock(side_effect=RuntimeError("delete forbidden"))
+    monkeypatch.setattr(duel.random, "choice", choice)
+    fake_context.bot.send_message = AsyncMock(return_value=bot_response)
+
+    await duel.gnomed_command(update, fake_context)
+
+    choice.assert_called_once_with(duel.DUEL_POST_MESSAGES)
+    fake_context.bot.send_message.assert_awaited_once_with(
+        chat_id=-700,
+        text=phrase,
+        reply_to_message_id=100,
+    )
+    update.message.delete.assert_awaited_once_with()
+    update.message.reply_to_message.delete.assert_not_awaited()
+    bot_response.delete.assert_not_awaited()
