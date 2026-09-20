@@ -290,6 +290,11 @@ BOSSES = [
         "emoji": get_text("boss.catalog.dick_devourer.emoji"),
         "description": get_text("boss.catalog.dick_devourer.description"),
     },
+    {
+        "name": get_text("boss.catalog.chizyanovsky_skier.name"),
+        "emoji": get_text("boss.catalog.chizyanovsky_skier.emoji"),
+        "description": get_text("boss.catalog.chizyanovsky_skier.description"),
+    },
 ]
 
 

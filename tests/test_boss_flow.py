@@ -374,6 +374,39 @@ async def test_start_boss_battle_creates_complete_join_state(
 
 
 @pytest.mark.asyncio
+async def test_start_boss_battle_selects_and_announces_chizyanovsky_skier_via_common_pool(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    chat_id = -722
+    boss = next(
+        boss
+        for boss in duel.BOSSES
+        if boss["name"] == "Чизяновский лыжник"
+    )
+    choose = Mock(return_value=boss)
+    tasks = TaskRecorder()
+    monkeypatch.setattr(duel.random, "choice", choose)
+    monkeypatch.setattr(duel.asyncio, "create_task", tasks)
+
+    assert await duel._start_boss_battle(
+        fake_context,
+        chat_id,
+        include_registrations=False,
+    ) is True
+
+    choose.assert_called_once_with(duel.BOSSES)
+    assert duel.ACTIVE_BOSS_BATTLES[chat_id]["boss"] is boss
+    assert boss["description"] == (
+        "Любит всратые фигурки, не любит когда их роняют"
+    )
+    announcement = fake_context.bot.send_message.await_args.kwargs["text"]
+    assert "💀 <b>Чизяновский лыжник</b>" in announcement
+
+
+@pytest.mark.asyncio
 async def test_start_boss_battle_preserves_pre_registered_join_presentation(
     monkeypatch,
     fake_context,

@@ -19,6 +19,10 @@ catalog:
     name: Пожиратель Хуев
     emoji: 🦷
     description: Никто не знает, сколько хуев он уже съел. Сам он тоже не знает. Он просто продолжает.
+  chizyanovsky_skier:
+    name: Чизяновский лыжник
+    emoji: 🎿
+    description: Любит всратые фигурки, не любит когда их роняют
 zones:
   display:
     head: Голова

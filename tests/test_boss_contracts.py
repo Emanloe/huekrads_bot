@@ -55,9 +55,10 @@ def test_boss_catalog_has_stable_order_shape_and_yaml_backed_presentation():
         "prince_of_underground_chaos",
         "great_knife_beard",
         "dick_devourer",
+        "chizyanovsky_skier",
     ]
 
-    assert len(duel.BOSSES) == 5
+    assert len(duel.BOSSES) == 6
     assert all(set(boss) == {"name", "emoji", "description"} for boss in duel.BOSSES)
     assert duel.BOSSES == [
         {
@@ -67,6 +68,11 @@ def test_boss_catalog_has_stable_order_shape_and_yaml_backed_presentation():
         }
         for key in catalog_keys
     ]
+    skier = duel.BOSSES[-1]
+    assert skier["name"] == "Чизяновский лыжник"
+    assert skier["description"] == (
+        "Любит всратые фигурки, не любит когда их роняют"
+    )
 
 
 def test_boss_registration_uses_isolated_database(tmp_path, monkeypatch, tg_user):
