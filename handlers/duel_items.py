@@ -31,11 +31,16 @@ BASE_DUEL_ITEM_IDS = ("oiled_vest", "knife")
 
 
 def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
-    with open(path, encoding="utf-8") as items_file:
-        items = json.load(items_file)
+    try:
+        with open(path, encoding="utf-8") as items_file:
+            items = json.load(items_file)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in duel item catalog: {path}") from exc
 
-    if not isinstance(items, list) or len(items) != 43:
-        raise ValueError("duel_items.json must contain exactly 43 items")
+    if not isinstance(items, list):
+        raise ValueError("duel_items.json must contain a list of items")
+    if not items:
+        raise ValueError("duel_items.json must contain at least one item")
 
     normalized = []
     ids = set()
@@ -47,6 +52,8 @@ def _load_duel_items(path=_DUEL_ITEMS_PATH) -> tuple[dict[str, str], ...]:
         name = item["name"]
         if not isinstance(item_id, str) or not _ITEM_ID_PATTERN.fullmatch(item_id):
             raise ValueError(f"Invalid duel item id: {item_id!r}")
+        if item_id in BASE_DUEL_ITEM_IDS:
+            raise ValueError(f"Base duel item id cannot be collectible: {item_id!r}")
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"Invalid duel item name for {item_id!r}")
         if item_id in ids or name in names:

@@ -22,7 +22,7 @@ def make_user(user_id, username, first_name=None):
     )
 
 
-def test_duel_item_catalog_has_exact_stable_contract():
+def test_duel_item_catalog_has_valid_extensible_contract():
     from config import (
         BOSS_ITEM_DROP_CHANCE,
         DUEL_ITEM_DROP_CHANCE,
@@ -44,7 +44,7 @@ def test_duel_item_catalog_has_exact_stable_contract():
         items = json.load(catalog_file)
     assert items == list(DUEL_ITEMS)
     assert duel.DUEL_ITEMS is DUEL_ITEMS
-    assert len(items) == 43
+    assert items
     assert len(BASE_DUEL_ITEMS) == 2
     assert BASE_DUEL_ITEM_IDS == ("oiled_vest", "knife")
     assert [item["name"] for item in BASE_DUEL_ITEMS] == [
@@ -62,8 +62,8 @@ def test_duel_item_catalog_has_exact_stable_contract():
         item["id"] for item in DUEL_ITEMS
     }
     assert all(set(item) == {"id", "name"} for item in items)
-    assert len({item["id"] for item in items}) == 43
-    assert len({item["name"] for item in items}) == 43
+    assert len({item["id"] for item in items}) == len(items)
+    assert len({item["name"] for item in items}) == len(items)
     assert all(re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", item["id"]) for item in items)
     assert all(item["name"].strip() for item in items)
     assert DUEL_ITEM_NAMES["vevangel_wing"] == "Крыло Вевангела"
@@ -71,6 +71,13 @@ def test_duel_item_catalog_has_exact_stable_contract():
     assert DUEL_ITEM_NAMES["green_pimple"] == "Зеленая пимпочка"
     assert DUEL_ITEM_NAMES["cheesestool"] == "Чизистул"
     assert DUEL_ITEM_NAMES["ural_mountain_parmesan"] == "Уральский горный пармезан"
+    assert {
+        "Полочки",
+        "Беззвучный щелчок",
+        "Фото чужой мамы",
+        "Наследство от двух отцов",
+        "Порей говна",
+    } <= {item["name"] for item in DUEL_ITEMS}
     assert get_duel_item_name("rusty_dwarf_fork") == "Ржавая гномья вилка"
     assert get_duel_item_name("legacy_missing_id") == "Неизвестная находка"
     assert len(get_text_list("duel.item_event.intros")) == 8
@@ -79,6 +86,64 @@ def test_duel_item_catalog_has_exact_stable_contract():
     assert BOSS_ITEM_DROP_CHANCE == 0.50
     assert DUEL_ITEM_EVENT_CHANCE == 0.10
     assert DUEL_ITEM_EVENT_CHECK_MINUTES == 60
+
+
+def test_duel_item_loader_accepts_an_additional_valid_collectible(tmp_path):
+    from handlers.duel_items import _load_duel_items
+
+    items = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    items.append({"id": "future_extra_collectible", "name": "Будущая находка"})
+    expanded_catalog = tmp_path / "expanded_duel_items.json"
+    expanded_catalog.write_text(
+        json.dumps(items, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    loaded = _load_duel_items(expanded_catalog)
+
+    assert len(loaded) == len(items)
+    assert loaded[-1] == {
+        "id": "future_extra_collectible",
+        "name": "Будущая находка",
+    }
+
+
+def test_duel_item_loader_rejects_duplicate_id(tmp_path):
+    from handlers.duel_items import _load_duel_items
+
+    duplicate_catalog = tmp_path / "duplicate_duel_items.json"
+    duplicate_catalog.write_text(
+        json.dumps(
+            [
+                {"id": "same_item", "name": "Первый предмет"},
+                {"id": "same_item", "name": "Второй предмет"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="ids and names must be unique"):
+        _load_duel_items(duplicate_catalog)
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ("{}", "must contain a list"),
+        ("[]", "at least one item"),
+        ('[{"id": "knife", "name": "Нож"}]', "cannot be collectible"),
+        ("not json", "Invalid JSON"),
+    ],
+)
+def test_duel_item_loader_rejects_invalid_catalog_invariants(tmp_path, payload, error):
+    from handlers.duel_items import _load_duel_items
+
+    catalog = tmp_path / "invalid_duel_items.json"
+    catalog.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error):
+        _load_duel_items(catalog)
 
 
 def test_inventory_migration_is_idempotent_on_existing_database(tmp_path, monkeypatch):
@@ -382,7 +447,7 @@ async def test_item_event_callback_rejects_invalid_then_claims_once_and_edits_sa
     assert edit["message_id"] == 777
     assert edit["reply_markup"] is None
     assert "&lt;claimant &amp; one&gt;" in edit["text"]
-    assert "Ржавая гномья вилка" in edit["text"]
+    assert duel_items.get_duel_item_name(choice.return_value["id"]) in edit["text"]
 
     second = make_user(12, "second")
     db.get_or_create_duel_user(second, chat_id)
