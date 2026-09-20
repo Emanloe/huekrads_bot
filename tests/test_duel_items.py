@@ -44,7 +44,7 @@ def test_duel_item_catalog_has_exact_stable_contract():
         items = json.load(catalog_file)
     assert items == list(DUEL_ITEMS)
     assert duel.DUEL_ITEMS is DUEL_ITEMS
-    assert len(items) == 40
+    assert len(items) == 42
     assert len(BASE_DUEL_ITEMS) == 2
     assert BASE_DUEL_ITEM_IDS == ("oiled_vest", "knife")
     assert [item["name"] for item in BASE_DUEL_ITEMS] == [
@@ -52,16 +52,23 @@ def test_duel_item_catalog_has_exact_stable_contract():
         "Нож",
     ]
     assert set(BASE_DUEL_ITEM_IDS).isdisjoint(item["id"] for item in DUEL_ITEMS)
-    assert {"vevangel_wing", "formangnome_whisker"} <= {
+    assert {
+        "vevangel_wing",
+        "formangnome_whisker",
+        "green_pimple",
+        "cheesestool",
+    } <= {
         item["id"] for item in DUEL_ITEMS
     }
     assert all(set(item) == {"id", "name"} for item in items)
-    assert len({item["id"] for item in items}) == 40
-    assert len({item["name"] for item in items}) == 40
+    assert len({item["id"] for item in items}) == 42
+    assert len({item["name"] for item in items}) == 42
     assert all(re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", item["id"]) for item in items)
     assert all(item["name"].strip() for item in items)
     assert DUEL_ITEM_NAMES["vevangel_wing"] == "Крыло Вевангела"
     assert DUEL_ITEM_NAMES["formangnome_whisker"] == "Ус Формангнома"
+    assert DUEL_ITEM_NAMES["green_pimple"] == "Зеленая пимпочка"
+    assert DUEL_ITEM_NAMES["cheesestool"] == "Чизистул"
     assert get_duel_item_name("rusty_dwarf_fork") == "Ржавая гномья вилка"
     assert get_duel_item_name("legacy_missing_id") == "Неизвестная находка"
     assert len(get_text_list("duel.item_event.intros")) == 8

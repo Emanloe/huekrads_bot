@@ -38,5 +38,7 @@
   {"id": "mayors_false_beard", "name": "Фальшивая борода мэра"},
   {"id": "last_match_of_clan", "name": "Последняя спичка клана"},
   {"id": "bottle_with_underground_air", "name": "Бутылка подземного воздуха"},
-  {"id": "miners_lunch_fossil", "name": "Окаменевший обед шахтёра"}
+  {"id": "miners_lunch_fossil", "name": "Окаменевший обед шахтёра"},
+  {"id": "green_pimple", "name": "Зеленая пимпочка"},
+  {"id": "cheesestool", "name": "Чизистул"}
 ]

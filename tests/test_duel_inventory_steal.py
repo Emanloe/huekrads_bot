@@ -141,7 +141,7 @@ def test_all_collectibles_and_only_collectibles_are_item_steal_candidates():
     ]
 
     candidates = get_droppable_duel_inventory(instances)
-    assert len(candidates) == 40
+    assert len(candidates) == 42
     assert {item["item_id"] for item in candidates} == {item["id"] for item in DUEL_ITEMS}
     assert set(BASE_DUEL_ITEM_IDS).isdisjoint(item["item_id"] for item in candidates)
 
