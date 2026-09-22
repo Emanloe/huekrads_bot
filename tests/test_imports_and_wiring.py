@@ -250,6 +250,62 @@ def test_callback_handler_patterns_are_stable():
 
 
 @pytest.mark.asyncio
+async def test_boss_daily_job_is_scheduled_at_1337_moscow(monkeypatch):
+    import bot
+
+    daily_jobs = []
+
+    class FakeJobQueue:
+        def run_daily(self, callback, **kwargs):
+            daily_jobs.append((callback, kwargs))
+
+        def run_repeating(self, *_args, **_kwargs):
+            pass
+
+        def get_jobs_by_name(self, _name):
+            return [object()]
+
+    class FakeApplication:
+        job_queue = FakeJobQueue()
+
+        def add_handler(self, _handler):
+            pass
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return FakeApplication()
+
+    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+    monkeypatch.setattr(bot, "schedule_past_pizda_job", lambda _queue: None)
+
+    await bot.main()
+
+    boss_jobs = [entry for entry in daily_jobs if entry[0] is bot.boss_daily_job]
+    assert len(boss_jobs) == 1
+    scheduled_time = boss_jobs[0][1]["time"]
+    assert scheduled_time.hour == 13
+    assert scheduled_time.minute == 37
+    assert scheduled_time.tzinfo is not None
+    assert scheduled_time.tzinfo.zone == "Europe/Moscow"
+    assert bot.DUEL_TIMEZONE == "Europe/Moscow"
+    assert boss_jobs[0][1]["name"] == "boss_daily_job"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("already_registered", [False, True])
 async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
     monkeypatch,

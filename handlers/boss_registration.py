@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 from config import DUEL_TIMEZONE
 
 
-BOSS_REG_CUTOFF_HOUR = 18
-BOSS_REG_CUTOFF_MINUTE = 0
+BOSS_REG_CUTOFF_HOUR = 13
+BOSS_REG_CUTOFF_MINUTE = 37
 _BOSS_REG_DB_PATH = Path(__file__).resolve().parent.parent / "bot_database.db"
 _BOSS_REG_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS boss_registrations (

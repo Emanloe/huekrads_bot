@@ -1,3 +1,4 @@
+import datetime as datetime_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -93,6 +94,46 @@ def test_boss_registration_uses_isolated_database(tmp_path, monkeypatch, tg_user
     assert duel._boss_get_registered_users(-99) == []
 
 
+@pytest.mark.parametrize(
+    ("hour", "minute", "expected_open"),
+    [
+        (13, 36, True),
+        (13, 37, False),
+        (17, 59, False),
+    ],
+)
+def test_boss_registration_cutoff_is_1337_moscow(
+    monkeypatch,
+    hour,
+    minute,
+    expected_open,
+):
+    from handlers import boss_registration
+
+    observed_timezones = []
+
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, tz):
+            observed_timezones.append(tz)
+            return datetime_module.datetime(
+                2026,
+                9,
+                22,
+                hour,
+                minute,
+                tzinfo=tz,
+            )
+
+    monkeypatch.setattr(boss_registration, "datetime", FrozenDateTime)
+
+    assert boss_registration.BOSS_REG_CUTOFF_HOUR == 13
+    assert boss_registration.BOSS_REG_CUTOFF_MINUTE == 37
+    assert boss_registration._boss_registration_is_open() is expected_open
+    assert len(observed_timezones) == 1
+    assert observed_timezones[0].key == "Europe/Moscow"
+
+
 @pytest.mark.asyncio
 async def test_boss_registration_messages_use_current_participant_count(
     tmp_path,
@@ -164,7 +205,7 @@ async def test_boss_registration_closed_message_preserves_current_text(monkeypat
     send.assert_awaited_once_with(
         update,
         context,
-        "Извинитесь. Битва уже была, запишитесь завтра до 18:00",
+        "Извинитесь. Битва уже была, запишитесь завтра до 13:37",
     )
 
 
@@ -173,10 +214,10 @@ async def test_boss_registration_closed_message_preserves_current_text(monkeypat
     ("chat_type", "registration_open", "active", "added", "expected", "parse_mode"),
     [
         ("private", True, False, True, "⚔️ Записываться на гномью бойню можно только в группе.", None),
-        ("group", False, False, True, "Извинитесь. Битва уже была, запишитесь завтра до 18:00", None),
+        ("group", False, False, True, "Извинитесь. Битва уже была, запишитесь завтра до 13:37", None),
         ("group", True, True, True, "⚔️ Битва уже идёт. На неё запись закрыта.", None),
-        ("group", True, False, True, "⚔️ <b>Гном записан на сегодняшнюю бойню.</b>\n\nВ 18:00 твоя борода сама окажется на арене. Нож бери с собой.\n\n Записано участников: <b>1</b>", "HTML"),
-        ("group", True, False, False, "🍺 Ты уже записан на сегодняшнюю бойню.\n\nВ 18:00 просто приходи рубиться.\n\n Записано участников: <b>1</b>", "HTML"),
+        ("group", True, False, True, "⚔️ <b>Гном записан на сегодняшнюю бойню.</b>\n\nВ 13:37 твоя борода сама окажется на арене. Нож бери с собой.\n\n Записано участников: <b>1</b>", "HTML"),
+        ("group", True, False, False, "🍺 Ты уже записан на сегодняшнюю бойню.\n\nВ 13:37 просто приходи рубиться.\n\n Записано участников: <b>1</b>", "HTML"),
     ],
 )
 async def test_boss_registration_presentation_branches_are_exact(

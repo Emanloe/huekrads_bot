@@ -196,12 +196,12 @@ async def main():
             name="beauty_daily_job",
         )
 
-        # Ежедневный босс в 18:00
+        # Ежедневный босс в 13:37
         application.job_queue.run_daily(
             boss_daily_job,
             time=datetime.time(
-                18,
-                0,
+                13,
+                37,
                 tzinfo=tz,
             ),
             name="boss_daily_job",
