@@ -58,7 +58,6 @@ def _apply_boss_round_result(battle, required_hits):
             continue
 
         attack = participant["attack"]
-        block = participant["block"]
         hit = attack != boss_block
 
         if hit:
@@ -67,6 +66,19 @@ def _apply_boss_round_result(battle, required_hits):
         else:
             participant["misses"] += 1
 
+        if hit and battle["hits"] >= required_hits:
+            participant["rounds_survived"] += 1
+            round_results.append({
+                "participant": participant,
+                "attack": attack,
+                "block": None,
+                "hit": hit,
+                "survived": True,
+                "boss_responded": False,
+            })
+            break
+
+        block = participant["block"]
         survived = block == boss_attack
 
         if survived:
@@ -85,6 +97,7 @@ def _apply_boss_round_result(battle, required_hits):
             "block": block,
             "hit": hit,
             "survived": survived,
+            "boss_responded": True,
         })
 
     alive_after = sum(

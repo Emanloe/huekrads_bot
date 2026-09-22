@@ -362,6 +362,7 @@ def test_apply_boss_round_result_handles_mixed_round():
             "block": "head",
             "hit": True,
             "survived": True,
+            "boss_responded": True,
         },
         {
             "participant": killed,
@@ -369,6 +370,7 @@ def test_apply_boss_round_result_handles_mixed_round():
             "block": "dick",
             "hit": False,
             "survived": False,
+            "boss_responded": True,
         },
     ]
 
@@ -428,6 +430,13 @@ def test_apply_boss_round_result_reports_victory():
     assert result["victory"] is True
     assert result["defeat"] is False
     assert result["outcome"] == "victory"
+    assert result["alive_after"] == 1
+    assert participant["alive"] is True
+    assert participant["blocks"] == 0
+    assert participant["rounds_survived"] == 1
+    assert participant["death_round"] is None
+    assert result["round_results"][0]["boss_responded"] is False
+    assert result["round_results"][0]["block"] is None
 
 
 def test_apply_boss_round_result_reports_defeat():
@@ -443,7 +452,7 @@ def test_apply_boss_round_result_reports_defeat():
     assert result["outcome"] == "defeat"
 
 
-def test_apply_boss_round_result_prefers_victory_when_all_players_die():
+def test_lethal_hit_prevents_boss_response_and_preserves_victory_survivor_invariant():
     from handlers.boss_state import _apply_boss_round_result
 
     participant = make_round_participant(attack="head", block="body")
@@ -452,10 +461,60 @@ def test_apply_boss_round_result_prefers_victory_when_all_players_die():
     result = _apply_boss_round_result(battle, required_hits=5)
 
     assert battle["hits"] == 5
-    assert participant["alive"] is False
+    survivors = [
+        player
+        for player in battle["participants"].values()
+        if player["alive"]
+    ]
+    assert survivors == [participant]
     assert result["victory"] is True
-    assert result["defeat"] is True
+    assert result["defeat"] is False
     assert result["outcome"] == "victory"
+    assert result["alive_after"] == len(survivors) == 1
+    assert participant["blocks"] == 0
+    assert participant["rounds_survived"] == 1
+    assert participant["death_round"] is None
+    assert participant["death_by_zone"] is None
+    assert participant["death_defended_zone"] is None
+    assert participant["death_attack_zone"] is None
+    assert result["round_results"] == [
+        {
+            "participant": participant,
+            "attack": "head",
+            "block": None,
+            "hit": True,
+            "survived": True,
+            "boss_responded": False,
+        }
+    ]
+
+
+def test_lethal_hit_keeps_earlier_deaths_and_stops_later_participant_processing():
+    from handlers.boss_state import _apply_boss_round_result
+
+    already_dead = make_round_participant(alive=False, hits=1)
+    already_dead["death_round"] = 1
+    already_dead["death_by_zone"] = "dick"
+    finisher = make_round_participant(attack="head", block="body")
+    later_survivor = make_round_participant(attack="dick", block="dick")
+    later_before = copy.deepcopy(later_survivor)
+    battle = make_round_battle(
+        {1: already_dead, 2: finisher, 3: later_survivor},
+        hits=4,
+    )
+
+    result = _apply_boss_round_result(battle, required_hits=5)
+
+    assert result["outcome"] == "victory"
+    assert result["alive_after"] == 2
+    assert already_dead["alive"] is False
+    assert already_dead["death_round"] == 1
+    assert already_dead["death_by_zone"] == "dick"
+    assert finisher["alive"] is True
+    assert finisher["hits"] == 1
+    assert finisher["death_round"] is None
+    assert later_survivor == later_before
+    assert [entry["participant"] for entry in result["round_results"]] == [finisher]
 
 
 def test_apply_boss_round_result_preserves_identity_and_unrelated_fields():

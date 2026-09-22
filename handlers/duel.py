@@ -2556,19 +2556,27 @@ async def _boss_resolve_round(
         # Это не даёт второму callback/таймеру разрешить тот же раунд.
         boss_attack = battle["boss_attack"]
         boss_block = battle["boss_block"]
+        projected_hits = battle["hits"]
 
         for participant in battle["participants"].values():
             if not participant["alive"]:
                 continue
 
             attack = participant.get("attack")
-            block = participant.get("block")
 
             # Защита от старого/битого таймера: зазевавшемуся
             # участнику всё равно назначаем ход.
             if attack not in BOSS_ZONES:
                 attack = _boss_auto_zone()
                 participant["attack"] = attack
+
+            if attack != boss_block:
+                projected_hits += 1
+
+                if projected_hits >= BOSS_REQUIRED_HITS:
+                    break
+
+            block = participant.get("block")
 
             if block not in BOSS_ZONES:
                 block = _boss_auto_zone()
@@ -2589,29 +2597,48 @@ async def _boss_resolve_round(
                 if participant_result["hit"]
                 else "boss.round.attack_result.miss"
             )
-            block_result = get_text(
-                "boss.round.block_result.survived"
-                if participant_result["survived"]
-                else "boss.round.block_result.dead"
-            )
 
             title = _boss_player_title(participant)
 
-            results.append(
-                get_text(
-                    "boss.round.participant_result",
-                    title=title,
-                    attack_zone=BOSS_ZONE_NAMES[attack],
-                    attack_result=attack_result,
-                    block_zone=BOSS_ZONE_NAMES[block],
-                    block_result=block_result,
+            if participant_result["boss_responded"]:
+                block_result = get_text(
+                    "boss.round.block_result.survived"
+                    if participant_result["survived"]
+                    else "boss.round.block_result.dead"
                 )
-            )
+                results.append(
+                    get_text(
+                        "boss.round.participant_result",
+                        title=title,
+                        attack_zone=BOSS_ZONE_NAMES[attack],
+                        attack_result=attack_result,
+                        block_zone=BOSS_ZONE_NAMES[block],
+                        block_result=block_result,
+                    )
+                )
+            else:
+                results.append(
+                    get_text(
+                        "boss.round.finishing_participant_result",
+                        title=title,
+                        attack_zone=BOSS_ZONE_NAMES[attack],
+                        attack_result=attack_result,
+                    )
+                )
 
         alive_after = round_result["alive_after"]
 
+        boss_responded = any(
+            participant_result["boss_responded"]
+            for participant_result in round_result["round_results"]
+        )
+        summary_key = (
+            "boss.round.finishing_summary"
+            if round_result["victory"] and not boss_responded
+            else "boss.round.summary"
+        )
         text = get_text(
-            "boss.round.summary",
+            summary_key,
             round=battle["round"],
             boss_attack=BOSS_ZONE_NAMES[boss_attack],
             boss_block=BOSS_ZONE_NAMES[boss_block],

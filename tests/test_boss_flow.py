@@ -832,7 +832,7 @@ async def test_boss_block_phase_timer_auto_chooses_then_awaits_resolver(
             0,
         ),
         (
-            "victory_and_defeat",
+            "lethal_hit_with_unblocked_boss_attack",
             4,
             [make_participant(1, attack="head", block="body")],
             5,
@@ -900,9 +900,10 @@ async def test_boss_resolve_round_mutations_and_outcome_precedence(
     elif outcome == "victory":
         participant = participants[0]
         assert participant["hits"] == 1
-        assert participant["blocks"] == 1
+        assert participant["blocks"] == 0
         assert participant["rounds_survived"] == 1
         assert participant["alive"] is True
+        assert participant["death_round"] is None
         finish_victory.assert_awaited_once_with(fake_context, chat_id)
         finish_defeat.assert_not_awaited()
         start_round.assert_not_awaited()
@@ -920,11 +921,106 @@ async def test_boss_resolve_round_mutations_and_outcome_precedence(
     else:
         participant = participants[0]
         assert participant["hits"] == 1
-        assert participant["alive"] is False
-        assert participant["death_round"] == 6
+        assert participant["blocks"] == 0
+        assert participant["rounds_survived"] == 1
+        assert participant["alive"] is True
+        assert participant["death_round"] is None
+        assert participant["death_by_zone"] is None
+        assert participant["death_defended_zone"] is None
+        assert participant["death_attack_zone"] is None
         finish_victory.assert_awaited_once_with(fake_context, chat_id)
         finish_defeat.assert_not_awaited()
         start_round.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lethal_hit_skips_boss_block_fallback_rng_and_reports_real_survivor(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    chat_id = -721
+    fallen = make_participant(2, alive=False)
+    fallen["death_round"] = 4
+    fallen["death_by_zone"] = "dick"
+    fallen["death_defended_zone"] = "head"
+    fallen["death_attack_zone"] = "body"
+    finisher = make_participant(1, attack="head", block=None)
+    battle = make_battle(
+        [fallen, finisher],
+        phase="block",
+        round_num=5,
+        hits=4,
+        boss_attack="head",
+        boss_block="body",
+    )
+    duel.ACTIVE_BOSS_BATTLES[chat_id] = battle
+    finish_victory = AsyncMock()
+    auto_zone = Mock(
+        side_effect=AssertionError("dead boss requested offensive/death fallback RNG")
+    )
+    monkeypatch.setattr(duel, "_boss_finish_victory", finish_victory)
+    monkeypatch.setattr(duel, "_boss_finish_defeat", AsyncMock())
+    monkeypatch.setattr(duel, "_boss_start_round", AsyncMock())
+    monkeypatch.setattr(duel, "_boss_auto_zone", auto_zone)
+    monkeypatch.setattr(duel.asyncio, "sleep", AsyncMock())
+
+    await duel._boss_resolve_round(fake_context, chat_id)
+
+    survivors = duel._boss_alive_players(battle)
+    assert battle["hits"] == duel.BOSS_REQUIRED_HITS
+    assert survivors == [finisher]
+    assert fallen["alive"] is False
+    assert fallen["death_round"] == 4
+    assert finisher["block"] is None
+    assert finisher["alive"] is True
+    assert finisher["death_round"] is None
+    auto_zone.assert_not_called()
+    finish_victory.assert_awaited_once_with(fake_context, chat_id)
+
+    report = duel._boss_final_report(battle, victory=True)
+    assert "Отряд: <b>2</b> — выжило <b>1</b>, погибло <b>1</b>." in report
+    round_text = fake_context.bot.edit_message_text.await_args.kwargs["text"]
+    assert "Босс пал до ответного удара" in round_text
+    assert "Босс атаковал" not in round_text
+
+
+@pytest.mark.asyncio
+async def test_nonlethal_round_preserves_attack_then_block_fallback_rng_order(
+    monkeypatch,
+    fake_context,
+):
+    from handlers import duel
+
+    chat_id = -722
+    participant = make_participant(1, attack=None, block=None)
+    battle = make_battle(
+        [participant],
+        phase="block",
+        hits=0,
+        boss_attack="head",
+        boss_block="body",
+    )
+    duel.ACTIVE_BOSS_BATTLES[chat_id] = battle
+    auto_zone = Mock(side_effect=["head", "dick"])
+    start_round = AsyncMock()
+    finish_defeat = AsyncMock()
+    monkeypatch.setattr(duel, "_boss_auto_zone", auto_zone)
+    monkeypatch.setattr(duel, "_boss_start_round", start_round)
+    monkeypatch.setattr(duel, "_boss_finish_defeat", finish_defeat)
+    monkeypatch.setattr(duel.asyncio, "sleep", AsyncMock())
+
+    await duel._boss_resolve_round(fake_context, chat_id)
+
+    assert auto_zone.call_args_list == [call(), call()]
+    assert participant["attack"] == "head"
+    assert participant["block"] == "dick"
+    assert battle["hits"] == 1
+    assert participant["alive"] is False
+    assert participant["death_round"] == 1
+    start_round.assert_not_awaited()
+    finish_defeat.assert_awaited_once_with(fake_context, chat_id)
 
 
 @pytest.mark.asyncio

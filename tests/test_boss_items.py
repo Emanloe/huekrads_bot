@@ -78,6 +78,47 @@ def test_boss_loot_hit_selects_one_living_survivor_then_full_catalog(monkeypatch
     )
 
 
+def test_boss_loot_can_go_to_last_gnome_after_his_lethal_hit(monkeypatch):
+    from handlers import duel
+    from handlers.boss_state import _apply_boss_round_result
+
+    finisher = participant(7, title="finisher")
+    finisher.update({
+        "attack": "head",
+        "block": "body",
+        "hits": 0,
+        "misses": 0,
+        "blocks": 0,
+        "rounds_survived": 0,
+        "death_round": None,
+        "death_by_zone": None,
+        "death_defended_zone": None,
+        "death_attack_zone": None,
+    })
+    current_battle = {
+        "participants": {finisher["tg_user"].id: finisher},
+        "hits": 4,
+        "round": 5,
+        "phase": "block",
+        "boss_attack": "head",
+        "boss_block": "body",
+    }
+    item = {"id": "terminal_loot", "name": "Terminal Loot"}
+    add = Mock(return_value={"id": 101})
+    monkeypatch.setattr(duel, "DUEL_ITEMS", (item,))
+    monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
+    monkeypatch.setattr(duel.random, "choice", Mock(side_effect=lambda values: values[0]))
+    monkeypatch.setattr(duel, "add_duel_inventory_item", add)
+
+    result = _apply_boss_round_result(current_battle, required_hits=5)
+    loot_text = duel._maybe_award_boss_item(-30, current_battle)
+
+    assert result["outcome"] == "victory"
+    assert finisher["alive"] is True
+    add.assert_called_once_with(-30, 7, "terminal_loot")
+    assert "finisher" in loot_text
+
+
 def test_boss_loot_uses_the_shared_nonempty_collectible_catalog():
     from handlers import duel, duel_items
 
