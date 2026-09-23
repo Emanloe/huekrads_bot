@@ -60,6 +60,7 @@ DUEL_ITEM_STEAL_CHANCE = 0.05  # 5% при сработавшей краже х�
 DUEL_ITEM_DROP_CHANCE = 0.50  # 50% потерять предмет из непустого инвентаря
 BOSS_ITEM_DROP_CHANCE = 0.50  # 50% на один предмет одному выжившему
 DUEL_ITEM_EVENT_CHANCE = 0.10  # 10% на каждую почасовую проверку чата
+DIG_FIND_CHANCE = 0.20
 DUEL_ITEM_EVENT_CHECK_MINUTES = 60
 DUEL_WIN_CHANCE = 0.50    # 50%
 TOP_SORT_BY = "wins"      # "wins" | "net_wins" | "points"

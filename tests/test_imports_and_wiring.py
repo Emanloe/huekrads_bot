@@ -65,6 +65,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("duel", "Гномья дуэль на ножах"),
         ("name", "Назвать своего гнома"),
         ("summary", "Месячная статистика чата"),
+        ("dig", "Копать за 10 очков"),
         ("duel_stats", "Статистика дуэлей"),
         ("duel_top", "Топ дуэлянтов"),
         ("duel_delete", "Удалить игрока дуэлей"),
@@ -83,7 +84,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
     class FakeApplication:
         job_queue = None
 
-        def add_handler(self, handler):
+        def add_handler(self, handler, group=0):
             registered_handlers.append(handler)
 
         def add_error_handler(self, _handler):
@@ -116,6 +117,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
         (bot.gnomed_command, "gnomed"),
         (bot.name_command, "name"),
         (bot.summary_command, "summary"),
+        (bot.dig_command, "dig"),
     ):
         handlers = [
             item
@@ -165,7 +167,7 @@ async def test_registered_duel_stats_handler_sends_virtual_base_inventory(
     class FakeApplication:
         job_queue = None
 
-        def add_handler(self, handler):
+        def add_handler(self, handler, group=0):
             registered_handlers.append(handler)
 
         def add_error_handler(self, _handler):
@@ -275,7 +277,7 @@ async def test_boss_daily_job_is_scheduled_at_1337_moscow(monkeypatch):
     class FakeApplication:
         job_queue = FakeJobQueue()
 
-        def add_handler(self, _handler):
+        def add_handler(self, _handler, group=0):
             pass
 
         def add_error_handler(self, _handler):
@@ -340,7 +342,7 @@ async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
     class FakeApplication:
         job_queue = FakeJobQueue()
 
-        def add_handler(self, _handler):
+        def add_handler(self, _handler, group=0):
             pass
 
         def add_error_handler(self, _handler):
@@ -385,7 +387,7 @@ async def test_duel_item_callback_handler_is_registered(monkeypatch):
     class FakeApplication:
         job_queue = None
 
-        def add_handler(self, handler):
+        def add_handler(self, handler, group=0):
             handlers.append(handler)
 
         def add_error_handler(self, _handler):
@@ -429,7 +431,7 @@ async def test_registered_hyperborean_callback_handler_routes_all_supported_payl
     class FakeApplication:
         job_queue = None
 
-        def add_handler(self, handler):
+        def add_handler(self, handler, group=0):
             registered_handlers.append(handler)
 
         def add_error_handler(self, _handler):

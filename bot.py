@@ -92,6 +92,8 @@ from handlers.duel_items import (
 )
 from handlers.duel_name import name_command
 from handlers.monthly_summary import monthly_summary_job, summary_command
+from handlers.elite_ball import elite_ball_callback, elite_ball_question, ELITE_BALL_CALLBACK_DATA
+from handlers.dig import dig_command
 
 
 logging.basicConfig(
@@ -116,6 +118,7 @@ BOT_COMMANDS = [
     BotCommand("duel", get_text("menu.commands.duel")),
     BotCommand("name", get_text("menu.commands.name")),
     BotCommand("summary", get_text("menu.commands.summary")),
+    BotCommand("dig", get_text("menu.commands.dig")),
     BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
     BotCommand("duel_top", get_text("menu.commands.duel_top")),
     BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
@@ -343,6 +346,13 @@ async def main():
         )
     )
 
+    application.add_handler(
+        CallbackQueryHandler(
+            elite_ball_callback,
+            pattern=rf"^{ELITE_BALL_CALLBACK_DATA}$",
+        )
+    )
+
     # ============================================================
     # DUEL
     # ============================================================
@@ -356,6 +366,7 @@ async def main():
 
     application.add_handler(CommandHandler("name", name_command))
     application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("dig", dig_command))
 
     application.add_handler(
         CallbackQueryHandler(
@@ -450,6 +461,11 @@ async def main():
     # ============================================================
     # TEXT TRIGGERS
     # ============================================================
+
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, elite_ball_question),
+        group=-1,
+    )
 
     application.add_handler(
         MessageHandler(

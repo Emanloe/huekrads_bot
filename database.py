@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from html import escape
 from zoneinfo import ZoneInfo
 import pytz
-from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN
+from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN, DIG_FIND_CHANCE
 from text_resources import get_text
 
 DB_NAME = "bot_database.db"
@@ -23,6 +23,14 @@ def moscow_month_key(when: datetime | None = None) -> str:
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("Month key requires a timezone-aware instant")
     return instant.astimezone(ZoneInfo(DUEL_TIMEZONE)).strftime("%Y-%m")
+
+
+def moscow_date_key(when: datetime | None = None) -> str:
+    """Calendar date of an instant in the game's Moscow timezone."""
+    instant = when if when is not None else _utc_now()
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("Dig date requires a timezone-aware instant")
+    return instant.astimezone(ZoneInfo(DUEL_TIMEZONE)).date().isoformat()
 
 
 @contextmanager
@@ -247,6 +255,16 @@ def init_db():
             CREATE UNIQUE INDEX IF NOT EXISTS idx_duel_item_events_active_chat
             ON duel_item_events (chat_id)
             WHERE claimed = 0
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS duel_dig_daily (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                moscow_date TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (chat_id, user_id, moscow_date)
+            )
         """)
 
         cursor.execute("""
@@ -892,6 +910,147 @@ def restore_unpublished_duel_drop(drop: dict, message_id: int | None = None) -> 
         )
         if cursor.rowcount != 1:
             raise RuntimeError("Unpublished duel drop disappeared during restoration")
+        return True
+
+
+def get_duel_dig_attempts(chat_id: int, user_id: int, date_key: str | None = None) -> int:
+    date_key = date_key or moscow_date_key()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT attempts FROM duel_dig_daily
+            WHERE chat_id = ? AND user_id = ? AND moscow_date = ?
+            """,
+            (chat_id, user_id, date_key),
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def try_duel_dig(chat_id: int, user_id: int, roll, item_selector) -> tuple[str, dict | None]:
+    """Pay for one dig, and optionally reserve its exact loot, in one transaction."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        date_key = moscow_date_key()
+        cursor.execute(
+            """
+            SELECT points, username, display_name, dwarf_name FROM duel_users
+            WHERE chat_id = ? AND user_id = ?
+            """,
+            (chat_id, user_id),
+        )
+        user = cursor.fetchone()
+        if user is None:
+            return "not_registered", None
+
+        cursor.execute(
+            "SELECT 1 FROM duel_item_events WHERE chat_id = ? AND claimed = 0",
+            (chat_id,),
+        )
+        if cursor.fetchone():
+            return "active_event", None
+
+        cursor.execute(
+            """
+            SELECT attempts FROM duel_dig_daily
+            WHERE chat_id = ? AND user_id = ? AND moscow_date = ?
+            """,
+            (chat_id, user_id, date_key),
+        )
+        row = cursor.fetchone()
+        attempts = row[0] if row else 0
+        if attempts >= 5:
+            return "daily_limit", None
+        if user[0] < 10:
+            return "insufficient_points", None
+
+        found = roll() < DIG_FIND_CHANCE
+        item_id = item_selector() if found else None
+        event_id = None
+        if found:
+            if item_id in ("oiled_vest", "knife"):
+                raise ValueError("Permanent base items cannot be dug up")
+            cursor.execute(
+                "INSERT OR IGNORE INTO duel_item_events (chat_id, item_id) VALUES (?, ?)",
+                (chat_id, item_id),
+            )
+            if cursor.rowcount != 1:
+                return "active_event", None
+            event_id = cursor.lastrowid
+
+        cursor.execute(
+            """
+            UPDATE duel_users SET points = points - 10
+            WHERE chat_id = ? AND user_id = ? AND points >= 10
+            """,
+            (chat_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Dig points changed during locked transaction")
+        cursor.execute(
+            """
+            INSERT INTO duel_dig_daily (chat_id, user_id, moscow_date, attempts)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(chat_id, user_id, moscow_date) DO UPDATE SET
+                attempts = attempts + 1 WHERE attempts < 5
+            """,
+            (chat_id, user_id, date_key),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Dig daily limit changed during locked transaction")
+
+        return ("found" if found else "miss"), {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "date_key": date_key,
+            "points": user[0] - 10,
+            "remaining": 4 - attempts,
+            "event_id": event_id,
+            "item_id": item_id,
+            "user": {
+                "username": user[1],
+                "display_name": user[2],
+                "dwarf_name": user[3],
+            },
+        }
+
+
+def cancel_unpublished_duel_dig(dig: dict, message_id: int | None = None) -> bool:
+    """Refund one unpublished find without permitting a second refund."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            SELECT 1 FROM duel_item_events
+            WHERE event_id = ? AND chat_id = ? AND item_id = ?
+              AND claimed = 0 AND (message_id IS NULL OR message_id = ?)
+            """,
+            (dig["event_id"], dig["chat_id"], dig["item_id"], message_id),
+        )
+        if not cursor.fetchone():
+            return False
+        cursor.execute(
+            "UPDATE duel_users SET points = points + 10 WHERE chat_id = ? AND user_id = ?",
+            (dig["chat_id"], dig["user_id"]),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Dig user disappeared before refund")
+        cursor.execute(
+            """
+            UPDATE duel_dig_daily SET attempts = attempts - 1
+            WHERE chat_id = ? AND user_id = ? AND moscow_date = ? AND attempts > 0
+            """,
+            (dig["chat_id"], dig["user_id"], dig["date_key"]),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Dig attempt disappeared before refund")
+        cursor.execute(
+            "DELETE FROM duel_item_events WHERE event_id = ?",
+            (dig["event_id"],),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Dig event disappeared before refund")
         return True
 
 

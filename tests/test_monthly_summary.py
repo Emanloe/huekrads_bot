@@ -228,7 +228,7 @@ async def test_monthly_job_wiring_is_once_on_first_day_ten_moscow(monkeypatch, a
     class FakeApplication:
         job_queue = FakeJobQueue()
 
-        def add_handler(self, _handler):
+        def add_handler(self, _handler, group=0):
             pass
 
         def add_error_handler(self, _handler):

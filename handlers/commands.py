@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from datetime import timedelta
 from zoneinfo import ZoneInfo
@@ -16,6 +16,7 @@ from database import (
 )
 from handlers.utils import is_admin, reply_or_send, delete_messages_job
 from text_resources import get_text
+from handlers.elite_ball import elite_ball_button
 
 
 def schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, message):
@@ -36,7 +37,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_or_update_user(update.message.from_user, update.message.chat_id)
-    await reply_or_send(update, context, get_text("commands.start.greeting"))
+    await reply_or_send(
+        update,
+        context,
+        get_text("commands.start.greeting"),
+        reply_markup=InlineKeyboardMarkup([[elite_ball_button()]]),
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
