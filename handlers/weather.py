@@ -286,18 +286,8 @@ async def weather_stub_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pass
 
 
-async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Инлайн: город пишется в поле ввода после @бота, в чат уходит только выбранный результат."""
-    inline_query = update.inline_query
-    if not inline_query:
-        return
-
-    city = (inline_query.query or "").strip()
-    if not city:
-        # Пустой запрос: без результатов, иначе «подсказка» уходит в чат как сообщение
-        await inline_query.answer([], cache_time=1, is_personal=True)
-        return
-
+def build_weather_inline_result(city: str, context: ContextTypes.DEFAULT_TYPE):
+    """Build one weather choice without answering the inline query."""
     try:
         fetched = _fetch_weather_html(city)
         text, api_city_name = fetched if fetched else (None, "")
@@ -305,20 +295,13 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
         photo_id = None if gif_id else _bonus_photo(city, api_city_name)
 
         if fetched is None and not gif_id:
-            await inline_query.answer(
-                [
-                    InlineQueryResultArticle(
-                        id=_inline_id(),
-                        title=get_text("weather.inline.not_found.title", city=city),
-                        input_message_content=InputTextMessageContent(
-                            get_text("weather.inline.not_found.message", city=city)
-                        ),
-                    )
-                ],
-                cache_time=5,
-                is_personal=True,
-            )
-            return
+            return InlineQueryResultArticle(
+                id=_inline_id(),
+                title=get_text("weather.inline.not_found.title", city=city),
+                input_message_content=InputTextMessageContent(
+                    get_text("weather.inline.not_found.message", city=city)
+                ),
+            ), 5
 
         display_name = api_city_name or city
         if not text:
@@ -348,19 +331,26 @@ async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYP
                 title=get_text("weather.inline.result.title", city=display_name),
                 input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
             )
-        await inline_query.answer([result], cache_time=1, is_personal=True)
+        return result, 1
 
     except Exception:
-        await inline_query.answer(
-            [
-                InlineQueryResultArticle(
-                    id=_inline_id(),
-                    title=get_text("weather.inline.error.title"),
-                    input_message_content=InputTextMessageContent(
-                        get_text("weather.inline.error.message")
-                    ),
-                )
-            ],
-            cache_time=1,
-            is_personal=True,
-        )
+        return InlineQueryResultArticle(
+            id=_inline_id(),
+            title=get_text("weather.inline.error.title"),
+            input_message_content=InputTextMessageContent(
+                get_text("weather.inline.error.message")
+            ),
+        ), 1
+
+
+async def weather_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Compatibility weather-only entry point; bot wiring uses the dispatcher."""
+    inline_query = update.inline_query
+    if not inline_query:
+        return
+    city = (inline_query.query or "").strip()
+    if not city:
+        await inline_query.answer([], cache_time=1, is_personal=True)
+        return
+    result, cache_time = build_weather_inline_result(city, context)
+    await inline_query.answer([result], cache_time=cache_time, is_personal=True)

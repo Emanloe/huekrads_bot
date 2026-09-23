@@ -1538,7 +1538,8 @@ async def duel_command(
         chat_id,
     )
 
-    if initiator["dick_stolen_today"]:
+    initiator_ineligibility = _get_duel_participant_ineligibility(initiator)
+    if initiator_ineligibility == "no_dick":
         await send_and_schedule(
             update,
             context,
@@ -1556,6 +1557,14 @@ async def duel_command(
     # --------------------------------------------------------
 
     if not target_username:
+
+        if initiator_ineligibility == "no_points":
+            await send_and_schedule(
+                update,
+                context,
+                get_text("duel.admission.initiator.no_points"),
+            )
+            return
 
         top_list = get_duel_top(
             chat_id=chat_id,

@@ -67,6 +67,7 @@ from handlers.weather import (
     weather_chosen_inline_result,
     weather_stub_callback,
 )
+from handlers.inline_query import inline_query_dispatch
 
 from handlers.hyperborean_event import HYPERBOREAN_HUY_CHECK_MINUTES
 from text_resources import get_text
@@ -92,7 +93,7 @@ from handlers.duel_items import (
 )
 from handlers.duel_name import name_command
 from handlers.monthly_summary import monthly_summary_job, summary_command
-from handlers.elite_ball import elite_ball_callback, elite_ball_question, ELITE_BALL_CALLBACK_DATA
+from handlers.elite_ball import ball_command, elite_ball_callback, elite_ball_question, ELITE_BALL_CALLBACK_DATA
 from handlers.dig import dig_command
 
 
@@ -119,6 +120,7 @@ BOT_COMMANDS = [
     BotCommand("name", get_text("menu.commands.name")),
     BotCommand("summary", get_text("menu.commands.summary")),
     BotCommand("dig", get_text("menu.commands.dig")),
+    BotCommand("ball", get_text("menu.commands.ball")),
     BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
     BotCommand("duel_top", get_text("menu.commands.duel_top")),
     BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
@@ -329,7 +331,7 @@ async def main():
 
     application.add_handler(
         InlineQueryHandler(
-            weather_inline_query
+            inline_query_dispatch
         )
     )
 
@@ -367,6 +369,7 @@ async def main():
     application.add_handler(CommandHandler("name", name_command))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("dig", dig_command))
+    application.add_handler(CommandHandler("ball", ball_command))
 
     application.add_handler(
         CallbackQueryHandler(

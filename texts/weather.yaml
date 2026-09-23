@@ -62,7 +62,7 @@ forecast:
     💨 Ветер: <b>{wind_speed} м/с</b>
 inline:
   not_found:
-    title: Город «{city}» не найден
+    title: "Погода: {city}"
     message: ❌ Город '{city}' не найден.
   heading: <b>Погода в {city}</b>
   result:

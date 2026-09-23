@@ -66,6 +66,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("name", "Назвать своего гнома"),
         ("summary", "Месячная статистика чата"),
         ("dig", "Копать за 10 очков"),
+        ("ball", "Активировать элитный мячик"),
         ("duel_stats", "Статистика дуэлей"),
         ("duel_top", "Топ дуэлянтов"),
         ("duel_delete", "Удалить игрока дуэлей"),

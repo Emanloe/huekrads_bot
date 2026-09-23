@@ -108,7 +108,7 @@ async def test_weather_inline_not_found_preserves_title_and_message(monkeypatch,
     await weather.weather_inline_query(SimpleNamespace(inline_query=inline_query), fake_context)
 
     result = inline_query.answer.await_args.args[0][0]
-    assert result.title == "Город «Тестоград» не найден"
+    assert result.title == "Погода: Тестоград"
     assert result.input_message_content.message_text == "❌ Город 'Тестоград' не найден."
 
 

@@ -2,13 +2,14 @@
 
 import random
 
-from telegram import InlineKeyboardButton, Update
+from telegram import InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from text_resources import get_text, get_text_list
 
 
 ELITE_BALL_CALLBACK_DATA = "elite_ball_ask"
+ELITE_BALL_INLINE_RESULT_ID = "elite_ball_inline"
 _WAITING_KEY = "elite_ball_waiting"
 
 
@@ -16,6 +17,28 @@ def elite_ball_button() -> InlineKeyboardButton:
     return InlineKeyboardButton(
         get_text("elite_ball.button"), callback_data=ELITE_BALL_CALLBACK_DATA,
     )
+
+
+def build_elite_ball_inline_result() -> InlineQueryResultArticle:
+    return InlineQueryResultArticle(
+        id=ELITE_BALL_INLINE_RESULT_ID,
+        title=get_text("elite_ball.button"),
+        input_message_content=InputTextMessageContent(get_text("elite_ball.inline_message")),
+    )
+
+
+async def _activate_ball(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> None:
+    context.bot_data.setdefault(_WAITING_KEY, set()).add((chat_id, user_id))
+    await context.bot.send_message(chat_id=chat_id, text=get_text("elite_ball.waiting"))
+
+
+async def ball_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Activate from a real chat update after the user chooses an inline result."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None or getattr(user, "is_bot", False):
+        return
+    await _activate_ball(context, chat.id, user.id)
 
 
 async def elite_ball_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -29,8 +52,7 @@ async def elite_ball_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     await query.answer()
-    context.bot_data.setdefault(_WAITING_KEY, set()).add((chat.id, query.from_user.id))
-    await context.bot.send_message(chat_id=chat.id, text=get_text("elite_ball.waiting"))
+    await _activate_ball(context, chat.id, query.from_user.id)
 
 
 async def elite_ball_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
