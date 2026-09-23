@@ -1,13 +1,19 @@
 import random
+import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 import pytz
 from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN
 from text_resources import get_text
 
 DB_NAME = "bot_database.db"
+BIRTHDAY_COOLDOWN = timedelta(days=365)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @contextmanager
@@ -64,6 +70,7 @@ def get_dick_steal_chance(daily_wins: int) -> float:
 def init_db():
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -74,9 +81,20 @@ def init_db():
                 beauty_count INTEGER DEFAULT 0,
                 is_bot INTEGER DEFAULT 0,
                 birthdate TEXT,
+                birthday_changed_at TEXT,
                 PRIMARY KEY (user_id, chat_id)
             )
         """)
+
+        cursor.execute("PRAGMA table_info(users)")
+        user_columns = {column[1] for column in cursor.fetchall()}
+        if "birthday_changed_at" not in user_columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN birthday_changed_at TEXT")
+            cursor.execute(
+                """UPDATE users SET birthday_changed_at = ?
+                   WHERE birthdate IS NOT NULL AND TRIM(birthdate) <> ''""",
+                (_utc_now().isoformat(timespec="microseconds"),),
+            )
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pizda_candidates (
@@ -919,18 +937,67 @@ def save_or_update_user(user, chat_id: int):
         """, (user.id, chat_id, clean_username, display_name, today_str))
 
 
+def valid_birthdate(bday_str: str) -> bool:
+    """Accept a real DD.MM or DD.MM.YYYY date; 29.02 is valid without a year."""
+    if not isinstance(bday_str, str):
+        return False
+    match = re.fullmatch(r"([0-9]{2})\.([0-9]{2})(?:\.([0-9]{4}))?", bday_str)
+    if not match:
+        return False
+    day, month, year = match.groups()
+    try:
+        date(int(year) if year else 2000, int(month), int(day))
+    except ValueError:
+        return False
+    return True
+
+
+def set_user_birthdate_with_cooldown(
+    chat_id: int, user_id: int, bday_str: str,
+) -> tuple[str, datetime | None]:
+    """Serialize the cooldown check and birthday update for one chat user."""
+    if not valid_birthdate(bday_str):
+        return "invalid", None
+
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT birthday_changed_at FROM users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone()
+        if row is None:
+            return "not_found", None
+
+        now = _utc_now()
+        if row[0]:
+            changed_at = datetime.fromisoformat(row[0])
+            if changed_at.tzinfo is None:
+                changed_at = changed_at.replace(tzinfo=timezone.utc)
+            next_change = changed_at.astimezone(timezone.utc) + BIRTHDAY_COOLDOWN
+            if now < next_change:
+                return "cooldown", next_change
+
+        conn.execute(
+            """UPDATE users SET birthdate = ?, birthday_changed_at = ?
+               WHERE chat_id = ? AND user_id = ?""",
+            (bday_str, now.isoformat(timespec="microseconds"), chat_id, user_id),
+        )
+        return "success", None
+
+
 def save_custom_birthdate(chat_id: int, username: str, bday_str: str) -> bool:
+    """Compatibility wrapper for the historical username-based DB API."""
     clean_username = _clean_username(username)
     if not clean_username:
         return False
     with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE users 
-            SET birthdate = ? 
-            WHERE chat_id = ? AND (LOWER(username) = LOWER(?) OR LOWER(first_name) = LOWER(?))
-        """, (bday_str, chat_id, clean_username, clean_username))
-        return cursor.rowcount > 0
+        row = conn.execute(
+            """SELECT user_id FROM users WHERE chat_id = ?
+               AND (LOWER(username) = LOWER(?) OR LOWER(first_name) = LOWER(?))
+               LIMIT 1""",
+            (chat_id, clean_username, clean_username),
+        ).fetchone()
+    return bool(row and set_user_birthdate_with_cooldown(chat_id, row[0], bday_str)[0] == "success")
 
 
 def get_user_birthdate_from_db(user_id: int, chat_id: int):

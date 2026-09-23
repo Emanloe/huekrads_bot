@@ -20,9 +20,10 @@ force_pidor:
   no_candidates: Нет кандидатов для проведения игры.
   winner: Пидор дня — {username}! Он был пидором уже {count} раз(а).
 birthday:
-  usage: "Использование: `/setbday @username DD.MM`"
-  saved: День рождения для {username} успешно сохранён ({birthdate}).
-  missing: Пользователь {username} не найден в базе данных этого чата.
+  usage: "Использование: /setbday ДД.ММ или /setbday ДД.ММ.ГГГГ"
+  saved: Твой день рождения сохранён ({birthdate}).
+  missing: Не удалось найти твою запись в этом чате.
+  cooldown: "День рождения можно менять только раз в 365 дней. Следующая смена доступна: {date} МСК."
 toggle_forward:
   status:
     enabled: включен

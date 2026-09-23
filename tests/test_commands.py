@@ -45,21 +45,24 @@ async def test_donate_command_replies_with_yaml_text(fake_context, tg_user):
 
 
 @pytest.mark.asyncio
-async def test_set_bday_command_preserves_dynamic_reply(monkeypatch, fake_context, tg_user):
+async def test_set_bday_command_saves_own_date(monkeypatch, temp_database, fake_context, tg_user):
     from handlers import commands
+    import database
 
     message = _message(tg_user)
-    fake_context.args = ["@alice", "26.01"]
+    fake_context.args = ["26.01"]
     monkeypatch.setattr(commands, "schedule_auto_delete", lambda *_args: None)
-    monkeypatch.setattr(commands, "is_admin", lambda _user_id: True)
-    monkeypatch.setattr(commands, "save_custom_birthdate", lambda *_args: True)
 
-    await commands.set_bday_command(SimpleNamespace(message=message), fake_context)
+    await commands.set_bday_command(
+        SimpleNamespace(message=message, effective_user=tg_user, effective_chat=SimpleNamespace(id=-44)),
+        fake_context,
+    )
 
     message.reply_text.assert_awaited_once_with(
-        "День рождения для alice успешно сохранён (26.01).",
+        "Твой день рождения сохранён (26.01).",
         parse_mode=None,
     )
+    assert database.get_user_birthdate_from_db(tg_user.id, -44) == "26.01"
 
 
 @pytest.mark.asyncio

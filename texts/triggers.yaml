@@ -1,5 +1,7 @@
 birthday:
   registration:
+    self_only: Можно указать только свой день рождения.
+    invalid: Укажи существующую дату в формате ДД.ММ или ДД.ММ.ГГГГ.
     saved: |-
       Запомнил! День рождения для {target_username}: {bday_str}
     missing_user: Пользователь {target_username} ещё не писал в этом чате, не могу сохранить дату.

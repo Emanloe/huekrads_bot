@@ -2,16 +2,17 @@ import json
 import re
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import OREL_GIF_IDS, BIRTHDAY_GIF_ID, LET_DO_STICKER_IDS
+from config import OREL_GIF_IDS, BIRTHDAY_GIF_ID, LET_DO_STICKER_IDS, DUEL_TIMEZONE
 from database import (
     save_or_update_user,
-    save_custom_birthdate,
+    set_user_birthdate_with_cooldown,
     get_user_birthdate_from_db,
     mark_pizda_candidate_used,
     is_forward_reply_enabled,
@@ -92,23 +93,36 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if match:
         target_username, bday_str = match.groups()
 
-        if save_custom_birthdate(chat_id, target_username, bday_str):
-            await update.message.reply_text(
-                get_text(
+        if target_username[1:].casefold() != (update.message.from_user.username or "").casefold():
+            response = get_text("triggers.birthday.registration.self_only")
+        else:
+            status, next_change = set_user_birthdate_with_cooldown(chat_id, user_id, bday_str)
+            if status == "success":
+                response = get_text(
                     "triggers.birthday.registration.saved",
                     target_username=target_username,
                     bday_str=bday_str,
-                ),
-                reply_to_message_id=update.message.message_id,
-            )
-        else:
-            await update.message.reply_text(
-                get_text(
+                )
+            elif status == "cooldown":
+                next_moscow = next_change.astimezone(ZoneInfo(DUEL_TIMEZONE))
+                if next_moscow.microsecond:
+                    next_moscow = (next_moscow + timedelta(seconds=1)).replace(microsecond=0)
+                response = get_text(
+                    "commands.birthday.cooldown",
+                    date=next_moscow.strftime("%d.%m.%Y %H:%M:%S"),
+                )
+            elif status == "invalid":
+                response = get_text("triggers.birthday.registration.invalid")
+            else:
+                response = get_text(
                     "triggers.birthday.registration.missing_user",
                     target_username=target_username,
-                ),
-                reply_to_message_id=update.message.message_id,
-            )
+                )
+
+        await update.message.reply_text(
+            response,
+            reply_to_message_id=update.message.message_id,
+        )
 
         return
 

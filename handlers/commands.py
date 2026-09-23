@@ -1,10 +1,14 @@
 from telegram import Update
 from telegram.ext import ContextTypes
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+from config import DUEL_TIMEZONE
 from database import (
     get_top_beauties,
     pick_beauty_of_the_day,
     save_or_update_user,
-    save_custom_birthdate,
+    set_user_birthdate_with_cooldown,
+    valid_birthdate,
     is_forward_reply_enabled,
     set_forward_reply_enabled,
     is_auto_delete_enabled,
@@ -108,42 +112,43 @@ async def force_pidor_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def set_bday_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Установка дня рождения пользователя: /setbday @username DD.MM"""
-    if not update.message or not update.message.from_user:
+    """Set only the command author's birthday, at most once per 365 days."""
+    if not update.message or not update.effective_user or not update.effective_chat:
         return
 
     schedule_auto_delete(context, update.message)
-    if not is_admin(update.message.from_user.id):
-        await reply_or_send(
-            update, context, get_text("commands.admin.only")
-        )
-        return
-
-    args = context.args
-    if len(args) < 2:
+    args = context.args or []
+    if len(args) != 1 or not valid_birthdate(args[0]):
         await reply_or_send(
             update,
             context,
             get_text("commands.birthday.usage"),
-            parse_mode="Markdown",
         )
         return
 
-    username = args[0].lstrip("@")
-    bday_str = args[1]
-
-    updated = save_custom_birthdate(update.message.chat_id, username, bday_str)
-    if updated:
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    save_or_update_user(user, chat_id)
+    status, next_change = set_user_birthdate_with_cooldown(chat_id, user.id, args[0])
+    if status == "success":
         await reply_or_send(
             update,
             context,
-            get_text("commands.birthday.saved", username=username, birthdate=bday_str),
+            get_text("commands.birthday.saved", birthdate=args[0]),
         )
-    else:
+    elif status == "cooldown":
+        next_moscow = next_change.astimezone(ZoneInfo(DUEL_TIMEZONE))
+        if next_moscow.microsecond:
+            next_moscow = (next_moscow + timedelta(seconds=1)).replace(microsecond=0)
+        await reply_or_send(
+            update, context,
+            get_text("commands.birthday.cooldown", date=next_moscow.strftime("%d.%m.%Y %H:%M:%S")),
+        )
+    elif status == "not_found":
         await reply_or_send(
             update,
             context,
-            get_text("commands.birthday.missing", username=username),
+            get_text("commands.birthday.missing"),
         )
 
 
