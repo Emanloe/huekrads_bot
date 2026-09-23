@@ -180,10 +180,10 @@ def test_formatter_plain_and_html_safety(temp_database):
         "set", "<b>ХУЙ</b> & Гном"
     )
     participant = db.get_or_create_duel_user(person, CHAT_ID)
-    assert db.format_user_title_plain(participant) == "<Eman & Loe> (<b>ХУЙ</b> & Гном)"
+    assert db.format_user_title_plain(participant) == "<b>ХУЙ</b> & Гном (<Eman & Loe>)"
     assert db.format_user_title_plain(participant, include_dwarf_name=False) == "<Eman & Loe>"
     assert db.format_user_title(participant) == (
-        "&lt;Eman &amp; Loe&gt; (&lt;b&gt;ХУЙ&lt;/b&gt; &amp; Гном)"
+        "&lt;b&gt;ХУЙ&lt;/b&gt; &amp; Гном (&lt;Eman &amp; Loe&gt;)"
     )
 
 
@@ -203,12 +203,13 @@ async def test_runtime_stats_selection_duel_start_and_leaderboard(
     monkeypatch.setattr(duel, "send_and_schedule", sent)
     update = name_update(first, "/duel_stats")
     await duel.duel_stats_command(update, fake_context)
-    assert "Emanloe (Гномыч)" in sent.await_args.args[2]
+    assert "Гномыч (Emanloe)" in sent.await_args.args[2]
+    assert "Emanloe (Гномыч)" not in sent.await_args.args[2]
     await duel.duel_top_command(update, fake_context)
-    assert "Other (&lt;b&gt;Второй&lt;/b&gt;)" in sent.await_args.args[2]
+    assert "&lt;b&gt;Второй&lt;/b&gt; (Other)" in sent.await_args.args[2]
     await duel.duel_command(update, fake_context)
     buttons = sent.await_args.kwargs["reply_markup"].inline_keyboard
-    assert any("Other (<b>Второй</b>)" in button.text for row in buttons for button in row)
+    assert any("<b>Второй</b> (Other)" in button.text for row in buttons for button in row)
 
     def close_task(coroutine):
         coroutine.close()
@@ -221,8 +222,8 @@ async def test_runtime_stats_selection_duel_start_and_leaderboard(
         db.get_or_create_duel_user(second, CHAT_ID),
     )
     text = fake_context.bot.send_message.await_args.kwargs["text"]
-    assert "Emanloe (Гномыч)" in text
-    assert "Other (&lt;b&gt;Второй&lt;/b&gt;)" in text
+    assert "Гномыч (Emanloe)" in text
+    assert "&lt;b&gt;Второй&lt;/b&gt; (Other)" in text
     duel.ACTIVE_DUELS.pop(CHAT_ID)
 
 
@@ -236,7 +237,7 @@ async def test_runtime_item_boss_and_hyperborean_paths(temp_database, monkeypatc
     person = user()
     db.get_or_create_duel_user(person, CHAT_ID)
     db.set_duel_dwarf_name_once(CHAT_ID, 1, "<b>Гномыч</b>")
-    title = "Emanloe (&lt;b&gt;Гномыч&lt;/b&gt;)"
+    title = "&lt;b&gt;Гномыч&lt;/b&gt; (Emanloe)"
 
     event_id = db.create_duel_item_event(CHAT_ID)
     db.set_duel_item_event_message(event_id, 77)
@@ -295,5 +296,5 @@ async def test_runtime_duel_result_shows_both_named_players(temp_database, monke
 
     await duel._finish_duel(fake_context, CHAT_ID, winner, loser, "")
     result = fake_context.bot.send_message.await_args.kwargs["text"]
-    assert "Emanloe (Гномыч)" in result
-    assert "Other (&lt;i&gt;Лузер&lt;/i&gt;)" in result
+    assert "Гномыч (Emanloe)" in result
+    assert "&lt;i&gt;Лузер&lt;/i&gt; (Other)" in result

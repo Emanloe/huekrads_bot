@@ -47,7 +47,7 @@ def format_user_title_plain(user_data: dict, *, include_dwarf_name: bool = True)
     username = _clean_username(user_data.get('username'))
     title = username or user_data.get('display_name') or get_text("common.user.default_title")
     dwarf_name = user_data.get('dwarf_name') if include_dwarf_name else None
-    return f"{title} ({dwarf_name})" if dwarf_name else title
+    return f"{dwarf_name} ({title})" if dwarf_name else title
 
 
 def format_user_title(user_data: dict) -> str:
