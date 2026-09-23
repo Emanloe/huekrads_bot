@@ -1,32 +1,52 @@
 """Chat-scoped, Telegram-independent operations for ordinary duels."""
 
+import logging
 import random
 from dataclasses import dataclass
+from html import escape
+
+from config import MAX_DAILY_POINTS
+from text_resources import get_text
 
 from database import (
+    apply_duel_berserk_in_transaction,
+    apply_duel_result_plan_in_transaction,
+    format_user_title,
     format_user_title_plain,
     get_db,
     get_duel_inventory,
+    get_duel_inventory_in_transaction,
+    get_dick_steal_chance,
     get_duel_top,
     get_duel_user_by_id,
     get_duel_user_by_id_in_transaction,
     get_duel_user_by_username,
+    transfer_duel_inventory_item_in_transaction,
 )
 from duel_session_repository import (
     activate_duel_session_in_transaction,
     create_duel_session,
+    finish_duel_session_in_transaction,
     get_duel_session_in_transaction,
     has_current_duel_session,
     save_duel_attack_in_transaction,
     save_duel_block_resolution_in_transaction,
     utc_unix_milliseconds,
 )
+from handlers.duel_catalog import DUEL_POST_MESSAGES, DWARFS_FACTS
+from handlers.duel_items import get_droppable_duel_inventory, get_duel_item_name
 from handlers.duel_state import (
     DUEL_MOVE_TIMEOUT_SECONDS,
+    _build_duel_result_plan,
     _get_duel_participant_ineligibility,
+    _is_berserk_roll,
+    _is_duel_post_message_roll,
+    choose_duel_item_to_steal,
     resolve_duel_round,
 )
-from handlers.duel_text import TARGET_NAMES
+from handlers.duel_text import (
+    TARGET_NAMES, _build_berserk_text, _plural_rounds, get_round_flavor_text,
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +132,229 @@ class PersistentDuelActionResult:
     @property
     def accepted(self) -> bool:
         return self.reason in ("success", "terminal_pending") and self.session is not None
+
+
+@dataclass(frozen=True)
+class PersistentDuelFinalizationResult:
+    """A terminal DB commit, its stored replay, or a domain-level rejection."""
+
+    reason: str
+    session: dict | None = None
+    result: dict | None = None
+
+
+def _validated_terminal_checkpoint(session: dict) -> dict | None:
+    """Reject malformed or mismatched stored resolution before any finish RNG."""
+    checkpoint = session["result"]
+    if not isinstance(checkpoint, dict) or checkpoint.get("kind") != "terminal_resolution":
+        return None
+    attacker = session["attacker_user_id"]
+    defender = session["defender_user_id"]
+    outcome = checkpoint.get("outcome")
+    if outcome not in ("hit", "suicide"):
+        return None
+    expected_winner, expected_loser = (
+        (attacker, defender) if outcome == "hit" else (defender, attacker)
+    )
+    expected = {
+        "attacker_user_id": attacker,
+        "defender_user_id": defender,
+        "winner_user_id": expected_winner,
+        "loser_user_id": expected_loser,
+        "strike_zone": session["attack_zone"],
+        "round_no": session["round_no"],
+        "resolved_turn_id": session["turn_id"] - 1,
+    }
+    if any(checkpoint.get(key) != value for key, value in expected.items()):
+        return None
+    if checkpoint.get("block_zone") not in TARGET_NAMES:
+        return None
+    phrase_keys = ("outcome_phrase", "attack_phrase") if outcome == "hit" else ("outcome_phrase",)
+    if not all(isinstance(checkpoint.get(key), str) for key in phrase_keys):
+        return None
+    return checkpoint
+
+
+def _terminal_custom_text(checkpoint: dict, attacker: dict, defender: dict) -> str:
+    attacker_title = format_user_title(attacker)
+    defender_title = format_user_title(defender)
+    if checkpoint["outcome"] == "suicide":
+        return get_text(
+            "duel.live.outcomes.suicide",
+            attacker_title=attacker_title,
+            suicide_phrase=checkpoint["outcome_phrase"],
+            defender_title=defender_title,
+        )
+    return get_text(
+        "duel.live.outcomes.hit",
+        attacker_title=attacker_title,
+        attack_phrase=checkpoint["attack_phrase"],
+        strike_target=TARGET_NAMES[checkpoint["strike_zone"]],
+        defender_title=defender_title,
+        block_target=TARGET_NAMES[checkpoint["block_zone"]],
+        hit_phrase=checkpoint["outcome_phrase"],
+    )
+
+
+def _steal_persistent_item(cursor, chat_id: int, winner_id: int, loser_id: int) -> dict | None:
+    """Same collectible roll/choice as Telegram, using the finalization connection."""
+    inventory = get_droppable_duel_inventory(
+        get_duel_inventory_in_transaction(cursor, chat_id, loser_id)
+    )
+    instance = choose_duel_item_to_steal(inventory, random)
+    if instance is None:
+        return None
+    if not transfer_duel_inventory_item_in_transaction(
+        cursor, chat_id, loser_id, winner_id, instance["id"],
+    ):
+        return None
+    return {"instance_id": instance["id"], "item_id": instance["item_id"],
+            "item_name": get_duel_item_name(instance["item_id"])}
+
+
+def finalize_persistent_duel(
+    chat_id: int, duel_id: int, *, now_ms: int | None = None,
+) -> PersistentDuelFinalizationResult:
+    """Apply one checkpointed terminal duel exactly once, without publication/drop."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        if session is None:
+            return PersistentDuelFinalizationResult("not_found")
+        if session["status"] == "finished":
+            stored = session["result"]
+            if isinstance(stored, dict) and stored.get("kind") == "finalized":
+                return PersistentDuelFinalizationResult("already_finished", session, stored)
+            return PersistentDuelFinalizationResult("invalid_state")
+        if session["status"] != "publishing" or session["phase"] != "block":
+            return PersistentDuelFinalizationResult("invalid_state")
+        if not isinstance(session["result"], dict) or session["result"].get("kind") != "terminal_resolution":
+            return PersistentDuelFinalizationResult("not_terminal")
+        checkpoint = _validated_terminal_checkpoint(session)
+        if checkpoint is None:
+            return PersistentDuelFinalizationResult("invalid_state")
+
+        try:
+            player1 = DuelParticipantSnapshot.from_storage(session["player1_snapshot"]).to_storage()
+            player2 = DuelParticipantSnapshot.from_storage(session["player2_snapshot"]).to_storage()
+        except (KeyError, TypeError, ValueError):
+            return PersistentDuelFinalizationResult("invalid_state")
+        if (player1["user_id"], player2["user_id"]) != (
+            session["player1_user_id"], session["player2_user_id"],
+        ):
+            return PersistentDuelFinalizationResult("invalid_state")
+        participants = {player1["user_id"]: player1, player2["user_id"]: player2}
+        winner = participants[checkpoint["winner_user_id"]]
+        loser = participants[checkpoint["loser_user_id"]]
+        attacker = participants[checkpoint["attacker_user_id"]]
+        defender = participants[checkpoint["defender_user_id"]]
+
+        # Match _finish_duel's exact order. No pocket-drop RNG belongs here.
+        is_dick_stolen = random.random() < get_dick_steal_chance(loser["daily_wins"])
+        plan = _build_duel_result_plan(
+            winner, loser, is_dick_stolen,
+            format_user_title_plain(winner, include_dwarf_name=False),
+            MAX_DAILY_POINTS,
+        )
+        winner_points, loser_points = apply_duel_result_plan_in_transaction(
+            cursor, chat_id, plan,
+        )
+
+        stolen_item = None
+        if is_dick_stolen:
+            cursor.execute("SAVEPOINT persistent_item_steal")
+            try:
+                stolen_item = _steal_persistent_item(
+                    cursor, chat_id, winner["user_id"], loser["user_id"],
+                )
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT persistent_item_steal")
+                logging.exception("Ошибка кражи предмета после дуэли в чате %s", chat_id)
+            finally:
+                cursor.execute("RELEASE SAVEPOINT persistent_item_steal")
+
+        winner_title = format_user_title(winner)
+        loser_title = format_user_title(loser)
+        custom_text = _terminal_custom_text(checkpoint, attacker, defender)
+        final_text = get_text(
+            "duel.finish.result", custom_text=custom_text,
+            winner_title=winner_title, loser_title=loser_title,
+            winner_points=winner_points, loser_points=loser_points,
+        )
+        round_flavor = get_round_flavor_text(session["round_no"], rng=random)
+        stats_text = get_text(
+            "duel.finish.stats", rounds_count=session["round_no"],
+            rounds_label=_plural_rounds(session["round_no"]),
+            round_flavor=round_flavor,
+        )
+        dwarf_fact = None
+        if is_dick_stolen:
+            if stolen_item is not None:
+                final_text += get_text(
+                    "duel.finish.item_stolen", item_name=escape(stolen_item["item_name"]),
+                )
+            dwarf_fact = random.choice(DWARFS_FACTS)
+            final_text += get_text(
+                "duel.finish.stolen", loser_title=loser_title,
+                stats_text=stats_text, fact=dwarf_fact,
+            )
+        else:
+            final_text += stats_text
+
+        berserk = None
+        if _is_berserk_roll(random.random()):
+            berserker = random.choice((winner, loser))
+            victim = loser if berserker is winner else winner
+            berserker_title = winner_title if berserker is winner else loser_title
+            victim_title = loser_title if victim is loser else winner_title
+            cursor.execute("SAVEPOINT persistent_berserk")
+            try:
+                applied = apply_duel_berserk_in_transaction(
+                    cursor, chat_id, berserker["user_id"], victim["user_id"],
+                    format_user_title_plain(berserker, include_dwarf_name=False),
+                )
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT persistent_berserk")
+                logging.exception("Не удалось применить berserk event в чате %s", chat_id)
+            else:
+                berserk_text = _build_berserk_text(
+                    berserker_title, victim_title, already_stolen=not applied, rng=random,
+                )
+                final_text += berserk_text
+                berserk = {
+                    "berserker_user_id": berserker["user_id"],
+                    "victim_user_id": victim["user_id"],
+                    "applied": applied, "text": berserk_text,
+                }
+            finally:
+                cursor.execute("RELEASE SAVEPOINT persistent_berserk")
+
+        post_message = None
+        if DUEL_POST_MESSAGES and _is_duel_post_message_roll(random.random()):
+            post_message = random.choice(DUEL_POST_MESSAGES)
+            final_text += (
+                f"\n\n{get_text('duel.finish.post_message.prefix')}\n"
+                f"{escape(post_message)}"
+            )
+
+        result = {
+            "kind": "finalized", "terminal_resolution": checkpoint,
+            "winner_user_id": winner["user_id"], "loser_user_id": loser["user_id"],
+            "winner_points": winner_points, "loser_points": loser_points,
+            "winner_reached_max": plan["winner_reached_max"],
+            "is_dick_stolen": is_dick_stolen, "stolen_item": stolen_item,
+            "round_flavor": round_flavor, "dwarf_fact": dwarf_fact,
+            "berserk": berserk, "post_message": post_message,
+            "custom_text": custom_text, "final_text": final_text,
+        }
+        timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        if not finish_duel_session_in_transaction(
+            chat_id, duel_id, session["turn_id"], result, timestamp, cursor=cursor,
+        ):
+            raise RuntimeError("Validated terminal duel could not be finalized")
+        finished = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        return PersistentDuelFinalizationResult("finalized", finished, result)
 
 
 def _terminal_resolution_pending(session: dict) -> bool:

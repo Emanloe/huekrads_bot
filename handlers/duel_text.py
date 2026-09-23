@@ -158,7 +158,7 @@ def _build_duel_block_text(
     )
 
 
-def get_round_flavor_text(rounds_count: int) -> str:
+def get_round_flavor_text(rounds_count: int, rng=None) -> str:
     if rounds_count <= 1:
         phrases = get_text_list("duel.round_flavor.one")
     elif rounds_count <= 4:
@@ -167,19 +167,21 @@ def get_round_flavor_text(rounds_count: int) -> str:
         phrases = get_text_list("duel.round_flavor.several")
     else:
         phrases = get_text_list("duel.round_flavor.many")
-    return random.choice(phrases)
+    return (rng or random).choice(phrases)
 
 
 def _build_berserk_text(
     berserker_title: str,
     victim_title: str,
     already_stolen: bool,
+    rng=None,
 ) -> str:
     berserker_title = escape(berserker_title)
     victim_title = escape(victim_title)
-    trigger = random.choice(BERSERK_TRIGGERS)
+    picker = rng or random
+    trigger = picker.choice(BERSERK_TRIGGERS)
     result_catalog = BERSERK_ALREADY_STOLEN if already_stolen else BERSERK_RESULTS
-    result = random.choice(result_catalog)
+    result = picker.choice(result_catalog)
     return get_text(
         "duel.berserk.block",
         header=get_text("duel.berserk.header"),

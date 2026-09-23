@@ -690,73 +690,79 @@ def apply_duel_result_plan(
     result_plan: dict,
 ) -> tuple[int, int]:
     with get_db() as conn:
-        cursor = conn.cursor()
-        winner = result_plan["winner"]
-        loser = result_plan["loser"]
+        return apply_duel_result_plan_in_transaction(conn.cursor(), chat_id, result_plan)
 
-        if result_plan["is_dick_stolen"]:
-            cursor.execute("""
-                UPDATE duel_users
-                SET points = ?, wins = wins + ?, daily_wins = daily_wins + ?,
-                    stolen_dicks_count = stolen_dicks_count + ?
-                WHERE user_id = ? AND chat_id = ?
-            """, (
-                winner["points"],
-                winner["wins_increment"],
-                winner["daily_wins_increment"],
-                winner["stolen_dicks_count_increment"],
-                winner["user_id"],
-                chat_id,
-            ))
 
-            cursor.execute("""
-                UPDATE duel_users
-                SET points = ?, losses = losses + ?,
-                    dick_stolen_count = dick_stolen_count + ?,
-                    dick_stolen_today = ?, last_stolen_by = ?
-                WHERE user_id = ? AND chat_id = ?
-            """, (
-                loser["points"],
-                loser["losses_increment"],
-                loser["dick_stolen_count_increment"],
-                loser["dick_stolen_today"],
-                loser["last_stolen_by"],
-                loser["user_id"],
-                chat_id,
-            ))
-        else:
-            cursor.execute("""
-                UPDATE duel_users
-                SET points = ?, wins = wins + ?, daily_wins = daily_wins + ?
-                WHERE user_id = ? AND chat_id = ?
-            """, (
-                winner["points"],
-                winner["wins_increment"],
-                winner["daily_wins_increment"],
-                winner["user_id"],
-                chat_id,
-            ))
+def apply_duel_result_plan_in_transaction(
+    cursor, chat_id: int, result_plan: dict,
+) -> tuple[int, int]:
+    """Apply the existing result and monthly counters on the caller's connection."""
+    winner = result_plan["winner"]
+    loser = result_plan["loser"]
 
-            cursor.execute("""
-                UPDATE duel_users
-                SET points = ?, losses = losses + ?
-                WHERE user_id = ? AND chat_id = ?
-            """, (
-                loser["points"],
-                loser["losses_increment"],
-                loser["user_id"],
-                chat_id,
-            ))
-
-        _increment_monthly_chat_stats(
-            cursor,
+    if result_plan["is_dick_stolen"]:
+        cursor.execute("""
+            UPDATE duel_users
+            SET points = ?, wins = wins + ?, daily_wins = daily_wins + ?,
+                stolen_dicks_count = stolen_dicks_count + ?
+            WHERE user_id = ? AND chat_id = ?
+        """, (
+            winner["points"],
+            winner["wins_increment"],
+            winner["daily_wins_increment"],
+            winner["stolen_dicks_count_increment"],
+            winner["user_id"],
             chat_id,
-            moscow_month_key(),
-            duels=1,
-            dicks_stolen=int(result_plan["is_dick_stolen"]),
-        )
+        ))
 
-        return winner["points"], loser["points"]
+        cursor.execute("""
+            UPDATE duel_users
+            SET points = ?, losses = losses + ?,
+                dick_stolen_count = dick_stolen_count + ?,
+                dick_stolen_today = ?, last_stolen_by = ?
+            WHERE user_id = ? AND chat_id = ?
+        """, (
+            loser["points"],
+            loser["losses_increment"],
+            loser["dick_stolen_count_increment"],
+            loser["dick_stolen_today"],
+            loser["last_stolen_by"],
+            loser["user_id"],
+            chat_id,
+        ))
+    else:
+        cursor.execute("""
+            UPDATE duel_users
+            SET points = ?, wins = wins + ?, daily_wins = daily_wins + ?
+            WHERE user_id = ? AND chat_id = ?
+        """, (
+            winner["points"],
+            winner["wins_increment"],
+            winner["daily_wins_increment"],
+            winner["user_id"],
+            chat_id,
+        ))
+
+        cursor.execute("""
+            UPDATE duel_users
+            SET points = ?, losses = losses + ?
+            WHERE user_id = ? AND chat_id = ?
+        """, (
+            loser["points"],
+            loser["losses_increment"],
+            loser["user_id"],
+            chat_id,
+        ))
+
+    _increment_monthly_chat_stats(
+        cursor,
+        chat_id,
+        moscow_month_key(),
+        duels=1,
+        dicks_stolen=int(result_plan["is_dick_stolen"]),
+    )
+
+    return winner["points"], loser["points"]
 
 
 def apply_duel_berserk(
@@ -766,28 +772,36 @@ def apply_duel_berserk(
     berserker_title: str,
 ) -> bool:
     with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE duel_users
-            SET dick_stolen_count = dick_stolen_count + 1,
-                dick_stolen_today = 1, last_stolen_by = ?
-            WHERE user_id = ? AND chat_id = ? AND dick_stolen_today = 0
-            """,
-            (berserker_title, victim_user_id, chat_id),
+        return apply_duel_berserk_in_transaction(
+            conn.cursor(), chat_id, berserker_user_id, victim_user_id, berserker_title,
         )
-        if cursor.rowcount == 0:
-            return False
 
-        cursor.execute(
-            """
-            UPDATE duel_users
-            SET stolen_dicks_count = stolen_dicks_count + 1
-            WHERE user_id = ? AND chat_id = ?
-            """,
-            (berserker_user_id, chat_id),
-        )
-        return True
+
+def apply_duel_berserk_in_transaction(
+    cursor, chat_id: int, berserker_user_id: int, victim_user_id: int,
+    berserker_title: str,
+) -> bool:
+    cursor.execute(
+        """
+        UPDATE duel_users
+        SET dick_stolen_count = dick_stolen_count + 1,
+            dick_stolen_today = 1, last_stolen_by = ?
+        WHERE user_id = ? AND chat_id = ? AND dick_stolen_today = 0
+        """,
+        (berserker_title, victim_user_id, chat_id),
+    )
+    if cursor.rowcount == 0:
+        return False
+
+    cursor.execute(
+        """
+        UPDATE duel_users
+        SET stolen_dicks_count = stolen_dicks_count + 1
+        WHERE user_id = ? AND chat_id = ?
+        """,
+        (berserker_user_id, chat_id),
+    )
+    return True
 
 
 # ==========================================
@@ -815,26 +829,29 @@ def add_duel_inventory_item(chat_id: int, user_id: int, item_id: str) -> dict:
 
 def get_duel_inventory(chat_id: int, user_id: int) -> list[dict]:
     with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, chat_id, user_id, item_id, created_at
-            FROM duel_inventory
-            WHERE chat_id = ? AND user_id = ?
-            ORDER BY id
-            """,
-            (chat_id, user_id),
-        )
-        return [
-            {
-                "id": row[0],
-                "chat_id": row[1],
-                "user_id": row[2],
-                "item_id": row[3],
-                "created_at": row[4],
-            }
-            for row in cursor.fetchall()
-        ]
+        return get_duel_inventory_in_transaction(conn.cursor(), chat_id, user_id)
+
+
+def get_duel_inventory_in_transaction(cursor, chat_id: int, user_id: int) -> list[dict]:
+    cursor.execute(
+        """
+        SELECT id, chat_id, user_id, item_id, created_at
+        FROM duel_inventory
+        WHERE chat_id = ? AND user_id = ?
+        ORDER BY id
+        """,
+        (chat_id, user_id),
+    )
+    return [
+        {
+            "id": row[0],
+            "chat_id": row[1],
+            "user_id": row[2],
+            "item_id": row[3],
+            "created_at": row[4],
+        }
+        for row in cursor.fetchall()
+    ]
 
 
 def remove_duel_inventory_instance(
@@ -865,37 +882,46 @@ def transfer_duel_inventory_item(
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("BEGIN IMMEDIATE")
-        cursor.execute(
-            """
-            SELECT item_id
-            FROM duel_inventory
-            WHERE id = ? AND chat_id = ? AND user_id = ?
-            """,
-            (inventory_instance_id, chat_id, from_user_id),
+        return transfer_duel_inventory_item_in_transaction(
+            cursor, chat_id, from_user_id, to_user_id, inventory_instance_id,
         )
-        row = cursor.fetchone()
-        if not row:
-            return False
 
-        item_id = row[0]
-        cursor.execute(
-            """
-            DELETE FROM duel_inventory
-            WHERE id = ? AND chat_id = ? AND user_id = ?
-            """,
-            (inventory_instance_id, chat_id, from_user_id),
-        )
-        if cursor.rowcount != 1:
-            return False
 
-        cursor.execute(
-            """
-            INSERT INTO duel_inventory (chat_id, user_id, item_id)
-            VALUES (?, ?, ?)
-            """,
-            (chat_id, to_user_id, item_id),
-        )
-        return True
+def transfer_duel_inventory_item_in_transaction(
+    cursor, chat_id: int, from_user_id: int, to_user_id: int,
+    inventory_instance_id: int,
+) -> bool:
+    cursor.execute(
+        """
+        SELECT item_id
+        FROM duel_inventory
+        WHERE id = ? AND chat_id = ? AND user_id = ?
+        """,
+        (inventory_instance_id, chat_id, from_user_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return False
+
+    item_id = row[0]
+    cursor.execute(
+        """
+        DELETE FROM duel_inventory
+        WHERE id = ? AND chat_id = ? AND user_id = ?
+        """,
+        (inventory_instance_id, chat_id, from_user_id),
+    )
+    if cursor.rowcount != 1:
+        return False
+
+    cursor.execute(
+        """
+        INSERT INTO duel_inventory (chat_id, user_id, item_id)
+        VALUES (?, ?, ?)
+        """,
+        (chat_id, to_user_id, item_id),
+    )
+    return True
 
 
 def get_duel_item_event_chat_ids() -> list[int]:

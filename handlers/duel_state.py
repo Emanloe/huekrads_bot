@@ -41,6 +41,13 @@ def _is_duel_item_steal_roll(item_steal_roll: float) -> bool:
     return item_steal_roll < DUEL_ITEM_STEAL_CHANCE
 
 
+def choose_duel_item_to_steal(collectible_inventory: list[dict], rng) -> dict | None:
+    """Use the ordinary duel item-steal roll and one concrete instance choice."""
+    if not collectible_inventory or not _is_duel_item_steal_roll(rng.random()):
+        return None
+    return rng.choice(collectible_inventory)
+
+
 def _resolve_zone_outcome(strike_zone: str, block_zone: str) -> str:
     return "block" if strike_zone == block_zone else "hit"
 

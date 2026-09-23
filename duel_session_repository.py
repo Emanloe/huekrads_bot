@@ -233,6 +233,24 @@ def save_duel_block_resolution_in_transaction(
     return cursor.rowcount == 1
 
 
+def finish_duel_session_in_transaction(
+    chat_id: int, duel_id: int, turn_id: int, result: dict, finished_at: int,
+    *, cursor: sqlite3.Cursor,
+) -> bool:
+    """Commit a server-computed terminal result under the caller's write lock."""
+    cursor.execute(
+        """
+        UPDATE duel_sessions
+        SET status = 'finished', result_json = ?, deadline_at = NULL,
+            updated_at = ?, finished_at = ?
+        WHERE chat_id = ? AND id = ? AND status = 'publishing'
+          AND phase = 'block' AND turn_id = ? AND finished_at IS NULL
+        """,
+        (_json_object(result), finished_at, finished_at, chat_id, duel_id, turn_id),
+    )
+    return cursor.rowcount == 1
+
+
 def get_current_duel_session(chat_id: int) -> dict | None:
     """Return this chat's sole publishing or active ordinary duel, if any."""
     with get_db() as conn:
