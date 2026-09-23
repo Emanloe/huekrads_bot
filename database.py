@@ -278,6 +278,66 @@ def init_db():
             )
         """)
 
+        # Dormant Mini App infrastructure. Telegram duels still use ACTIVE_DUELS.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS duel_sessions (
+                id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                player1_user_id INTEGER NOT NULL,
+                player2_user_id INTEGER NOT NULL,
+                player1_snapshot_json TEXT NOT NULL,
+                player2_snapshot_json TEXT NOT NULL,
+                attacker_user_id INTEGER NOT NULL,
+                defender_user_id INTEGER NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (status IN ('publishing', 'active', 'finished', 'cancelled')),
+                phase TEXT NOT NULL CHECK (phase IN ('attack', 'block')),
+                attack_zone TEXT
+                    CHECK (attack_zone IS NULL OR attack_zone IN ('head', 'body', 'dick')),
+                round_no INTEGER NOT NULL DEFAULT 1 CHECK (round_no >= 1),
+                turn_id INTEGER NOT NULL DEFAULT 1 CHECK (turn_id >= 1),
+                deadline_at INTEGER,
+                message_id INTEGER,
+                original_message_id INTEGER,
+                result_json TEXT,
+                pocket_done_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                CHECK (player1_user_id <> player2_user_id),
+                CHECK (
+                    (attacker_user_id = player1_user_id AND defender_user_id = player2_user_id)
+                    OR
+                    (attacker_user_id = player2_user_id AND defender_user_id = player1_user_id)
+                ),
+                CHECK (
+                    (phase = 'attack' AND attack_zone IS NULL)
+                    OR
+                    (phase = 'block' AND attack_zone IS NOT NULL)
+                ),
+                CHECK (
+                    (status = 'active' AND deadline_at IS NOT NULL)
+                    OR
+                    (status <> 'active' AND deadline_at IS NULL)
+                ),
+                CHECK (
+                    status <> 'finished'
+                    OR (finished_at IS NOT NULL AND result_json IS NOT NULL)
+                ),
+                CHECK (pocket_done_at IS NULL OR status = 'finished')
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_duel_sessions_one_active_chat
+            ON duel_sessions (chat_id)
+            WHERE status IN ('publishing', 'active')
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_duel_sessions_due
+            ON duel_sessions (deadline_at, id)
+            WHERE status = 'active'
+        """)
+
         # Fix broken initial data where points=0 and losses=20 from prior seed bug
         cursor.execute("""
             UPDATE duel_users 

@@ -1,0 +1,163 @@
+"""Chat-scoped storage for future persistent ordinary-duel sessions.
+
+The Telegram duel runtime does not use this repository yet. It stores session
+snapshots as JSON without interpreting game rules or performing RNG.
+"""
+
+import json
+import sqlite3
+from datetime import datetime, timezone
+
+from database import get_db
+
+
+def utc_unix_milliseconds(when: datetime | None = None) -> int:
+    """Return UTC Unix milliseconds; callers may provide an aware test clock."""
+    instant = when if when is not None else datetime.now(timezone.utc)
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("Duel session timestamps require a timezone-aware datetime")
+    return int(instant.timestamp() * 1000)
+
+
+def _json_object(value: dict) -> str:
+    if not isinstance(value, dict):
+        raise TypeError("Duel session JSON values must be dictionaries")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+
+
+def _session_from_row(row) -> dict | None:
+    if row is None:
+        return None
+    session = dict(row)
+    session["player1_snapshot"] = json.loads(session.pop("player1_snapshot_json"))
+    session["player2_snapshot"] = json.loads(session.pop("player2_snapshot_json"))
+    result_json = session.pop("result_json")
+    session["result"] = json.loads(result_json) if result_json is not None else None
+    return session
+
+
+def create_duel_session(
+    chat_id: int,
+    player1_user_id: int,
+    player2_user_id: int,
+    player1_snapshot: dict,
+    player2_snapshot: dict,
+    attacker_user_id: int,
+    defender_user_id: int,
+    *,
+    status: str = "publishing",
+    phase: str = "attack",
+    attack_zone: str | None = None,
+    round_no: int = 1,
+    turn_id: int = 1,
+    deadline_at: int | None = None,
+    message_id: int | None = None,
+    original_message_id: int | None = None,
+    result: dict | None = None,
+    pocket_done_at: int | None = None,
+    finished_at: int | None = None,
+    now_ms: int | None = None,
+) -> dict:
+    """Insert one session; SQLite constraints reject conflicting active slots.
+
+    This is storage only: it does not register players, check admission, or
+    decide the first attacker. An IntegrityError is left for the caller to
+    classify without hiding a failed CHECK behind an active-slot conflict.
+    """
+    created_at = utc_unix_milliseconds() if now_ms is None else now_ms
+    snapshot1_json = _json_object(player1_snapshot)
+    snapshot2_json = _json_object(player2_snapshot)
+    result_json = _json_object(result) if result is not None else None
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            INSERT INTO duel_sessions (
+                chat_id, player1_user_id, player2_user_id,
+                player1_snapshot_json, player2_snapshot_json,
+                attacker_user_id, defender_user_id, status, phase, attack_zone,
+                round_no, turn_id, deadline_at, message_id, original_message_id,
+                result_json, pocket_done_at, created_at, updated_at, finished_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                chat_id, player1_user_id, player2_user_id,
+                snapshot1_json, snapshot2_json, attacker_user_id, defender_user_id,
+                status, phase, attack_zone, round_no, turn_id, deadline_at,
+                message_id, original_message_id, result_json, pocket_done_at,
+                created_at, created_at, finished_at,
+            ),
+        )
+        cursor.execute(
+            "SELECT * FROM duel_sessions WHERE chat_id = ? AND id = ?",
+            (chat_id, cursor.lastrowid),
+        )
+        return _session_from_row(cursor.fetchone())
+
+
+def get_duel_session(chat_id: int, duel_id: int) -> dict | None:
+    """Never return a session without matching its chat security boundary."""
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM duel_sessions WHERE chat_id = ? AND id = ?",
+            (chat_id, duel_id),
+        ).fetchone()
+        return _session_from_row(row)
+
+
+def get_current_duel_session(chat_id: int) -> dict | None:
+    """Return this chat's sole publishing or active ordinary duel, if any."""
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT * FROM duel_sessions
+            WHERE chat_id = ? AND status IN ('publishing', 'active')
+            """,
+            (chat_id,),
+        ).fetchone()
+        return _session_from_row(row)
+
+
+def bind_duel_session_message(
+    chat_id: int,
+    duel_id: int,
+    message_id: int,
+    *,
+    expected_turn_id: int,
+    expected_status: str = "publishing",
+    now_ms: int | None = None,
+) -> bool:
+    """CAS-bind a Telegram message for one expected turn and status."""
+    updated_at = utc_unix_milliseconds() if now_ms is None else now_ms
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE duel_sessions SET message_id = ?, updated_at = ?
+            WHERE chat_id = ? AND id = ? AND status = ? AND turn_id = ?
+            """,
+            (message_id, updated_at, chat_id, duel_id, expected_status, expected_turn_id),
+        )
+        return cursor.rowcount == 1
+
+
+def list_due_duel_sessions(chat_id: int, now_ms: int, *, limit: int = 100) -> list[dict]:
+    """Find only this chat's active sessions whose UTC deadline has passed."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT * FROM duel_sessions
+            WHERE chat_id = ? AND status = 'active' AND deadline_at <= ?
+            ORDER BY deadline_at, id LIMIT ?
+            """,
+            (chat_id, now_ms, limit),
+        ).fetchall()
+        return [_session_from_row(row) for row in rows]
