@@ -165,7 +165,7 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
     def question_update(user_id, chat_id, text="Вопрос"):
         message = SimpleNamespace(
             message_id=30, from_user=SimpleNamespace(id=user_id, is_bot=False),
-            text=text, reply_text=AsyncMock(),
+            text=text, reply_text=AsyncMock(), reply_photo=AsyncMock(),
         )
         return SimpleNamespace(message=message, effective_chat=SimpleNamespace(id=chat_id))
 
@@ -183,9 +183,12 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
     choice.assert_called_once_with([
         "Да", "Нет", "Возможно", "Увлажните шар гнома усерднее",
     ])
-    mine.message.reply_text.assert_awaited_once_with(
-        answer, reply_to_message_id=30,
+    mine.message.reply_photo.assert_awaited_once_with(
+        photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
+        caption=answer,
+        reply_to_message_id=30,
     )
+    mine.message.reply_text.assert_not_awaited()
     assert fake_context.bot_data["elite_ball_waiting"] == set()
     assert len(fake_context.job_queue.calls) == 2
 

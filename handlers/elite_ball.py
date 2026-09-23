@@ -12,6 +12,7 @@ from text_resources import get_text, get_text_list
 
 ELITE_BALL_CALLBACK_DATA = "elite_ball_ask"
 ELITE_BALL_INLINE_RESULT_ID = "elite_ball_inline"
+ELITE_BALL_PHOTO_FILE_ID = "AgACAgIAAxkBAAPYarOx_Ot9KPfYe1lKYZsAAaKkq7kLAAIsIGsbFCShScvsbybBp2qPAQADAgADeAADPQQ"
 BALL_COMMAND_DELETE_DELAY = 10
 _WAITING_KEY = "elite_ball_waiting"
 
@@ -84,6 +85,13 @@ async def elite_ball_question(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     waiting.remove(key)
     answer = random.choice(get_text_list("elite_ball.answers"))
-    await message.reply_text(answer, reply_to_message_id=message.message_id)
+    try:
+        await message.reply_photo(
+            photo=ELITE_BALL_PHOTO_FILE_ID,
+            caption=answer,
+            reply_to_message_id=message.message_id,
+        )
+    except Exception:
+        logging.exception("Could not send elite ball answer in chat %s", chat.id)
     # The ordinary text trigger is in group 0; this answered question is consumed.
     raise ApplicationHandlerStop

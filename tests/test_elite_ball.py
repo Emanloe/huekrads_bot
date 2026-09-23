@@ -35,6 +35,7 @@ def text_update(user_id=1, chat_id=CHAT_ID, text="Вопрос", *, is_bot=False
         message_id=71,
         text=text,
         reply_text=AsyncMock(),
+        reply_photo=AsyncMock(),
     )
     return SimpleNamespace(
         message=message, effective_chat=SimpleNamespace(id=chat_id),
@@ -78,7 +79,7 @@ async def test_click_waits_for_exact_user_and_chat_without_rng(fake_context, mon
 
     other_update, other_message = text_update(user_id=2)
     await elite_ball.elite_ball_question(other_update, fake_context)
-    other_message.reply_text.assert_not_awaited()
+    other_message.reply_photo.assert_not_awaited()
     assert fake_context.bot_data["elite_ball_waiting"] == {(CHAT_ID, 1)}
     choice.assert_not_called()
 
@@ -95,12 +96,17 @@ async def test_one_question_one_choice_reply_and_then_no_waiting(fake_context, m
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(question, fake_context)
     choice.assert_called_once_with(list(ANSWERS))
-    message.reply_text.assert_awaited_once_with("Да", reply_to_message_id=71)
+    message.reply_photo.assert_awaited_once_with(
+        photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
+        caption="Да",
+        reply_to_message_id=71,
+    )
+    message.reply_text.assert_not_awaited()
     assert fake_context.bot_data["elite_ball_waiting"] == set()
 
     next_update, next_message = text_update(text="Ещё вопрос")
     await elite_ball.elite_ball_question(next_update, fake_context)
-    next_message.reply_text.assert_not_awaited()
+    next_message.reply_photo.assert_not_awaited()
     choice.assert_called_once()
 
 
@@ -121,8 +127,45 @@ async def test_each_answer_is_possible_with_one_uniform_choice(
         await elite_ball.elite_ball_question(update, fake_context)
     choice.assert_called_once_with(list(ANSWERS))
     random_roll.assert_not_called()
-    message.reply_text.assert_awaited_once_with(answer, reply_to_message_id=71)
+    message.reply_photo.assert_awaited_once_with(
+        photo="AgACAgIAAxkBAAPYarOx_Ot9KPfYe1lKYZsAAaKkq7kLAAIsIGsbFCShScvsbybBp2qPAQADAgADeAADPQQ",
+        caption=answer,
+        reply_to_message_id=71,
+    )
+    message.reply_text.assert_not_awaited()
+    assert fake_context.job_queue.calls == []
     assert fake_context.bot_data["elite_ball_waiting"] == set()
+
+
+@pytest.mark.asyncio
+async def test_photo_send_failure_consumes_question_without_reroll(
+    fake_context, monkeypatch, caplog,
+):
+    from handlers import elite_ball
+
+    await elite_ball.elite_ball_callback(callback_update()[0], fake_context)
+    choice = Mock(return_value="Да")
+    random_roll = Mock(side_effect=AssertionError("answer used random.random"))
+    monkeypatch.setattr(elite_ball.random, "choice", choice)
+    monkeypatch.setattr(elite_ball.random, "random", random_roll)
+    update, message = text_update()
+    message.reply_photo.side_effect = RuntimeError("Telegram rejected photo")
+
+    with pytest.raises(ApplicationHandlerStop):
+        await elite_ball.elite_ball_question(update, fake_context)
+
+    choice.assert_called_once_with(list(ANSWERS))
+    random_roll.assert_not_called()
+    message.reply_photo.assert_awaited_once_with(
+        photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
+        caption="Да",
+        reply_to_message_id=71,
+    )
+    message.reply_text.assert_not_awaited()
+    assert fake_context.bot_data["elite_ball_waiting"] == set()
+    assert "Could not send elite ball answer" in caplog.text
+    await elite_ball.elite_ball_question(text_update()[0], fake_context)
+    choice.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -155,7 +198,7 @@ async def test_commands_nontext_bot_message_and_repeated_click_do_not_consume(
     for text, is_bot in (("/summary", False), (" /name Гном", False), (None, False), ("текст", True)):
         question, message = text_update(text=text, is_bot=is_bot)
         await elite_ball.elite_ball_question(question, fake_context)
-        message.reply_text.assert_not_awaited()
+        message.reply_photo.assert_not_awaited()
     assert fake_context.bot_data["elite_ball_waiting"] == {(CHAT_ID, 1)}
     choice.assert_not_called()
 
@@ -164,7 +207,11 @@ async def test_commands_nontext_bot_message_and_repeated_click_do_not_consume(
     question, message = text_update()
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(question, fake_context)
-    message.reply_text.assert_awaited_once_with("Возможно", reply_to_message_id=71)
+    message.reply_photo.assert_awaited_once_with(
+        photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
+        caption="Возможно",
+        reply_to_message_id=71,
+    )
     assert fake_context.bot_data["elite_ball_waiting"] == set()
     await elite_ball.elite_ball_question(text_update()[0], fake_context)
     answer_choice.assert_called_once()
@@ -179,7 +226,7 @@ async def test_unrelated_text_does_not_stop_existing_triggers(fake_context):
     await elite_ball.elite_ball_question(update, fake_context)
     await trigger(update, fake_context)
     trigger.assert_awaited_once_with(update, fake_context)
-    message.reply_text.assert_not_awaited()
+    message.reply_photo.assert_not_awaited()
 
 
 @pytest.mark.asyncio
