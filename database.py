@@ -755,6 +755,81 @@ def create_duel_item_event(chat_id: int) -> int | None:
         return cursor.lastrowid if cursor.rowcount == 1 else None
 
 
+def create_duel_item_event_from_inventory(
+    chat_id: int, user_id: int, instance_id: int,
+) -> dict | None:
+    """Move one exact inventory instance into the chat's active pickup slot."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            SELECT item_id, created_at FROM duel_inventory
+            WHERE id = ? AND chat_id = ? AND user_id = ?
+            """,
+            (instance_id, chat_id, user_id),
+        )
+        row = cursor.fetchone()
+        if not row or row[0] in ("oiled_vest", "knife"):
+            return None
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO duel_item_events (chat_id, item_id) VALUES (?, ?)",
+            (chat_id, row[0]),
+        )
+        if cursor.rowcount != 1:
+            return None
+        event_id = cursor.lastrowid
+        cursor.execute(
+            "DELETE FROM duel_inventory WHERE id = ? AND chat_id = ? AND user_id = ?",
+            (instance_id, chat_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Selected duel inventory instance disappeared")
+        return {
+            "event_id": event_id,
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "instance_id": instance_id,
+            "item_id": row[0],
+            "created_at": row[1],
+        }
+
+
+def restore_unpublished_duel_drop(drop: dict, message_id: int | None = None) -> bool:
+    """Atomically return a drop when publishing its pickup message failed."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            SELECT 1 FROM duel_item_events
+            WHERE event_id = ? AND chat_id = ? AND item_id = ?
+              AND claimed = 0 AND (message_id IS NULL OR message_id = ?)
+            """,
+            (drop["event_id"], drop["chat_id"], drop["item_id"], message_id),
+        )
+        if not cursor.fetchone():
+            return False
+        cursor.execute(
+            """
+            INSERT INTO duel_inventory (id, chat_id, user_id, item_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                drop["instance_id"], drop["chat_id"], drop["user_id"],
+                drop["item_id"], drop["created_at"],
+            ),
+        )
+        cursor.execute(
+            "DELETE FROM duel_item_events WHERE event_id = ?",
+            (drop["event_id"],),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Unpublished duel drop disappeared during restoration")
+        return True
+
+
 def set_duel_item_event_message(event_id: int, message_id: int) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
@@ -826,14 +901,14 @@ def claim_duel_item_event(
         cursor.execute("BEGIN IMMEDIATE")
         cursor.execute(
             """
-            SELECT claimed
+            SELECT claimed, item_id, message_id
             FROM duel_item_events
             WHERE event_id = ? AND chat_id = ?
             """,
             (event_id, chat_id),
         )
         event = cursor.fetchone()
-        if not event or event[0]:
+        if not event or event[0] or (event[1] is not None and event[2] is None):
             return "already_claimed", None
 
         cursor.execute(
@@ -854,7 +929,7 @@ def claim_duel_item_event(
         if cursor.rowcount != 1:
             return "already_claimed", None
 
-        item_id = item_selector()
+        item_id = event[1] if event[1] is not None else item_selector()
         cursor.execute(
             """
             INSERT INTO duel_inventory (chat_id, user_id, item_id)

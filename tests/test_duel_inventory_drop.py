@@ -1,4 +1,5 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -54,15 +55,15 @@ def test_drop_choice_receives_only_collectible_instances(monkeypatch):
         collectible[1],
     ]
     choice = Mock(return_value=collectible[1])
-    remove = Mock(return_value=True)
+    create_event = Mock(return_value={"event_id": 8, "item_id": "formangnome_whisker"})
     monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: inventory)
     monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
     monkeypatch.setattr(duel.random, "choice", choice)
-    monkeypatch.setattr(duel, "remove_duel_inventory_instance", remove)
+    monkeypatch.setattr(duel, "create_duel_item_event_from_inventory", create_event)
 
-    assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) == "Ус Формангнома"
+    assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) == create_event.return_value
     choice.assert_called_once_with(collectible)
-    remove.assert_called_once_with(CHAT_ID, 2, 4)
+    create_event.assert_called_once_with(CHAT_ID, 2, 4)
 
 
 def test_nonempty_inventory_miss_does_not_choose_or_delete(monkeypatch):
@@ -70,34 +71,34 @@ def test_nonempty_inventory_miss_does_not_choose_or_delete(monkeypatch):
 
     inventory = [{"id": 7, "item_id": "vevangel_wing"}]
     choice = Mock(side_effect=AssertionError("miss selected item"))
-    remove = Mock(side_effect=AssertionError("miss deleted item"))
+    create_event = Mock(side_effect=AssertionError("miss created event"))
     monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: inventory)
     monkeypatch.setattr(duel.random, "random", Mock(return_value=duel.DUEL_ITEM_DROP_CHANCE))
     monkeypatch.setattr(duel.random, "choice", choice)
-    monkeypatch.setattr(duel, "remove_duel_inventory_instance", remove)
+    monkeypatch.setattr(duel, "create_duel_item_event_from_inventory", create_event)
 
     assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) is None
     choice.assert_not_called()
-    remove.assert_not_called()
+    create_event.assert_not_called()
 
 
-def test_drop_removes_one_loser_duplicate_only_and_creates_no_event(temp_database):
+def test_drop_removes_one_loser_duplicate_only_and_creates_exact_event(temp_database):
     import database as db
     from handlers import duel
 
     winner_id = 1
     loser_id = 2
     db.add_duel_inventory_item(CHAT_ID, winner_id, "rat_knuckle")
-    db.add_duel_inventory_item(CHAT_ID, loser_id, "vevangel_wing")
+    selected = db.add_duel_inventory_item(CHAT_ID, loser_id, "vevangel_wing")
     db.add_duel_inventory_item(CHAT_ID, loser_id, "vevangel_wing")
     db.add_duel_inventory_item(CHAT_ID, loser_id, "formangnome_whisker")
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
         monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
-        assert duel._maybe_drop_loser_inventory_item(CHAT_ID, loser_id) == (
-            "Крыло Вевангела"
-        )
+        drop = duel._maybe_drop_loser_inventory_item(CHAT_ID, loser_id)
+        assert drop["instance_id"] == selected["id"]
+        assert drop["item_id"] == "vevangel_wing"
 
     assert [item["item_id"] for item in db.get_duel_inventory(CHAT_ID, loser_id)] == [
         "vevangel_wing",
@@ -107,7 +108,8 @@ def test_drop_removes_one_loser_duplicate_only_and_creates_no_event(temp_databas
         "rat_knuckle"
     ]
     with sqlite3.connect(temp_database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 1
+    assert db.get_duel_item_event(drop["event_id"])["item_id"] == "vevangel_wing"
 
 
 def test_losing_last_collectible_leaves_virtual_base_inventory(temp_database):
@@ -120,9 +122,7 @@ def test_losing_last_collectible_leaves_virtual_base_inventory(temp_database):
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
         monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
-        assert duel._maybe_drop_loser_inventory_item(CHAT_ID, loser_id) == (
-            "Крыло Вевангела"
-        )
+        assert duel._maybe_drop_loser_inventory_item(CHAT_ID, loser_id)["item_id"] == "vevangel_wing"
 
     remaining = db.get_duel_inventory(CHAT_ID, loser_id)
     assert remaining == []
@@ -130,7 +130,7 @@ def test_losing_last_collectible_leaves_virtual_base_inventory(temp_database):
 
 
 @pytest.mark.asyncio
-async def test_finish_duel_appends_item_loss_after_berserk_and_post_message(
+async def test_finish_duel_sends_pickup_after_result_without_extra_rng(
     monkeypatch,
     fake_context,
 ):
@@ -189,8 +189,16 @@ async def test_finish_duel_appends_item_loss_after_berserk_and_post_message(
         lambda *_args: events.append("berserk_applied") or True,
     )
     monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: inventory)
-    remove = Mock(return_value=True)
-    monkeypatch.setattr(duel, "remove_duel_inventory_instance", remove)
+    create_event = Mock(return_value={
+        "event_id": 17,
+        "chat_id": CHAT_ID,
+        "user_id": loser["user_id"],
+        "instance_id": 99,
+        "item_id": "vevangel_wing",
+    })
+    monkeypatch.setattr(duel, "create_duel_item_event_from_inventory", create_event)
+    bind_message = Mock(return_value=True)
+    monkeypatch.setattr(duel, "set_duel_item_event_message", bind_message)
     fake_context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=808))
 
     await duel._finish_duel(
@@ -214,11 +222,228 @@ async def test_finish_duel_appends_item_loss_after_berserk_and_post_message(
         "item_drop_roll",
         "item_instance_choice",
     ]
-    remove.assert_called_once_with(CHAT_ID, loser["user_id"], 99)
-    output = fake_context.bot.send_message.await_args.kwargs["text"]
+    create_event.assert_called_once_with(CHAT_ID, loser["user_id"], 99)
+    assert fake_context.bot.send_message.await_count == 2
+    output = fake_context.bot.send_message.await_args_list[0].kwargs["text"]
     assert "post &lt;message&gt; &amp; tail" in output
-    assert output.endswith(
-        "\n\n<b>Карман порвался, выпало:</b> Крыло Вевангела"
-    )
-    assert output.index("На теле проигравшего") < output.index("Карман порвался")
-    assert output.index("БЕРСЕРК") < output.index("Карман порвался")
+    assert "Карман порвался" not in output
+    pickup = fake_context.bot.send_message.await_args_list[1].kwargs
+    assert pickup["text"] == "<b>Карман порвался, выпало:</b> Крыло Вевангела"
+    assert pickup["reply_markup"].inline_keyboard[0][0].text == "Подобрать"
+    assert pickup["reply_markup"].inline_keyboard[0][0].callback_data == "duel_item_claim_17"
+    bind_message.assert_called_once_with(17, 808)
+
+
+def test_active_event_keeps_selected_item_and_existing_event(temp_database):
+    import database as db
+
+    old_id = db.create_duel_item_event(CHAT_ID)
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    assert db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"]) is None
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    assert db.get_duel_item_event(old_id)["item_id"] is None
+
+
+def test_event_insert_failure_rolls_back_inventory(temp_database):
+    import database as db
+
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    with sqlite3.connect(temp_database) as conn:
+        conn.execute("""
+            CREATE TRIGGER reject_drop BEFORE INSERT ON duel_item_events
+            BEGIN SELECT RAISE(ABORT, 'event insert failed'); END
+        """)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    with sqlite3.connect(temp_database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 0
+
+
+def test_inventory_delete_failure_rolls_back_created_event(temp_database):
+    import database as db
+
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    with sqlite3.connect(temp_database) as conn:
+        conn.execute("""
+            CREATE TRIGGER reject_drop_delete BEFORE DELETE ON duel_inventory
+            BEGIN SELECT RAISE(ABORT, 'inventory delete failed'); END
+        """)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    with sqlite3.connect(temp_database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 0
+
+
+def test_missing_exact_instance_never_deletes_another(temp_database, monkeypatch):
+    import database as db
+    from handlers import duel
+
+    selected = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    alternative = db.add_duel_inventory_item(CHAT_ID, 2, "formangnome_whisker")
+    snapshot = db.get_duel_inventory(CHAT_ID, 2)
+    assert db.remove_duel_inventory_instance(CHAT_ID, 2, selected["id"])
+    monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: snapshot)
+    monkeypatch.setattr(duel.random, "random", Mock(return_value=0.0))
+    choice = Mock(return_value=snapshot[0])
+    monkeypatch.setattr(duel.random, "choice", choice)
+
+    assert duel._maybe_drop_loser_inventory_item(CHAT_ID, 2) is None
+    choice.assert_called_once()
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == alternative["id"]
+    with sqlite3.connect(temp_database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM duel_item_events").fetchone()[0] == 0
+
+
+def test_two_concurrent_drops_share_one_active_slot(temp_database):
+    import database as db
+
+    first = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    second = db.add_duel_inventory_item(CHAT_ID, 3, "formangnome_whisker")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        drops = list(pool.map(
+            lambda pair: db.create_duel_item_event_from_inventory(CHAT_ID, *pair),
+            ((2, first["id"]), (3, second["id"])),
+        ))
+    assert sum(drop is not None for drop in drops) == 1
+    assert sum(len(db.get_duel_inventory(CHAT_ID, user)) for user in (2, 3)) == 1
+    with sqlite3.connect(temp_database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM duel_item_events WHERE claimed = 0").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_failure_restores_same_instance_and_frees_slot(temp_database, fake_context):
+    import database as db
+    from handlers import duel
+
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+    fake_context.bot.send_message.side_effect = RuntimeError("Telegram unavailable")
+    await duel._publish_duel_drop(fake_context, drop)
+
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    assert db.get_duel_item_event(drop["event_id"]) is None
+    assert db.create_duel_item_event(CHAT_ID) is not None
+
+
+@pytest.mark.asyncio
+async def test_message_binding_failure_deletes_button_and_restores_item(
+    temp_database, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import duel
+
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+    monkeypatch.setattr(duel, "set_duel_item_event_message", Mock(return_value=False))
+    await duel._publish_duel_drop(fake_context, drop)
+
+    fake_context.bot.delete_message.assert_awaited_once()
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    assert db.get_duel_item_event(drop["event_id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_message_binding_exception_after_commit_still_restores_item(
+    temp_database, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import duel
+
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+
+    def bind_then_fail(event_id, message_id):
+        assert db.set_duel_item_event_message(event_id, message_id)
+        raise RuntimeError("late acknowledgement failure")
+
+    monkeypatch.setattr(duel, "set_duel_item_event_message", bind_then_fail)
+    await duel._publish_duel_drop(fake_context, drop)
+
+    fake_context.bot.delete_message.assert_awaited_once()
+    assert db.get_duel_inventory(CHAT_ID, 2)[0]["id"] == instance["id"]
+    assert db.get_duel_item_event(drop["event_id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_dropped_item_uses_existing_claim_callback_and_frees_slot(
+    temp_database, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import duel_items
+    from tests.test_duel_items import item_event_update, make_user
+
+    loser = make_user(2, "loser")
+    collector = make_user(3, "collector")
+    outsider = make_user(4, "outsider")
+    db.get_or_create_duel_user(loser, CHAT_ID)
+    db.get_or_create_duel_user(collector, CHAT_ID)
+    instance = db.add_duel_inventory_item(CHAT_ID, loser.id, "vevangel_wing")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, loser.id, instance["id"])
+    event_id = drop["event_id"]
+    choice = Mock(side_effect=AssertionError("fixed drop used random catalog"))
+    monkeypatch.setattr(duel_items.random, "choice", choice)
+
+    # A guessed callback cannot claim an item before its message is published.
+    update, query = item_event_update(CHAT_ID, collector, event_id)
+    await duel_items.duel_item_event_callback(update, fake_context)
+    assert db.get_duel_item_event(event_id)["claimed"] is False
+    assert db.get_duel_inventory(CHAT_ID, collector.id) == []
+    assert db.set_duel_item_event_message(event_id, 777)
+
+    update, query = item_event_update(CHAT_ID, outsider, event_id)
+    await duel_items.duel_item_event_callback(update, fake_context)
+    query.answer.assert_awaited_once_with("Сначала стань гномом.", show_alert=True)
+
+    update, query = item_event_update(CHAT_ID, collector, event_id)
+    await duel_items.duel_item_event_callback(update, fake_context)
+    query.answer.assert_awaited_once_with()
+    assert [item["item_id"] for item in db.get_duel_inventory(CHAT_ID, collector.id)] == [
+        "vevangel_wing"
+    ]
+    assert db.get_duel_inventory(CHAT_ID, loser.id) == []
+    assert db.get_duel_item_event(event_id)["claimed"] is True
+    choice.assert_not_called()
+
+    update, query = item_event_update(CHAT_ID, loser, event_id)
+    await duel_items.duel_item_event_callback(update, fake_context)
+    query.answer.assert_awaited_once_with("Уже утащили.", show_alert=True)
+    assert db.create_duel_item_event(CHAT_ID) is not None
+
+
+@pytest.mark.asyncio
+async def test_loser_may_claim_own_drop(temp_database, fake_context):
+    import database as db
+    from handlers import duel_items
+    from tests.test_duel_items import item_event_update, make_user
+
+    loser = make_user(2, "loser")
+    db.get_or_create_duel_user(loser, CHAT_ID)
+    instance = db.add_duel_inventory_item(CHAT_ID, loser.id, "rat_knuckle")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, loser.id, instance["id"])
+    db.set_duel_item_event_message(drop["event_id"], 777)
+    update, query = item_event_update(CHAT_ID, loser, drop["event_id"])
+    await duel_items.duel_item_event_callback(update, fake_context)
+    query.answer.assert_awaited_once_with()
+    assert [item["item_id"] for item in db.get_duel_inventory(CHAT_ID, loser.id)] == [
+        "rat_knuckle"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_event_sees_active_duel_drop(temp_database, fake_context, monkeypatch):
+    import database as db
+    from handlers import duel_items
+    from tests.test_duel_items import make_user
+
+    db.get_or_create_duel_user(make_user(2, "loser"), CHAT_ID)
+    instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
+    drop = db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
+    monkeypatch.setattr(duel_items.random, "random", Mock(return_value=0.0))
+    choice = Mock(side_effect=AssertionError("scheduled event chose intro"))
+    monkeypatch.setattr(duel_items.random, "choice", choice)
+    await duel_items._spawn_duel_item_event(fake_context, CHAT_ID)
+    choice.assert_not_called()
+    fake_context.bot.send_message.assert_not_awaited()
+    assert db.get_duel_item_event(drop["event_id"])["claimed"] is False

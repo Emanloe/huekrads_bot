@@ -37,7 +37,9 @@ from database import (
     set_boss_enabled,
     add_duel_inventory_item,
     get_duel_inventory,
-    remove_duel_inventory_instance,
+    create_duel_item_event_from_inventory,
+    restore_unpublished_duel_drop,
+    set_duel_item_event_message,
     transfer_duel_inventory_item,
 )
 from handlers.duel_text import (
@@ -114,6 +116,7 @@ from handlers.boss_registration import (
     _boss_registration_is_open,
 )
 from handlers.duel_items import (
+    DUEL_ITEM_EVENT_CALLBACK_PREFIX,
     DUEL_ITEMS,
     format_duel_display_inventory,
     get_droppable_duel_inventory,
@@ -184,7 +187,7 @@ async def gnomed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
-def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
+def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> dict | None:
     inventory = get_droppable_duel_inventory(
         get_duel_inventory(chat_id, loser_id)
     )
@@ -194,9 +197,43 @@ def _maybe_drop_loser_inventory_item(chat_id: int, loser_id: int) -> str | None:
         return None
 
     instance = random.choice(inventory)
-    if not remove_duel_inventory_instance(chat_id, loser_id, instance["id"]):
-        return None
-    return get_duel_item_name(instance["item_id"])
+    return create_duel_item_event_from_inventory(chat_id, loser_id, instance["id"])
+
+
+async def _publish_duel_drop(context, drop: dict) -> None:
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(
+        get_text("duel.item_event.button"),
+        callback_data=f"{DUEL_ITEM_EVENT_CALLBACK_PREFIX}{drop['event_id']}",
+    )]])
+    message = None
+    try:
+        message = await context.bot.send_message(
+            chat_id=drop["chat_id"],
+            text=get_text(
+                "duel.finish.item_drop",
+                item_name=escape(get_duel_item_name(drop["item_id"])),
+            ),
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        if not set_duel_item_event_message(drop["event_id"], message.message_id):
+            raise RuntimeError("Could not bind duel drop to pickup message")
+    except Exception:
+        logging.exception("Не удалось опубликовать выпавший предмет в чате %s", drop["chat_id"])
+        restored = False
+        try:
+            restored = restore_unpublished_duel_drop(
+                drop, message.message_id if message is not None else None,
+            )
+            if not restored:
+                logging.error("Не удалось вернуть неопубликованный предмет %s", drop["event_id"])
+        except Exception:
+            logging.exception("Не удалось откатить выпадение предмета %s", drop["event_id"])
+        if restored and message is not None:
+            try:
+                await context.bot.delete_message(drop["chat_id"], message.message_id)
+            except Exception:
+                logging.exception("Не удалось удалить недоступную кнопку предмета %s", drop["event_id"])
 
 
 def _maybe_steal_loser_inventory_item(
@@ -1201,20 +1238,6 @@ async def _finish_duel(
             f"{escape(random.choice(DUEL_POST_MESSAGES))}"
         )
 
-    try:
-        dropped_item_name = _maybe_drop_loser_inventory_item(
-            chat_id,
-            loser["user_id"],
-        )
-    except Exception:
-        logging.exception("Ошибка потери предмета после дуэли в чате %s", chat_id)
-    else:
-        if dropped_item_name is not None:
-            res_msg += "\n\n" + get_text(
-                "duel.finish.item_drop",
-                item_name=escape(dropped_item_name),
-            )
-
     if duel and duel.get("message_id"):
 
         try:
@@ -1230,6 +1253,14 @@ async def _finish_duel(
         text=res_msg,
         parse_mode="HTML",
     )
+
+    try:
+        dropped_item = _maybe_drop_loser_inventory_item(chat_id, loser["user_id"])
+    except Exception:
+        logging.exception("Ошибка выпадения предмета после дуэли в чате %s", chat_id)
+    else:
+        if dropped_item is not None:
+            await _publish_duel_drop(context, dropped_item)
 
     to_delete = []
 

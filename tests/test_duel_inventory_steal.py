@@ -431,9 +431,17 @@ async def test_item_steal_then_pocket_drop_uses_fresh_remaining_instance_and_sta
     ]
     assert inventory_ids(db, WINNER_ID) == ["vevangel_wing"]
     assert inventory_ids(db, LOSER_ID) == []
-    output = fake_context.bot.send_message.await_args.kwargs["text"]
+    assert fake_context.bot.send_message.await_count == 2
+    output = fake_context.bot.send_message.await_args_list[0].kwargs["text"]
     assert "<b>Заодно спиздил:</b> Крыло Вевангела" in output
-    assert output.endswith("\n\n<b>Карман порвался, выпало:</b> Ус Формангнома")
+    assert "Карман порвался" not in output
+    assert fake_context.bot.send_message.await_args_list[1].kwargs["text"] == (
+        "<b>Карман порвался, выпало:</b> Ус Формангнома"
+    )
+    with sqlite3.connect(temp_database) as connection:
+        assert connection.execute(
+            "SELECT item_id FROM duel_item_events WHERE claimed = 0"
+        ).fetchone()[0] == "formangnome_whisker"
 
 
 @pytest.mark.asyncio
