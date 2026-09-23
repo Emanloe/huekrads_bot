@@ -677,6 +677,45 @@ def make_block_phase_duel(*, strike_zone="head", round_num=3, turn_id=8):
 
 
 @pytest.mark.asyncio
+async def test_process_block_choice_miss_preserves_rng_trace(monkeypatch, fake_context):
+    from handlers import duel
+
+    state = make_block_phase_duel()
+    duel.ACTIVE_DUELS[CHAT_ID] = state
+    install_fake_tasks(monkeypatch, duel)
+    finish = AsyncMock()
+    rolls = iter((0.5, 0.0))
+    trace = []
+
+    def roll():
+        value = next(rolls)
+        trace.append(("random", value))
+        return value
+
+    def choose(values):
+        if values is duel.MISS_PHRASES:
+            trace.append(("choice", "miss"))
+            return values[0]
+        assert values is duel.ATTACK_PHRASES
+        trace.append(("choice", "attack"))
+        return values[0]
+
+    monkeypatch.setattr(duel, "_finish_duel", finish)
+    monkeypatch.setattr(duel, "random", SimpleNamespace(random=roll, choice=choose))
+
+    await duel._process_block_choice(fake_context, CHAT_ID, "body")
+
+    assert trace == [
+        ("random", 0.5), ("random", 0.0),
+        ("choice", "miss"), ("choice", "attack"),
+    ]
+    assert (state["phase"], state["attack_zone"], state["round"], state["turn_id"]) == (
+        "attack", None, 4, 9,
+    )
+    finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_process_block_choice_successful_block_preserves_rng_state_and_timer_contract(
     monkeypatch,
     fake_context,

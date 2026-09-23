@@ -133,6 +133,106 @@ def get_duel_session(chat_id: int, duel_id: int) -> dict | None:
         return _session_from_row(row)
 
 
+def get_duel_session_in_transaction(
+    chat_id: int, duel_id: int, *, cursor: sqlite3.Cursor,
+) -> dict | None:
+    """Read one chat-scoped session on the caller's locked connection."""
+    cursor.execute(
+        "SELECT * FROM duel_sessions WHERE chat_id = ? AND id = ?",
+        (chat_id, duel_id),
+    )
+    return _session_from_row(cursor.fetchone(), cursor.description)
+
+
+def activate_duel_session_in_transaction(
+    chat_id: int,
+    duel_id: int,
+    turn_id: int,
+    message_id: int,
+    deadline_at: int,
+    published_at: int,
+    *,
+    cursor: sqlite3.Cursor,
+) -> bool:
+    """Bind a published prompt and arm its deadline without changing turn_id."""
+    cursor.execute(
+        """
+        UPDATE duel_sessions
+        SET status = 'active', message_id = ?, deadline_at = ?, updated_at = ?
+        WHERE chat_id = ? AND id = ? AND status = 'publishing' AND turn_id = ?
+          AND (phase = 'attack' OR result_json IS NULL)
+        """,
+        (message_id, deadline_at, published_at, chat_id, duel_id, turn_id),
+    )
+    return cursor.rowcount == 1
+
+
+def save_duel_attack_in_transaction(
+    chat_id: int,
+    duel_id: int,
+    turn_id: int,
+    attacker_user_id: int,
+    zone: str,
+    updated_at: int,
+    *,
+    cursor: sqlite3.Cursor,
+) -> bool:
+    """CAS an accepted attack into an unpublished block prompt."""
+    cursor.execute(
+        """
+        UPDATE duel_sessions
+        SET status = 'publishing', phase = 'block', attack_zone = ?,
+            turn_id = turn_id + 1, deadline_at = NULL, result_json = NULL,
+            updated_at = ?
+        WHERE chat_id = ? AND id = ? AND status = 'active'
+          AND phase = 'attack' AND turn_id = ? AND attacker_user_id = ?
+        """,
+        (zone, updated_at, chat_id, duel_id, turn_id, attacker_user_id),
+    )
+    return cursor.rowcount == 1
+
+
+def save_duel_block_resolution_in_transaction(
+    chat_id: int,
+    duel_id: int,
+    turn_id: int,
+    defender_user_id: int,
+    resolution: dict,
+    updated_at: int,
+    *,
+    terminal: bool,
+    cursor: sqlite3.Cursor,
+) -> bool:
+    """Checkpoint one resolved block; terminal DB effects are deliberately absent."""
+    resolution_json = _json_object(resolution)
+    if terminal:
+        cursor.execute(
+            """
+            UPDATE duel_sessions
+            SET status = 'publishing', turn_id = turn_id + 1,
+                deadline_at = NULL, result_json = ?, updated_at = ?
+            WHERE chat_id = ? AND id = ? AND status = 'active'
+              AND phase = 'block' AND turn_id = ? AND defender_user_id = ?
+            """,
+            (resolution_json, updated_at, chat_id, duel_id, turn_id, defender_user_id),
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE duel_sessions
+            SET status = 'publishing', phase = 'attack', attack_zone = NULL,
+                attacker_user_id = defender_user_id,
+                defender_user_id = attacker_user_id,
+                round_no = round_no + 1, turn_id = turn_id + 1,
+                deadline_at = NULL, result_json = ?, updated_at = ?
+            WHERE chat_id = ? AND id = ? AND status = 'active'
+              AND phase = 'block' AND turn_id = ? AND defender_user_id = ?
+            """,
+            (resolution_json, updated_at, chat_id, duel_id, turn_id, defender_user_id),
+        )
+    return cursor.rowcount == 1
+
+
 def get_current_duel_session(chat_id: int) -> dict | None:
     """Return this chat's sole publishing or active ordinary duel, if any."""
     with get_db() as conn:

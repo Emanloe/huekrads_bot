@@ -91,6 +91,7 @@ from handlers.duel_state import (
     _advance_duel_round,
     _build_duel_result_plan,
     _get_duel_participant_ineligibility,
+    DUEL_MOVE_TIMEOUT_SECONDS,
     _is_miss_roll,
     _is_berserk_roll,
     _is_duel_item_steal_roll,
@@ -98,6 +99,7 @@ from handlers.duel_state import (
     _is_suicide_roll,
     _resolve_zone_outcome,
     _set_attack_choice,
+    resolve_duel_round,
 )
 from handlers.duel_messaging import (
     AUTO_DELETE_DELAY,
@@ -125,7 +127,7 @@ from handlers.duel_items import (
     get_duel_item_name,
 )
 
-MOVE_TIMEOUT = 10  # 10 секунд на ход
+MOVE_TIMEOUT = DUEL_MOVE_TIMEOUT_SECONDS  # 10 секунд на ход
 
 _DWARFS_FACTS_PATH = Path(__file__).resolve().parent.parent / "data" / "dwarfs_facts.json"
 with open(_DWARFS_FACTS_PATH, encoding="utf-8") as _facts_file:
@@ -899,21 +901,18 @@ async def _process_block_choice(
 
     att_title = format_user_title(attacker_data)
     def_title = format_user_title(defender_data)
+    resolution = resolve_duel_round(strike_zone, block_zone, random)
 
     # ========================================================
     # 1. Шанс 1% — самоубийство атаковавшего
     # ========================================================
 
-    if _is_suicide_roll(random.random()):
-
-        suicide_phrase = random.choice(
-            SUICIDE_PHRASES
-        )
+    if resolution.outcome == "suicide":
 
         res_text = get_text(
             "duel.live.outcomes.suicide",
             attacker_title=att_title,
-            suicide_phrase=suicide_phrase,
+            suicide_phrase=resolution.outcome_phrase,
             defender_title=def_title,
         )
 
@@ -933,15 +932,7 @@ async def _process_block_choice(
     # 2. Шанс 5% — промах
     # ========================================================
 
-    if _is_miss_roll(random.random()):
-
-        miss_phrase = random.choice(
-            MISS_PHRASES
-        )
-
-        att_action = random.choice(
-            ATTACK_PHRASES
-        )
+    if resolution.outcome == "miss":
 
         # Смена ролей.
         _advance_duel_round(duel)
@@ -957,9 +948,9 @@ async def _process_block_choice(
 
         text = _build_duel_miss_text(
             att_title,
-            att_action,
+            resolution.attack_phrase,
             strike_zone,
-            miss_phrase,
+            resolution.outcome_phrase,
             new_att_title,
             new_def_title,
             MOVE_TIMEOUT,
@@ -1007,15 +998,7 @@ async def _process_block_choice(
     # 3. Сравнение УДАРА и БЛОКА
     # ========================================================
 
-    if _resolve_zone_outcome(strike_zone, block_zone) == "block":
-
-        block_phrase = random.choice(
-            BLOCK_PHRASES
-        )
-
-        att_action = random.choice(
-            ATTACK_PHRASES
-        )
+    if resolution.outcome == "block":
 
         # Смена ролей.
         _advance_duel_round(duel)
@@ -1032,9 +1015,9 @@ async def _process_block_choice(
         text = _build_duel_block_text(
             att_title,
             def_title,
-            att_action,
+            resolution.attack_phrase,
             strike_zone,
-            block_phrase,
+            resolution.outcome_phrase,
             new_att_title,
             new_def_title,
             MOVE_TIMEOUT,
@@ -1082,22 +1065,14 @@ async def _process_block_choice(
 
     else:
 
-        hit_phrase = random.choice(
-            HIT_PHRASES
-        )
-
-        att_action = random.choice(
-            ATTACK_PHRASES
-        )
-
         res_text = get_text(
             "duel.live.outcomes.hit",
             attacker_title=att_title,
-            attack_phrase=att_action,
+            attack_phrase=resolution.attack_phrase,
             strike_target=TARGET_NAMES[strike_zone],
             defender_title=def_title,
             block_target=TARGET_NAMES[block_zone],
-            hit_phrase=hit_phrase,
+            hit_phrase=resolution.outcome_phrase,
         )
 
         await _finish_duel(

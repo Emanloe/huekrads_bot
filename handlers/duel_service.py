@@ -12,8 +12,21 @@ from database import (
     get_duel_user_by_id_in_transaction,
     get_duel_user_by_username,
 )
-from duel_session_repository import create_duel_session, has_current_duel_session
-from handlers.duel_state import _get_duel_participant_ineligibility
+from duel_session_repository import (
+    activate_duel_session_in_transaction,
+    create_duel_session,
+    get_duel_session_in_transaction,
+    has_current_duel_session,
+    save_duel_attack_in_transaction,
+    save_duel_block_resolution_in_transaction,
+    utc_unix_milliseconds,
+)
+from handlers.duel_state import (
+    DUEL_MOVE_TIMEOUT_SECONDS,
+    _get_duel_participant_ineligibility,
+    resolve_duel_round,
+)
+from handlers.duel_text import TARGET_NAMES
 
 
 @dataclass(frozen=True)
@@ -85,6 +98,209 @@ class PersistentDuelStartResult:
     @property
     def success(self) -> bool:
         return self.session is not None
+
+
+@dataclass(frozen=True)
+class PersistentDuelActionResult:
+    """One server-side transition or a domain-level rejection."""
+
+    reason: str
+    session: dict | None = None
+    resolution: dict | None = None
+    timeout_zone: str | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.reason in ("success", "terminal_pending") and self.session is not None
+
+
+def _terminal_resolution_pending(session: dict) -> bool:
+    result = session["result"]
+    return isinstance(result, dict) and result.get("kind") == "terminal_resolution"
+
+
+def _validated_active_turn(
+    session: dict | None, expected_turn_id: int,
+) -> PersistentDuelActionResult | None:
+    if session is None:
+        return PersistentDuelActionResult("not_found")
+    if _terminal_resolution_pending(session):
+        return PersistentDuelActionResult("terminal_pending")
+    if session["turn_id"] != expected_turn_id:
+        return PersistentDuelActionResult("stale_turn")
+    if session["status"] == "publishing":
+        return PersistentDuelActionResult("publishing")
+    if session["status"] != "active":
+        return PersistentDuelActionResult("not_active")
+    return None
+
+
+def activate_persistent_duel_turn(
+    chat_id: int,
+    duel_id: int,
+    turn_id: int,
+    message_id: int,
+    publication_time_ms: int,
+) -> PersistentDuelActionResult:
+    """Arm ten seconds only after a trusted publisher has shown this prompt."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        if session is None:
+            return PersistentDuelActionResult("not_found")
+        if _terminal_resolution_pending(session):
+            return PersistentDuelActionResult("terminal_pending")
+        if session["turn_id"] != turn_id:
+            return PersistentDuelActionResult("stale_turn")
+        if session["status"] != "publishing":
+            return PersistentDuelActionResult("not_publishing")
+        if type(message_id) is not int or message_id <= 0:
+            return PersistentDuelActionResult("invalid_message_id")
+
+        deadline_at = publication_time_ms + DUEL_MOVE_TIMEOUT_SECONDS * 1000
+        if not activate_duel_session_in_transaction(
+            chat_id, duel_id, turn_id, message_id, deadline_at,
+            publication_time_ms, cursor=cursor,
+        ):
+            raise RuntimeError("Validated duel prompt could not be activated")
+        current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        return PersistentDuelActionResult("success", current)
+
+
+def _apply_persistent_attack(
+    cursor, chat_id: int, duel_id: int, session: dict, zone: str, now_ms: int,
+) -> PersistentDuelActionResult:
+    if not save_duel_attack_in_transaction(
+        chat_id, duel_id, session["turn_id"], session["attacker_user_id"],
+        zone, now_ms, cursor=cursor,
+    ):
+        raise RuntimeError("Validated duel attack could not be saved")
+    current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    return PersistentDuelActionResult("success", current)
+
+
+def _apply_persistent_block(
+    cursor, chat_id: int, duel_id: int, session: dict, zone: str, now_ms: int,
+) -> PersistentDuelActionResult:
+    round_result = resolve_duel_round(session["attack_zone"], zone, random)
+    terminal = round_result.outcome in ("suicide", "hit")
+    # result_json is a server-generated, recoverable checkpoint until Stage 2B-4
+    # applies a terminal result. It also preserves nonterminal flavor across send failures.
+    resolution = {
+        "kind": "terminal_resolution" if terminal else "round_resolution",
+        "outcome": round_result.outcome,
+        "outcome_phrase": round_result.outcome_phrase,
+        "attack_phrase": round_result.attack_phrase,
+        "strike_zone": session["attack_zone"],
+        "block_zone": zone,
+        "attacker_user_id": session["attacker_user_id"],
+        "defender_user_id": session["defender_user_id"],
+        "round_no": session["round_no"],
+        "resolved_turn_id": session["turn_id"],
+    }
+    if terminal:
+        winner = (
+            session["defender_user_id"] if round_result.outcome == "suicide"
+            else session["attacker_user_id"]
+        )
+        loser = (
+            session["attacker_user_id"] if round_result.outcome == "suicide"
+            else session["defender_user_id"]
+        )
+        resolution["winner_user_id"] = winner
+        resolution["loser_user_id"] = loser
+
+    if not save_duel_block_resolution_in_transaction(
+        chat_id, duel_id, session["turn_id"], session["defender_user_id"],
+        resolution, now_ms, terminal=terminal, cursor=cursor,
+    ):
+        raise RuntimeError("Validated duel block could not be saved")
+    current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    return PersistentDuelActionResult(
+        "terminal_pending" if terminal else "success", current, resolution,
+    )
+
+
+def submit_persistent_duel_attack(
+    chat_id: int,
+    duel_id: int,
+    actor_user_id: int,
+    turn_id: int,
+    zone: str,
+    *,
+    now_ms: int | None = None,
+) -> PersistentDuelActionResult:
+    """Accept only the current attacker's action for this chat and turn."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        rejection = _validated_active_turn(session, turn_id)
+        if rejection is not None:
+            return rejection
+        if session["phase"] != "attack":
+            return PersistentDuelActionResult("wrong_phase")
+        if actor_user_id != session["attacker_user_id"]:
+            return PersistentDuelActionResult("wrong_actor")
+        if not isinstance(zone, str) or zone not in TARGET_NAMES:
+            return PersistentDuelActionResult("invalid_zone")
+        timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        return _apply_persistent_attack(cursor, chat_id, duel_id, session, zone, timestamp)
+
+
+def submit_persistent_duel_block(
+    chat_id: int,
+    duel_id: int,
+    actor_user_id: int,
+    turn_id: int,
+    zone: str,
+    *,
+    now_ms: int | None = None,
+) -> PersistentDuelActionResult:
+    """Resolve a block once, without applying any terminal DB effects."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        rejection = _validated_active_turn(session, turn_id)
+        if rejection is not None:
+            return rejection
+        if session["phase"] != "block":
+            return PersistentDuelActionResult("wrong_phase")
+        if actor_user_id != session["defender_user_id"]:
+            return PersistentDuelActionResult("wrong_actor")
+        if not isinstance(zone, str) or zone not in TARGET_NAMES:
+            return PersistentDuelActionResult("invalid_zone")
+        timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        return _apply_persistent_block(cursor, chat_id, duel_id, session, zone, timestamp)
+
+
+def resolve_persistent_duel_timeout(
+    chat_id: int,
+    duel_id: int,
+    turn_id: int,
+    now_ms: int,
+) -> PersistentDuelActionResult:
+    """Let the DB-validated current phase choose exactly one timeout zone."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        rejection = _validated_active_turn(session, turn_id)
+        if rejection is not None:
+            return rejection
+        if now_ms < session["deadline_at"]:
+            return PersistentDuelActionResult("not_due")
+
+        zone = random.choice(["head", "body", "dick"])
+        if session["phase"] == "attack":
+            result = _apply_persistent_attack(cursor, chat_id, duel_id, session, zone, now_ms)
+        else:
+            result = _apply_persistent_block(cursor, chat_id, duel_id, session, zone, now_ms)
+        return PersistentDuelActionResult(
+            result.reason, result.session, result.resolution, timeout_zone=zone,
+        )
 
 
 def start_persistent_duel(
