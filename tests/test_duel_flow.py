@@ -1307,7 +1307,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     monkeypatch,
     fake_context,
 ):
-    from handlers import duel
+    from handlers import duel, duel_service
 
     initiator_tg = make_user(701, "initiator")
     update = SimpleNamespace(
@@ -1328,14 +1328,19 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     )
     monkeypatch.setattr(duel, "_extract_username", lambda *_args: None)
     monkeypatch.setattr(
-        duel,
+        duel_service,
         "get_duel_top",
         Mock(return_value=[("initiator", "Initiator", 0, 0, 20), ("opponent", "@Оппонент", 0, 0, 20)]),
     )
     monkeypatch.setattr(
-        duel,
+        duel_service,
         "get_duel_user_by_username",
         lambda username, _chat_id: admission_user(702, username),
+    )
+    monkeypatch.setattr(
+        duel_service,
+        "get_duel_user_by_id",
+        lambda _chat_id, _user_id: admission_user(initiator_tg.id, initiator_tg.username),
     )
 
     await duel.duel_command(update, fake_context)
@@ -1350,7 +1355,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     ]
 
     sent.reset_mock()
-    monkeypatch.setattr(duel, "get_duel_top", Mock(return_value=[]))
+    monkeypatch.setattr(duel_service, "get_duel_top", Mock(return_value=[]))
     await duel.duel_command(update, fake_context)
     sent.assert_awaited_once_with(
         update,

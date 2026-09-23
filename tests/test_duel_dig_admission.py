@@ -45,13 +45,13 @@ async def test_duel_list_denies_ineligible_initiator_before_selection_or_rng(
     temp_database, fake_context, monkeypatch, points, no_dick, expected,
 ):
     import database
-    from handlers import duel
+    from handlers import duel, duel_service
     from text_resources import get_text
 
     initiator = _user(1, "initiator")
     database.get_or_create_duel_user(initiator, CHAT_ID)
     _set_points(temp_database, 1, points, no_dick=no_dick)
-    monkeypatch.setattr(duel, "get_duel_top", Mock(side_effect=AssertionError("opened selection")))
+    monkeypatch.setattr(duel_service, "get_duel_top", Mock(side_effect=AssertionError("opened selection")))
     monkeypatch.setattr(duel.random, "choice", Mock(side_effect=AssertionError("used RNG")))
     update = _duel_update(initiator)
 

@@ -86,6 +86,7 @@ from handlers.boss_state import (
     _record_boss_block_choice,
 )
 from handlers.duel_input import extract_username as _extract_username
+from handlers.duel_service import list_duel_opponents
 from handlers.duel_state import (
     _advance_duel_round,
     _build_duel_result_plan,
@@ -1558,7 +1559,16 @@ async def duel_command(
 
     if not target_username:
 
-        if initiator_ineligibility == "no_points":
+        selection = list_duel_opponents(chat_id, initiator["user_id"])
+        if selection.ineligibility == "no_dick":
+            await send_and_schedule(
+                update,
+                context,
+                get_text("duel.command.no_dick"),
+            )
+            return
+
+        if selection.ineligibility == "no_points":
             await send_and_schedule(
                 update,
                 context,
@@ -1566,54 +1576,16 @@ async def duel_command(
             )
             return
 
-        top_list = get_duel_top(
-            chat_id=chat_id,
-            limit=20,
-            include_dwarf_name=True,
-        )
-
         keyboard = []
 
-        for row in top_list:
-
-            username, display_name, *_ = row
-
-            if not username:
-                continue
-
-            if (
-                initiator_tg.username
-                and initiator_tg.username.lower()
-                == username.lower()
-            ):
-                continue
-
-            opponent = get_duel_user_by_username(
-                username,
-                chat_id,
-            )
-
-            if not opponent:
-                continue
-
-            if (
-                opponent["points"] <= 0
-                or opponent["dick_stolen_today"]
-            ):
-                continue
-
-            clean_label = format_user_title_plain({
-                "display_name": (display_name or username).lstrip("@"),
-                "dwarf_name": opponent.get("dwarf_name"),
-            })
-
-            label = get_text("duel.selection.button_label", title=clean_label)
+        for opponent in selection.opponents:
+            label = get_text("duel.selection.button_label", title=opponent.title)
 
             keyboard.append(
                 [
                     InlineKeyboardButton(
                         label,
-                        callback_data=f"start_duel_{username}",
+                        callback_data=f"start_duel_{opponent.username}",
                     )
                 ]
             )

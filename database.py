@@ -462,6 +462,19 @@ def get_or_create_duel_user(tg_user, chat_id: int) -> dict:
         return _reset_user_if_new_day(cursor, row)
 
 
+def get_duel_user_by_id(chat_id: int, user_id: int) -> dict | None:
+    """Read an existing duel participant in one chat without registering them."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT user_id, chat_id, username, display_name, points, wins, losses,
+                   stolen_dicks_count, dick_stolen_count, dick_stolen_today,
+                   last_activity_date, last_stolen_by, daily_wins, dwarf_name
+            FROM duel_users WHERE chat_id = ? AND user_id = ?
+        """, (chat_id, user_id))
+        return _reset_user_if_new_day(cursor, cursor.fetchone())
+
+
 def get_duel_user_by_username(username: str, chat_id: int) -> dict | None:
     clean_search = _clean_username(username)
     if not clean_search:
