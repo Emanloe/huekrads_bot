@@ -149,6 +149,12 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
     assert fake_context.bot.send_message.await_args.kwargs == {
         "chat_id": CHAT_ID, "text": "Шар ожидает вопрос:",
     }
+    from handlers.duel_messaging import delete_messages_job
+    assert fake_context.job_queue.calls == [
+        (delete_messages_job, elite_ball.BALL_COMMAND_DELETE_DELAY,
+         {"data": {"chat_id": CHAT_ID, "message_ids": [25]}}),
+    ] * 2
+    assert elite_ball.BALL_COMMAND_DELETE_DELAY == 10
 
     choice = Mock(return_value=answer)
     monkeypatch.setattr(elite_ball.random, "choice", choice)
@@ -181,6 +187,37 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
         answer, reply_to_message_id=30,
     )
     assert fake_context.bot_data["elite_ball_waiting"] == set()
+    assert len(fake_context.job_queue.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_ball_command_deletion_is_best_effort_and_never_clears_waiting(
+    fake_context, monkeypatch,
+):
+    from handlers import elite_ball
+
+    choice = Mock(side_effect=AssertionError("deletion used ball RNG"))
+    monkeypatch.setattr(elite_ball.random, "choice", choice)
+    command = _real_command_update()
+    await elite_ball.ball_command(command, fake_context)
+    callback, delay, kwargs = fake_context.job_queue.calls[0]
+    assert delay == 10
+    fake_context.job.data = kwargs["data"]
+    fake_context.bot.delete_message.side_effect = RuntimeError("Telegram denied deletion")
+    await callback(fake_context)
+    fake_context.bot.delete_message.assert_awaited_once_with(
+        chat_id=CHAT_ID, message_id=25,
+    )
+    assert fake_context.bot_data["elite_ball_waiting"] == {(CHAT_ID, 1)}
+
+    monkeypatch.setattr(
+        elite_ball, "schedule_auto_delete", Mock(side_effect=RuntimeError("queue stopped")),
+    )
+    await elite_ball.ball_command(command, fake_context)
+    assert fake_context.bot_data["elite_ball_waiting"] == {(CHAT_ID, 1)}
+    assert fake_context.bot.send_message.await_count == 2
+    assert len(fake_context.job_queue.calls) == 1
+    choice.assert_not_called()
 
 
 @pytest.mark.asyncio
