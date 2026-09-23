@@ -25,10 +25,13 @@ def _json_object(value: dict) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
 
 
-def _session_from_row(row) -> dict | None:
+def _session_from_row(row, description=None) -> dict | None:
     if row is None:
         return None
-    session = dict(row)
+    if isinstance(row, sqlite3.Row):
+        session = dict(row)
+    else:
+        session = dict(zip((column[0] for column in description), row))
     session["player1_snapshot"] = json.loads(session.pop("player1_snapshot_json"))
     session["player2_snapshot"] = json.loads(session.pop("player2_snapshot_json"))
     result_json = session.pop("result_json")
@@ -57,22 +60,24 @@ def create_duel_session(
     pocket_done_at: int | None = None,
     finished_at: int | None = None,
     now_ms: int | None = None,
+    cursor: sqlite3.Cursor | None = None,
 ) -> dict:
     """Insert one session; SQLite constraints reject conflicting active slots.
 
     This is storage only: it does not register players, check admission, or
     decide the first attacker. An IntegrityError is left for the caller to
     classify without hiding a failed CHECK behind an active-slot conflict.
+
+    When cursor is supplied, its caller owns the transaction. This lets the
+    future start operation validate admission and insert under one write lock.
     """
     created_at = utc_unix_milliseconds() if now_ms is None else now_ms
     snapshot1_json = _json_object(player1_snapshot)
     snapshot2_json = _json_object(player2_snapshot)
     result_json = _json_object(result) if result is not None else None
-    with get_db() as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("BEGIN IMMEDIATE")
-        cursor.execute(
+
+    def insert_in_transaction(db_cursor: sqlite3.Cursor) -> dict:
+        db_cursor.execute(
             """
             INSERT INTO duel_sessions (
                 chat_id, player1_user_id, player2_user_id,
@@ -92,11 +97,29 @@ def create_duel_session(
                 created_at, created_at, finished_at,
             ),
         )
-        cursor.execute(
+        db_cursor.execute(
             "SELECT * FROM duel_sessions WHERE chat_id = ? AND id = ?",
-            (chat_id, cursor.lastrowid),
+            (chat_id, db_cursor.lastrowid),
         )
-        return _session_from_row(cursor.fetchone())
+        return _session_from_row(db_cursor.fetchone(), db_cursor.description)
+
+    if cursor is not None:
+        return insert_in_transaction(cursor)
+    with get_db() as conn:
+        db_cursor = conn.cursor()
+        db_cursor.execute("BEGIN IMMEDIATE")
+        return insert_in_transaction(db_cursor)
+
+
+def has_current_duel_session(chat_id: int, *, cursor: sqlite3.Cursor) -> bool:
+    """Check this chat's active slot inside the caller's transaction."""
+    return cursor.execute(
+        """
+        SELECT 1 FROM duel_sessions
+        WHERE chat_id = ? AND status IN ('publishing', 'active')
+        """,
+        (chat_id,),
+    ).fetchone() is not None
 
 
 def get_duel_session(chat_id: int, duel_id: int) -> dict | None:
