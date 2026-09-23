@@ -44,7 +44,7 @@ def points(db, user_id=1, chat_id=CHAT_ID):
 def update(tg_user, chat_id=CHAT_ID):
     return SimpleNamespace(
         effective_chat=SimpleNamespace(id=chat_id), effective_user=tg_user,
-        message=SimpleNamespace(from_user=tg_user, chat_id=chat_id),
+        message=SimpleNamespace(from_user=tg_user, chat_id=chat_id, message_id=900),
     )
 
 
@@ -451,3 +451,111 @@ def test_dig_uses_existing_equal_weight_catalog_and_chance():
     assert DIG_FIND_CHANCE == 0.20
     assert DUEL_ITEMS
     assert all(item["id"] not in BASE_DUEL_ITEM_IDS for item in DUEL_ITEMS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", [
+    "unregistered", "insufficient_points", "daily_limit", "active_event", "miss",
+])
+async def test_dig_ordinary_responses_and_command_are_deleted_after_10_seconds(
+    outcome, frozen_dig_date, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import dig
+    from handlers.duel_messaging import delete_messages_job
+
+    if outcome != "unregistered":
+        register(db, points=100 if outcome == "daily_limit" else 50)
+    if outcome == "insufficient_points":
+        with db.get_db() as conn:
+            conn.execute(
+                "UPDATE duel_users SET points = 9 WHERE chat_id = ? AND user_id = 1",
+                (CHAT_ID,),
+            )
+    elif outcome == "daily_limit":
+        for _ in range(5):
+            assert db.try_duel_dig(CHAT_ID, 1, lambda: 1.0, lambda: None)[0] == "miss"
+    elif outcome == "active_event":
+        db.create_duel_item_event(CHAT_ID)
+
+    roll = Mock(return_value=1.0)
+    choice = Mock(side_effect=AssertionError("unexpected item selection"))
+    monkeypatch.setattr(dig.random, "random", roll)
+    monkeypatch.setattr(dig.random, "choice", choice)
+    await dig.dig_command(update(user(1)), fake_context)
+
+    assert len(fake_context.job_queue.calls) == 2
+    for callback, delay, _kwargs in fake_context.job_queue.calls:
+        assert callback is delete_messages_job
+        assert delay == dig.DIG_MESSAGE_DELETE_DELAY == 10
+    assert [call[2]["data"]["message_ids"] for call in fake_context.job_queue.calls] == [
+        [900], [101],
+    ]
+    assert all(call[2]["data"]["chat_id"] == CHAT_ID for call in fake_context.job_queue.calls)
+    assert roll.call_count == (1 if outcome == "miss" else 0)
+    choice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dig_find_deletes_only_command_and_preserves_pickup_message(
+    frozen_dig_date, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import dig, duel_items
+    from handlers.duel_messaging import delete_messages_job
+
+    register(db)
+    roll = Mock(return_value=0.0)
+    choice = Mock(return_value=duel_items.DUEL_ITEMS[0])
+    monkeypatch.setattr(dig.random, "random", roll)
+    monkeypatch.setattr(dig.random, "choice", choice)
+    await dig.dig_command(update(user(1)), fake_context)
+
+    assert fake_context.job_queue.calls == [(
+        delete_messages_job, dig.DIG_MESSAGE_DELETE_DELAY,
+        {"data": {"chat_id": CHAT_ID, "message_ids": [900]}},
+    )]
+    assert fake_context.bot.send_message.await_args.kwargs["reply_markup"] is not None
+    event_id = int(fake_context.bot.send_message.await_args.kwargs["reply_markup"]
+                   .inline_keyboard[0][0].callback_data.removeprefix(
+                       duel_items.DUEL_ITEM_EVENT_CALLBACK_PREFIX,
+                   ))
+    assert db.get_duel_item_event(event_id)["claimed"] is False
+    assert db.get_duel_item_event(event_id)["message_id"] == 101
+    roll.assert_called_once_with()
+    choice.assert_called_once_with(duel_items.DUEL_ITEMS)
+
+
+@pytest.mark.asyncio
+async def test_dig_delete_failures_do_not_change_completed_attempt(
+    frozen_dig_date, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import dig
+
+    register(db)
+    monkeypatch.setattr(dig.random, "random", Mock(return_value=1.0))
+    await dig.dig_command(update(user(1)), fake_context)
+    fake_context.bot.delete_message.side_effect = RuntimeError("Telegram denied deletion")
+    for callback, _delay, kwargs in fake_context.job_queue.calls:
+        fake_context.job.data = kwargs["data"]
+        await callback(fake_context)
+
+    assert fake_context.bot.delete_message.await_count == 2
+    assert db.get_duel_dig_attempts(CHAT_ID, 1, TODAY) == 1
+    assert points(db) == 40
+
+
+@pytest.mark.asyncio
+async def test_dig_schedule_failure_does_not_block_gameplay(
+    frozen_dig_date, fake_context, monkeypatch,
+):
+    import database as db
+    from handlers import dig
+
+    register(db)
+    monkeypatch.setattr(dig.random, "random", Mock(return_value=1.0))
+    monkeypatch.setattr(dig, "schedule_auto_delete", Mock(side_effect=RuntimeError("queue stopped")))
+    await dig.dig_command(update(user(1)), fake_context)
+    assert points(db) == 40
+    assert db.get_duel_dig_attempts(CHAT_ID, 1, TODAY) == 1

@@ -18,7 +18,18 @@ from handlers.duel_items import (
     DUEL_ITEM_EVENT_CALLBACK_PREFIX,
     get_duel_item_name,
 )
+from handlers.duel_messaging import schedule_auto_delete
 from text_resources import get_text
+
+
+DIG_MESSAGE_DELETE_DELAY = 10
+
+
+def _schedule_cleanup(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int) -> None:
+    try:
+        schedule_auto_delete(context, chat_id, [message_id], delay=DIG_MESSAGE_DELETE_DELAY)
+    except Exception:
+        logging.exception("Could not schedule /dig message deletion in chat %s", chat_id)
 
 
 async def dig_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -27,6 +38,8 @@ async def dig_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
+    if update.message is not None:
+        _schedule_cleanup(context, chat_id, update.message.message_id)
     try:
         status, dig = try_duel_dig(
             chat_id, user_id, random.random,
@@ -50,7 +63,8 @@ async def dig_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _publish_dig_find(context, dig)
         return
 
-    await context.bot.send_message(chat_id=chat_id, text=text)
+    response = await context.bot.send_message(chat_id=chat_id, text=text)
+    _schedule_cleanup(context, chat_id, response.message_id)
 
 
 async def _publish_dig_find(context: ContextTypes.DEFAULT_TYPE, dig: dict) -> None:

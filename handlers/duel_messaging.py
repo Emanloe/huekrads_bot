@@ -24,11 +24,12 @@ def schedule_auto_delete(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     message_ids: list[int],
+    delay: int = AUTO_DELETE_DELAY,
 ):
     if context.job_queue:
         context.job_queue.run_once(
             delete_messages_job,
-            when=AUTO_DELETE_DELAY,
+            when=delay,
             data={
                 "chat_id": chat_id,
                 "message_ids": message_ids,
