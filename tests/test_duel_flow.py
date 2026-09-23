@@ -1156,7 +1156,7 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
         "get_or_create_duel_user",
         Mock(return_value=user_data),
     )
-    monkeypatch.setattr(duel, "format_user_title", lambda _user: "<b>Статист</b>")
+    monkeypatch.setattr(duel, "format_user_title", lambda _user: "&lt;b&gt;Статист&lt;/b&gt;")
     monkeypatch.setattr(duel, "get_bosses_defeated", lambda **_kwargs: 4)
     monkeypatch.setattr(duel, "get_win_title", lambda _count: "🍆 Победитель")
     monkeypatch.setattr(duel, "get_loss_title", lambda _count: "💀 Лузер")

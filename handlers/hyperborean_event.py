@@ -242,7 +242,7 @@ def _claim_hyperboreic_huy_for_other(
         with sqlite3.connect(str(_HYPERBOREAN_DB_PATH), timeout=10) as conn:
             candidates = conn.execute(
                 """
-                SELECT user_id, username, display_name, points, dick_stolen_today
+                SELECT user_id, username, display_name, points, dick_stolen_today, dwarf_name
                 FROM duel_users
                 WHERE chat_id = ?
                 """,
@@ -253,13 +253,14 @@ def _claim_hyperboreic_huy_for_other(
                 return "missing", None, False
 
             selected = random.choice(candidates)
-            user_id, username, display_name, points, dick_stolen_today = selected
+            user_id, username, display_name, points, dick_stolen_today, dwarf_name = selected
             had_no_dick = bool(dick_stolen_today)
             selected_user = {
                 "user_id": user_id,
                 "chat_id": chat_id,
                 "username": username,
                 "display_name": display_name,
+                "dwarf_name": dwarf_name,
                 "points": points,
                 "dick_stolen_today": had_no_dick,
             }

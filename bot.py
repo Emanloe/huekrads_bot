@@ -89,6 +89,7 @@ from handlers.duel_items import (
     duel_item_event_callback,
     duel_item_event_job,
 )
+from handlers.duel_name import name_command
 
 
 logging.basicConfig(
@@ -111,6 +112,7 @@ BOT_COMMANDS = [
     BotCommand("toggle_forward", get_text("menu.commands.toggle_forward")),
     BotCommand("toggle_autodelete", get_text("menu.commands.toggle_autodelete")),
     BotCommand("duel", get_text("menu.commands.duel")),
+    BotCommand("name", get_text("menu.commands.name")),
     BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
     BotCommand("duel_top", get_text("menu.commands.duel_top")),
     BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
@@ -340,6 +342,8 @@ async def main():
             duel_command,
         )
     )
+
+    application.add_handler(CommandHandler("name", name_command))
 
     application.add_handler(
         CallbackQueryHandler(

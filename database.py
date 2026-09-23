@@ -2,6 +2,7 @@ import random
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
+from html import escape
 import pytz
 from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN
 from text_resources import get_text
@@ -35,14 +36,17 @@ def _clean_username(username: str | None) -> str | None:
     return cleaned if cleaned else None
 
 
-def format_user_title(user_data: dict) -> str:
-    """
-    Возвращает отображаемое имя без вызова упоминания (без @).
-    """
+def format_user_title_plain(user_data: dict, *, include_dwarf_name: bool = True) -> str:
+    """Participant title for plain text, including Telegram buttons."""
     username = _clean_username(user_data.get('username'))
-    if username:
-        return username
-    return user_data.get('display_name') or get_text("common.user.default_title")
+    title = username or user_data.get('display_name') or get_text("common.user.default_title")
+    dwarf_name = user_data.get('dwarf_name') if include_dwarf_name else None
+    return f"{title} ({dwarf_name})" if dwarf_name else title
+
+
+def format_user_title(user_data: dict) -> str:
+    """Participant title safe to insert into Telegram HTML messages."""
+    return escape(format_user_title_plain(user_data))
 
 
 def get_dick_steal_percent(daily_wins: int) -> int:
@@ -183,6 +187,9 @@ def init_db():
                 "ALTER TABLE duel_users ADD COLUMN bosses_defeated INTEGER DEFAULT 0"
             )
 
+        if "dwarf_name" not in cols:
+            cursor.execute("ALTER TABLE duel_users ADD COLUMN dwarf_name TEXT")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS duel_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,7 +327,7 @@ def _reset_user_if_new_day(cursor, row) -> dict | None:
     (
         user_id, chat_id, username, display_name, points, wins, losses,
         stolen_dicks_count, dick_stolen_count, dick_stolen_today,
-        last_activity_date, last_stolen_by, daily_wins
+        last_activity_date, last_stolen_by, daily_wins, dwarf_name
     ) = row
 
     if last_activity_date != today_str:
@@ -350,6 +357,7 @@ def _reset_user_if_new_day(cursor, row) -> dict | None:
         "last_activity_date": last_activity_date,
         "last_stolen_by": last_stolen_by,
         "daily_wins": daily_wins or 0,
+        "dwarf_name": dwarf_name,
     }
 
 
@@ -364,7 +372,7 @@ def get_or_create_duel_user(tg_user, chat_id: int) -> dict:
         cursor.execute("""
             SELECT user_id, chat_id, username, display_name, points, wins, losses,
                    stolen_dicks_count, dick_stolen_count, dick_stolen_today,
-                   last_activity_date, last_stolen_by, daily_wins
+                   last_activity_date, last_stolen_by, daily_wins, dwarf_name
             FROM duel_users WHERE user_id = ? AND chat_id = ?
         """, (tg_user.id, chat_id))
         row = cursor.fetchone()
@@ -385,7 +393,7 @@ def get_or_create_duel_user(tg_user, chat_id: int) -> dict:
             cursor.execute("""
                 SELECT user_id, chat_id, username, display_name, points, wins, losses,
                        stolen_dicks_count, dick_stolen_count, dick_stolen_today,
-                       last_activity_date, last_stolen_by, daily_wins
+                       last_activity_date, last_stolen_by, daily_wins, dwarf_name
                 FROM duel_users WHERE user_id = ? AND chat_id = ?
             """, (tg_user.id, chat_id))
             row = cursor.fetchone()
@@ -409,7 +417,7 @@ def get_duel_user_by_username(username: str, chat_id: int) -> dict | None:
         cursor.execute("""
             SELECT user_id, chat_id, username, display_name, points, wins, losses,
                    stolen_dicks_count, dick_stolen_count, dick_stolen_today,
-                   last_activity_date, last_stolen_by, daily_wins
+                   last_activity_date, last_stolen_by, daily_wins, dwarf_name
             FROM duel_users 
             WHERE chat_id = ? AND (LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?))
         """, (chat_id, clean_search, clean_search))
@@ -448,12 +456,46 @@ def get_duel_user_by_username(username: str, chat_id: int) -> dict | None:
         cursor.execute("""
             SELECT user_id, chat_id, username, display_name, points, wins, losses,
                    stolen_dicks_count, dick_stolen_count, dick_stolen_today,
-                   last_activity_date, last_stolen_by, daily_wins
+                   last_activity_date, last_stolen_by, daily_wins, dwarf_name
             FROM duel_users WHERE user_id = ? AND chat_id = ?
         """, (u_id, chat_id))
         new_row = cursor.fetchone()
 
         return _reset_user_if_new_day(cursor, new_row)
+
+
+def get_duel_dwarf_name(chat_id: int, user_id: int) -> str | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT dwarf_name FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def is_duel_user_registered(chat_id: int, user_id: int) -> bool:
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone() is not None
+
+
+def set_duel_dwarf_name_once(chat_id: int, user_id: int, dwarf_name: str) -> tuple[str, str | None]:
+    """Atomically set a registered dwarf's name; return status and stored name."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE duel_users SET dwarf_name = ?
+               WHERE chat_id = ? AND user_id = ? AND dwarf_name IS NULL""",
+            (dwarf_name, chat_id, user_id),
+        )
+        if cursor.rowcount == 1:
+            return "set", dwarf_name
+        row = conn.execute(
+            "SELECT dwarf_name FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone()
+        return ("already_named", row[0]) if row else ("not_registered", None)
 
 
 def delete_duel_user_by_username(username: str, chat_id: int) -> bool:
@@ -815,14 +857,17 @@ def claim_duel_item_event(
         }
 
 
-def get_duel_top(chat_id: int, sort_by: str = "wins", limit: int = 10) -> list:
+def get_duel_top(
+    chat_id: int, sort_by: str = "wins", limit: int = 10,
+    include_dwarf_name: bool = False,
+) -> list:
     valid_cols = {"wins": "wins", "points": "points"}
     sort_column = valid_cols.get(sort_by, "wins")
 
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(f"""
-            SELECT username, display_name, wins, losses, points
+            SELECT username, display_name, wins, losses, points, dwarf_name
             FROM duel_users
             WHERE chat_id = ?
             ORDER BY {sort_column} DESC, wins DESC
@@ -831,10 +876,11 @@ def get_duel_top(chat_id: int, sort_by: str = "wins", limit: int = 10) -> list:
         rows = cursor.fetchall()
         
         cleaned_rows = []
-        for u, d, w, l, p in rows:
+        for u, d, w, l, p, dwarf_name in rows:
             clean_u = _clean_username(u)
             clean_d = _clean_username(d) or d
-            cleaned_rows.append((clean_u, clean_d, w, l, p))
+            row = (clean_u, clean_d, w, l, p)
+            cleaned_rows.append(row + (dwarf_name,) if include_dwarf_name else row)
             
         return cleaned_rows
 

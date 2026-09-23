@@ -8,6 +8,7 @@ commands:
   toggle_forward: Переключить пересылку
   toggle_autodelete: Автоудаление сообщений
   duel: Гномья дуэль на ножах
+  name: Назвать своего гнома
   duel_stats: Статистика дуэлей
   duel_top: Топ дуэлянтов
   duel_delete: Удалить игрока дуэлей

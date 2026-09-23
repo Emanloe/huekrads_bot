@@ -63,6 +63,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("toggle_forward", "Переключить пересылку"),
         ("toggle_autodelete", "Автоудаление сообщений"),
         ("duel", "Гномья дуэль на ножах"),
+        ("name", "Назвать своего гнома"),
         ("duel_stats", "Статистика дуэлей"),
         ("duel_top", "Топ дуэлянтов"),
         ("duel_delete", "Удалить игрока дуэлей"),
@@ -112,6 +113,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
     for callback, command in (
         (bot.donate_command, "donate"),
         (bot.gnomed_command, "gnomed"),
+        (bot.name_command, "name"),
     ):
         handlers = [
             item

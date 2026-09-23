@@ -28,6 +28,7 @@ from database import (
     apply_duel_berserk,
     get_duel_top,
     format_user_title,
+    format_user_title_plain,
     get_dick_steal_chance,
     get_all_chats,
     reward_boss_victory,
@@ -235,7 +236,7 @@ def _maybe_award_boss_item(chat_id: int, battle: dict) -> str | None:
     return get_text(
         "boss.report.item_loot",
         item_name=escape(item["name"]),
-        survivor=escape(_boss_player_title(survivor)),
+        survivor=_boss_player_title(survivor),
     )
 
 
@@ -1100,7 +1101,7 @@ async def _finish_duel(
             winner,
             loser,
             is_dick_stolen,
-            win_title,
+            format_user_title_plain(winner, include_dwarf_name=False),
             MAX_DAILY_POINTS,
         )
         w_after, l_after = apply_duel_result_plan(
@@ -1183,7 +1184,7 @@ async def _finish_duel(
                 chat_id,
                 berserker["user_id"],
                 victim["user_id"],
-                berserker_title,
+                format_user_title_plain(berserker, include_dwarf_name=False),
             )
         except Exception:
             logging.exception("Не удалось применить berserk event в чате %s", chat_id)
@@ -1527,13 +1528,14 @@ async def duel_command(
         top_list = get_duel_top(
             chat_id=chat_id,
             limit=20,
+            include_dwarf_name=True,
         )
 
         keyboard = []
 
         for row in top_list:
 
-            username, display_name, _, _, _ = row
+            username, display_name, *_ = row
 
             if not username:
                 continue
@@ -1559,9 +1561,10 @@ async def duel_command(
             ):
                 continue
 
-            clean_label = (
-                display_name or username
-            ).lstrip("@")
+            clean_label = format_user_title_plain({
+                "display_name": (display_name or username).lstrip("@"),
+                "dwarf_name": opponent.get("dwarf_name"),
+            })
 
             label = get_text("duel.selection.button_label", title=clean_label)
 
@@ -1751,7 +1754,7 @@ async def duel_stats_command(update, context):
 
     text = get_text(
         "duel.stats.summary",
-        title=escape(title),
+        title=title,
         points=user["points"],
         wins=user["wins"],
         losses=user["losses"],
@@ -1795,6 +1798,7 @@ async def duel_top_command(
     top = get_duel_top(
         chat_id=chat_id,
         limit=10,
+        include_dwarf_name=True,
     )
 
     if not top:
@@ -1820,15 +1824,11 @@ async def duel_top_command(
 
     for idx, row in enumerate(top, 1):
 
-        username, display_name, wins, losses, points = row
-
-        raw_name = (
-            display_name
-            or username
-            or get_text("common.user.default_title")
-        )
-
-        clean_name = raw_name.lstrip("@")
+        username, display_name, wins, losses, points, *rest = row
+        clean_name = format_user_title({
+            "display_name": (display_name or username).lstrip("@") if (display_name or username) else None,
+            "dwarf_name": rest[0] if rest else None,
+        })
 
         text += get_text(
             "duel.top.row",

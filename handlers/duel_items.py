@@ -17,6 +17,7 @@ from database import (
     create_duel_item_event,
     discard_unpublished_duel_item_event,
     format_user_title,
+    get_duel_dwarf_name,
     get_duel_item_event,
     get_duel_item_event_chat_ids,
     set_duel_item_event_message,
@@ -209,13 +210,12 @@ async def duel_item_event_callback(
         return
 
     await query.answer()
-    title = escape(
-        format_user_title(
-            {
-                "username": query.from_user.username,
-                "display_name": query.from_user.first_name,
-            }
-        )
+    title = format_user_title(
+        {
+            "username": query.from_user.username,
+            "display_name": query.from_user.first_name,
+            "dwarf_name": get_duel_dwarf_name(chat_id, query.from_user.id),
+        }
     )
     item_name = escape(get_duel_item_name(instance["item_id"]))
     text = get_text(
