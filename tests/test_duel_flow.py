@@ -220,6 +220,17 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
         "dick_stolen_today": True,
         "last_stolen_by": "defender",
     }
+    assert database.get_monthly_chat_stats(CHAT_ID, database.moscow_month_key()) == {
+        "dicks_stolen": 1,
+        "duels": 1,
+        "bosses_killed": 0,
+    }
+    repeated_update, repeated_query = callback_update(
+        "duel_block_head_4", attacker_tg,
+    )
+    await duel.duel_strike_callback(repeated_update, fake_context)
+    repeated_query.answer.assert_awaited_once()
+    assert database.get_monthly_chat_stats(CHAT_ID, database.moscow_month_key())["duels"] == 1
 
 
 @pytest.mark.parametrize(

@@ -32,6 +32,7 @@ from database import (
     get_dick_steal_chance,
     get_all_chats,
     reward_boss_victory,
+    increment_monthly_bosses_killed,
     get_bosses_defeated,
     is_boss_enabled,
     set_boss_enabled,
@@ -2872,6 +2873,11 @@ async def _boss_finish_victory(
         return
 
     _boss_cancel_timer(battle)
+
+    try:
+        increment_monthly_bosses_killed(chat_id)
+    except Exception:
+        logging.exception("Не удалось записать месячную победу над боссом в чате %s", chat_id)
 
     for participant in battle["participants"].values():
         if not participant["alive"]:

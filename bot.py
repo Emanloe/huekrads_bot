@@ -1,5 +1,6 @@
 import datetime
 import logging
+from zoneinfo import ZoneInfo
 
 import nest_asyncio
 import pytz
@@ -90,6 +91,7 @@ from handlers.duel_items import (
     duel_item_event_job,
 )
 from handlers.duel_name import name_command
+from handlers.monthly_summary import monthly_summary_job, summary_command
 
 
 logging.basicConfig(
@@ -113,6 +115,7 @@ BOT_COMMANDS = [
     BotCommand("toggle_autodelete", get_text("menu.commands.toggle_autodelete")),
     BotCommand("duel", get_text("menu.commands.duel")),
     BotCommand("name", get_text("menu.commands.name")),
+    BotCommand("summary", get_text("menu.commands.summary")),
     BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
     BotCommand("duel_top", get_text("menu.commands.duel_top")),
     BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
@@ -208,6 +211,14 @@ async def main():
             ),
             name="boss_daily_job",
         )
+
+        if not application.job_queue.get_jobs_by_name("monthly_summary_job"):
+            application.job_queue.run_monthly(
+                monthly_summary_job,
+                when=datetime.time(10, 0, tzinfo=ZoneInfo(DUEL_TIMEZONE)),
+                day=1,
+                name="monthly_summary_job",
+            )
 
         # Независимое событие:
         # Шанс и частота проверки задаются в handlers.hyperborean_event.
@@ -344,6 +355,7 @@ async def main():
     )
 
     application.add_handler(CommandHandler("name", name_command))
+    application.add_handler(CommandHandler("summary", summary_command))
 
     application.add_handler(
         CallbackQueryHandler(

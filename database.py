@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from html import escape
+from zoneinfo import ZoneInfo
 import pytz
 from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN
 from text_resources import get_text
@@ -14,6 +15,14 @@ BIRTHDAY_COOLDOWN = timedelta(days=365)
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def moscow_month_key(when: datetime | None = None) -> str:
+    """Calendar month of an instant in the game's Moscow timezone."""
+    instant = when if when is not None else _utc_now()
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("Month key requires a timezone-aware instant")
+    return instant.astimezone(ZoneInfo(DUEL_TIMEZONE)).strftime("%Y-%m")
 
 
 @contextmanager
@@ -238,6 +247,17 @@ def init_db():
             CREATE UNIQUE INDEX IF NOT EXISTS idx_duel_item_events_active_chat
             ON duel_item_events (chat_id)
             WHERE claimed = 0
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS monthly_chat_stats (
+                chat_id INTEGER NOT NULL,
+                month TEXT NOT NULL,
+                dicks_stolen INTEGER NOT NULL DEFAULT 0,
+                duels INTEGER NOT NULL DEFAULT 0,
+                bosses_killed INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (chat_id, month)
+            )
         """)
 
         # Fix broken initial data where points=0 and losses=20 from prior seed bug
@@ -529,6 +549,43 @@ def delete_duel_user_by_username(username: str, chat_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def _increment_monthly_chat_stats(
+    cursor, chat_id: int, month: str, *, duels: int = 0,
+    dicks_stolen: int = 0, bosses_killed: int = 0,
+) -> None:
+    cursor.execute(
+        """
+        INSERT INTO monthly_chat_stats
+            (chat_id, month, dicks_stolen, duels, bosses_killed)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, month) DO UPDATE SET
+            dicks_stolen = dicks_stolen + excluded.dicks_stolen,
+            duels = duels + excluded.duels,
+            bosses_killed = bosses_killed + excluded.bosses_killed
+        """,
+        (chat_id, month, dicks_stolen, duels, bosses_killed),
+    )
+
+
+def get_monthly_chat_stats(chat_id: int, month: str) -> dict:
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT dicks_stolen, duels, bosses_killed
+            FROM monthly_chat_stats WHERE chat_id = ? AND month = ?
+            """,
+            (chat_id, month),
+        ).fetchone()
+    return dict(zip(("dicks_stolen", "duels", "bosses_killed"), row or (0, 0, 0)))
+
+
+def increment_monthly_bosses_killed(chat_id: int, month: str | None = None) -> None:
+    with get_db() as conn:
+        _increment_monthly_chat_stats(
+            conn.cursor(), chat_id, month or moscow_month_key(), bosses_killed=1,
+        )
+
+
 def apply_duel_result_plan(
     chat_id: int,
     result_plan: dict,
@@ -591,6 +648,14 @@ def apply_duel_result_plan(
                 loser["user_id"],
                 chat_id,
             ))
+
+        _increment_monthly_chat_stats(
+            cursor,
+            chat_id,
+            moscow_month_key(),
+            duels=1,
+            dicks_stolen=int(result_plan["is_dick_stolen"]),
+        )
 
         return winner["points"], loser["points"]
 

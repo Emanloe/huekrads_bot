@@ -64,6 +64,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("toggle_autodelete", "Автоудаление сообщений"),
         ("duel", "Гномья дуэль на ножах"),
         ("name", "Назвать своего гнома"),
+        ("summary", "Месячная статистика чата"),
         ("duel_stats", "Статистика дуэлей"),
         ("duel_top", "Топ дуэлянтов"),
         ("duel_delete", "Удалить игрока дуэлей"),
@@ -114,6 +115,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
         (bot.donate_command, "donate"),
         (bot.gnomed_command, "gnomed"),
         (bot.name_command, "name"),
+        (bot.summary_command, "summary"),
     ):
         handlers = [
             item
@@ -261,6 +263,9 @@ async def test_boss_daily_job_is_scheduled_at_1337_moscow(monkeypatch):
         def run_daily(self, callback, **kwargs):
             daily_jobs.append((callback, kwargs))
 
+        def run_monthly(self, *_args, **_kwargs):
+            pass
+
         def run_repeating(self, *_args, **_kwargs):
             pass
 
@@ -319,6 +324,9 @@ async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
 
     class FakeJobQueue:
         def run_daily(self, *_args, **_kwargs):
+            pass
+
+        def run_monthly(self, *_args, **_kwargs):
             pass
 
         def run_repeating(self, callback, **kwargs):
