@@ -251,6 +251,20 @@ def finish_duel_session_in_transaction(
     return cursor.rowcount == 1
 
 
+def mark_duel_pocket_done_in_transaction(
+    chat_id: int, duel_id: int, done_at: int, *, cursor: sqlite3.Cursor,
+) -> bool:
+    cursor.execute(
+        """
+        UPDATE duel_sessions SET pocket_done_at = ?, updated_at = ?
+        WHERE chat_id = ? AND id = ? AND status = 'finished'
+          AND pocket_done_at IS NULL
+        """,
+        (done_at, done_at, chat_id, duel_id),
+    )
+    return cursor.rowcount == 1
+
+
 def get_current_duel_session(chat_id: int) -> dict | None:
     """Return this chat's sole publishing or active ordinary duel, if any."""
     with get_db() as conn:
@@ -300,5 +314,50 @@ def list_due_duel_sessions(chat_id: int, now_ms: int, *, limit: int = 100) -> li
             ORDER BY deadline_at, id LIMIT ?
             """,
             (chat_id, now_ms, limit),
+        ).fetchall()
+        return [_session_from_row(row) for row in rows]
+
+
+def list_terminal_pending_duel_sessions(chat_id: int, *, limit: int = 100) -> list[dict]:
+    """Recover terminal checkpoints not yet finalized after a process restart."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT * FROM duel_sessions
+            WHERE chat_id = ? AND status = 'publishing' AND phase = 'block'
+              AND result_json IS NOT NULL
+            ORDER BY id
+            """,
+            (chat_id,),
+        ).fetchall()
+        sessions = [_session_from_row(row) for row in rows]
+        return [session for session in sessions if isinstance(session["result"], dict)
+                and session["result"].get("kind") == "terminal_resolution"][:limit]
+
+
+def list_ready_pocket_duel_sessions(chat_id: int, *, limit: int = 100) -> list[dict]:
+    """Recover published finals whose once-only pocket stage has not run."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT session.* FROM duel_sessions AS session
+            WHERE session.chat_id = ? AND session.status = 'finished'
+              AND session.pocket_done_at IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM duel_outbox AS publication
+                  WHERE publication.chat_id = session.chat_id
+                    AND publication.duel_id = session.id
+                    AND publication.kind = 'final_result'
+                    AND publication.status = 'delivered'
+              )
+            ORDER BY session.id LIMIT ?
+            """,
+            (chat_id, limit),
         ).fetchall()
         return [_session_from_row(row) for row in rows]

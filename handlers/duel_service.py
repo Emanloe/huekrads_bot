@@ -5,12 +5,14 @@ import random
 from dataclasses import dataclass
 from html import escape
 
-from config import MAX_DAILY_POINTS
+from config import DUEL_ITEM_DROP_CHANCE, MAX_DAILY_POINTS
 from text_resources import get_text
 
 from database import (
     apply_duel_berserk_in_transaction,
     apply_duel_result_plan_in_transaction,
+    bind_duel_item_event_message_in_transaction,
+    create_duel_item_event_from_inventory_in_transaction,
     format_user_title,
     format_user_title_plain,
     get_db,
@@ -21,7 +23,15 @@ from database import (
     get_duel_user_by_id,
     get_duel_user_by_id_in_transaction,
     get_duel_user_by_username,
+    restore_unpublished_duel_drop_in_transaction,
     transfer_duel_inventory_item_in_transaction,
+)
+from duel_outbox_repository import (
+    cancel_duel_publication_in_transaction,
+    create_duel_publication_in_transaction,
+    get_duel_publication_by_kind_in_transaction,
+    get_duel_publication_in_transaction,
+    mark_duel_publication_delivered_in_transaction,
 )
 from duel_session_repository import (
     activate_duel_session_in_transaction,
@@ -29,6 +39,7 @@ from duel_session_repository import (
     finish_duel_session_in_transaction,
     get_duel_session_in_transaction,
     has_current_duel_session,
+    mark_duel_pocket_done_in_transaction,
     save_duel_attack_in_transaction,
     save_duel_block_resolution_in_transaction,
     utc_unix_milliseconds,
@@ -45,7 +56,8 @@ from handlers.duel_state import (
     resolve_duel_round,
 )
 from handlers.duel_text import (
-    TARGET_NAMES, _build_berserk_text, _plural_rounds, get_round_flavor_text,
+    TARGET_NAMES, _build_berserk_text, _build_duel_block_text,
+    _build_duel_miss_text, _plural_rounds, get_round_flavor_text,
 )
 
 
@@ -141,6 +153,62 @@ class PersistentDuelFinalizationResult:
     reason: str
     session: dict | None = None
     result: dict | None = None
+
+
+@dataclass(frozen=True)
+class PersistentDuelPublicationResult:
+    reason: str
+    publication: dict | None = None
+    session: dict | None = None
+
+
+@dataclass(frozen=True)
+class PersistentDuelPocketResult:
+    reason: str
+    session: dict | None = None
+    drop: dict | None = None
+    publication: dict | None = None
+
+
+def _session_participants(session: dict) -> dict[int, dict]:
+    player1 = DuelParticipantSnapshot.from_storage(session["player1_snapshot"]).to_storage()
+    player2 = DuelParticipantSnapshot.from_storage(session["player2_snapshot"]).to_storage()
+    return {player1["user_id"]: player1, player2["user_id"]: player2}
+
+
+def _prompt_payload(session: dict) -> dict:
+    """Render a prompt from immutable snapshots/checkpoint without any RNG."""
+    players = _session_participants(session)
+    attacker_title = format_user_title(players[session["attacker_user_id"]])
+    defender_title = format_user_title(players[session["defender_user_id"]])
+    if session["phase"] == "block":
+        text = get_text(
+            "duel.live.defense_transition", round=session["round_no"],
+            attacker_title=attacker_title, defender_title=defender_title,
+            move_timeout=DUEL_MOVE_TIMEOUT_SECONDS,
+        )
+    elif session["result"] is None:
+        text = get_text(
+            "duel.live.start", attacker_title=attacker_title,
+            defender_title=defender_title, move_timeout=DUEL_MOVE_TIMEOUT_SECONDS,
+        )
+    else:
+        resolution = session["result"]
+        previous_attacker = format_user_title(players[resolution["attacker_user_id"]])
+        previous_defender = format_user_title(players[resolution["defender_user_id"]])
+        if resolution["outcome"] == "miss":
+            text = _build_duel_miss_text(
+                previous_attacker, resolution["attack_phrase"],
+                resolution["strike_zone"], resolution["outcome_phrase"],
+                attacker_title, defender_title, DUEL_MOVE_TIMEOUT_SECONDS,
+            )
+        else:
+            text = _build_duel_block_text(
+                previous_attacker, previous_defender, resolution["attack_phrase"],
+                resolution["strike_zone"], resolution["outcome_phrase"],
+                attacker_title, defender_title, DUEL_MOVE_TIMEOUT_SECONDS,
+            )
+    return {"text": text, "phase": session["phase"]}
 
 
 def _validated_terminal_checkpoint(session: dict) -> dict | None:
@@ -354,6 +422,10 @@ def finalize_persistent_duel(
         ):
             raise RuntimeError("Validated terminal duel could not be finalized")
         finished = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        create_duel_publication_in_transaction(
+            cursor, chat_id, duel_id, "final_result", finished["turn_id"],
+            {"text": final_text}, timestamp,
+        )
         return PersistentDuelFinalizationResult("finalized", finished, result)
 
 
@@ -389,26 +461,196 @@ def activate_persistent_duel_turn(
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("BEGIN IMMEDIATE")
+        return _activate_persistent_duel_turn_in_transaction(
+            cursor, chat_id, duel_id, turn_id, message_id, publication_time_ms,
+        )
+
+
+def _activate_persistent_duel_turn_in_transaction(
+    cursor, chat_id: int, duel_id: int, turn_id: int, message_id: int,
+    publication_time_ms: int,
+) -> PersistentDuelActionResult:
+    session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    if session is None:
+        return PersistentDuelActionResult("not_found")
+    if _terminal_resolution_pending(session):
+        return PersistentDuelActionResult("terminal_pending")
+    if session["turn_id"] != turn_id:
+        return PersistentDuelActionResult("stale_turn")
+    if session["status"] != "publishing":
+        return PersistentDuelActionResult("not_publishing")
+    if type(message_id) is not int or message_id <= 0:
+        return PersistentDuelActionResult("invalid_message_id")
+
+    deadline_at = publication_time_ms + DUEL_MOVE_TIMEOUT_SECONDS * 1000
+    if not activate_duel_session_in_transaction(
+        chat_id, duel_id, turn_id, message_id, deadline_at,
+        publication_time_ms, cursor=cursor,
+    ):
+        raise RuntimeError("Validated duel prompt could not be activated")
+    current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    return PersistentDuelActionResult("success", current)
+
+
+def acknowledge_persistent_duel_publication(
+    chat_id: int, publication_id: int, attempt_count: int,
+    message_id: int, published_at_ms: int,
+) -> PersistentDuelPublicationResult:
+    """Commit publication receipt and its DB acknowledgement in one short txn."""
+    if type(message_id) is not int or message_id <= 0:
+        return PersistentDuelPublicationResult("invalid_message_id")
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        publication = get_duel_publication_in_transaction(cursor, chat_id, publication_id)
+        if publication is None:
+            return PersistentDuelPublicationResult("not_found")
+        if publication["status"] == "delivered":
+            return PersistentDuelPublicationResult("already_delivered", publication)
+        if publication["status"] != "leased" or publication["attempt_count"] != attempt_count:
+            return PersistentDuelPublicationResult("lease_lost", publication)
+        session = get_duel_session_in_transaction(
+            chat_id, publication["duel_id"], cursor=cursor,
+        )
+        if session is None:
+            return PersistentDuelPublicationResult("not_found")
+
+        kind = publication["kind"]
+        acknowledged_message_id = message_id
+        reason = "delivered"
+        if kind in ("attack_prompt", "block_prompt"):
+            expected_phase = "attack" if kind == "attack_prompt" else "block"
+            if session["phase"] != expected_phase or session["turn_id"] != publication["turn_id"]:
+                cancel_duel_publication_in_transaction(cursor, chat_id, publication_id, published_at_ms)
+                return PersistentDuelPublicationResult("stale_prompt", None, session)
+            if session["status"] == "active":
+                # An existing deadline is authoritative; duplicate delivery never extends it.
+                acknowledged_message_id = session["message_id"]
+                reason = "already_active"
+            else:
+                activation = _activate_persistent_duel_turn_in_transaction(
+                    cursor, chat_id, session["id"], publication["turn_id"],
+                    message_id, published_at_ms,
+                )
+                if activation.reason != "success":
+                    cancel_duel_publication_in_transaction(
+                        cursor, chat_id, publication_id, published_at_ms,
+                    )
+                    return PersistentDuelPublicationResult("stale_prompt", None, session)
+                session = activation.session
+        elif kind == "final_result":
+            if session["status"] != "finished" or session["result"]["kind"] != "finalized":
+                return PersistentDuelPublicationResult("invalid_state", publication, session)
+        elif kind == "pocket_drop":
+            drop = publication["payload"]["drop"]
+            if not bind_duel_item_event_message_in_transaction(
+                cursor, chat_id, drop["event_id"], message_id,
+            ):
+                return PersistentDuelPublicationResult("event_unavailable", publication, session)
+        else:
+            raise RuntimeError("Unsupported duel publication kind")
+
+        if not mark_duel_publication_delivered_in_transaction(
+            cursor, chat_id, publication_id, attempt_count,
+            acknowledged_message_id, published_at_ms,
+        ):
+            raise RuntimeError("Leased duel publication could not be acknowledged")
+        current = get_duel_publication_in_transaction(cursor, chat_id, publication_id)
+        return PersistentDuelPublicationResult(reason, current, session)
+
+
+def process_persistent_duel_pocket_drop(
+    chat_id: int, duel_id: int, *, now_ms: int | None = None,
+) -> PersistentDuelPocketResult:
+    """After final publication, checkpoint the existing concrete pocket drop once."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
         if session is None:
-            return PersistentDuelActionResult("not_found")
-        if _terminal_resolution_pending(session):
-            return PersistentDuelActionResult("terminal_pending")
-        if session["turn_id"] != turn_id:
-            return PersistentDuelActionResult("stale_turn")
-        if session["status"] != "publishing":
-            return PersistentDuelActionResult("not_publishing")
-        if type(message_id) is not int or message_id <= 0:
-            return PersistentDuelActionResult("invalid_message_id")
-
-        deadline_at = publication_time_ms + DUEL_MOVE_TIMEOUT_SECONDS * 1000
-        if not activate_duel_session_in_transaction(
-            chat_id, duel_id, turn_id, message_id, deadline_at,
-            publication_time_ms, cursor=cursor,
+            return PersistentDuelPocketResult("not_found")
+        if (
+            session["status"] != "finished"
+            or not isinstance(session["result"], dict)
+            or session["result"].get("kind") != "finalized"
         ):
-            raise RuntimeError("Validated duel prompt could not be activated")
+            return PersistentDuelPocketResult("not_finished", session)
+        if session["pocket_done_at"] is not None:
+            return PersistentDuelPocketResult("already_done", session)
+        final_publication = get_duel_publication_by_kind_in_transaction(
+            cursor, chat_id, duel_id, "final_result",
+        )
+        if final_publication is None or final_publication["status"] != "delivered":
+            return PersistentDuelPocketResult("not_published", session)
+        loser_id = session["result"]["loser_user_id"]
+        inventory = get_droppable_duel_inventory(
+            get_duel_inventory_in_transaction(cursor, chat_id, loser_id)
+        )
+        timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        drop = None
+        publication = None
+        reason = "empty_inventory"
+        if inventory:
+            if random.random() >= DUEL_ITEM_DROP_CHANCE:
+                reason = "miss"
+            else:
+                instance = random.choice(inventory)
+                drop = create_duel_item_event_from_inventory_in_transaction(
+                    cursor, chat_id, loser_id, instance["id"],
+                )
+                if drop is None:
+                    reason = "unavailable_slot_or_instance"
+                else:
+                    publication = create_duel_publication_in_transaction(
+                        cursor, chat_id, duel_id, "pocket_drop", None,
+                        {
+                            "drop": drop,
+                            "text": get_text(
+                                "duel.finish.item_drop",
+                                item_name=escape(get_duel_item_name(drop["item_id"])),
+                            ),
+                        }, timestamp,
+                    )
+                    reason = "dropped"
+        if not mark_duel_pocket_done_in_transaction(
+            chat_id, duel_id, timestamp, cursor=cursor,
+        ):
+            raise RuntimeError("Validated pocket checkpoint could not be stored")
         current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
-        return PersistentDuelActionResult("success", current)
+        return PersistentDuelPocketResult(reason, current, drop, publication)
+
+
+def compensate_persistent_duel_drop(
+    chat_id: int, duel_id: int, *, now_ms: int | None = None,
+) -> PersistentDuelPocketResult:
+    """Explicit permanent-failure policy: restore the original unclaimed instance."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        session = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+        if session is None:
+            return PersistentDuelPocketResult("not_found")
+        publication = get_duel_publication_by_kind_in_transaction(
+            cursor, chat_id, duel_id, "pocket_drop",
+        )
+        if publication is None:
+            return PersistentDuelPocketResult("no_drop", session)
+        if publication["status"] == "cancelled":
+            return PersistentDuelPocketResult("already_compensated", session)
+        if publication["status"] == "leased":
+            return PersistentDuelPocketResult("in_flight", session)
+        drop = publication["payload"]["drop"]
+        if not restore_unpublished_duel_drop_in_transaction(
+            cursor, drop, publication["message_id"],
+        ):
+            return PersistentDuelPocketResult("event_unavailable", session)
+        timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        if not cancel_duel_publication_in_transaction(
+            cursor, chat_id, publication["id"], timestamp,
+        ):
+            raise RuntimeError("Restored pocket drop outbox could not be cancelled")
+        current = get_duel_publication_in_transaction(cursor, chat_id, publication["id"])
+        return PersistentDuelPocketResult("compensated", session, drop, current)
 
 
 def _apply_persistent_attack(
@@ -420,6 +662,10 @@ def _apply_persistent_attack(
     ):
         raise RuntimeError("Validated duel attack could not be saved")
     current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    create_duel_publication_in_transaction(
+        cursor, chat_id, duel_id, "block_prompt", current["turn_id"],
+        _prompt_payload(current), now_ms,
+    )
     return PersistentDuelActionResult("success", current)
 
 
@@ -460,6 +706,11 @@ def _apply_persistent_block(
     ):
         raise RuntimeError("Validated duel block could not be saved")
     current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    if not terminal:
+        create_duel_publication_in_transaction(
+            cursor, chat_id, duel_id, "attack_prompt", current["turn_id"],
+            _prompt_payload(current), now_ms,
+        )
     return PersistentDuelActionResult(
         "terminal_pending" if terminal else "success", current, resolution,
     )
@@ -602,6 +853,10 @@ def start_persistent_duel(
             phase="attack",
             now_ms=now_ms,
             cursor=cursor,
+        )
+        create_duel_publication_in_transaction(
+            cursor, chat_id, session["id"], "attack_prompt", session["turn_id"],
+            _prompt_payload(session), session["created_at"],
         )
         return PersistentDuelStartResult(None, session)
 
