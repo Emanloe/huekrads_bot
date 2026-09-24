@@ -130,7 +130,7 @@
       const inventory = element("ul", "inventory-list");
       for (const item of data.inventory) {
         const row = element("li");
-        row.append(element("span", null, item.item_id), element("strong", null, `×${item.count}`));
+        row.append(element("span", null, item.name || item.item_id), element("strong", null, `×${item.count}`));
         inventory.append(row);
       }
       content.append(inventory);

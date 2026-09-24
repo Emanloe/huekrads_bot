@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from config import BOT_TOKEN
 from database import format_user_title_plain
 from duel_session_repository import get_current_duel_session, utc_unix_milliseconds
+from handlers.duel_items import DUEL_ITEM_NAMES
 from handlers.duel_service import get_duel_profile, list_duel_opponents, start_persistent_duel
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from miniapp_auth import InitDataError, verify_telegram_init_data
@@ -118,7 +119,10 @@ def create_miniapp_api(*, bot_token: str | None = None,
             "daily_wins": user["daily_wins"],
             "dick_stolen_today": user["dick_stolen_today"],
             "ineligibility": profile.ineligibility,
-            "inventory": [{"item_id": key, "count": value} for key, value in sorted(inventory.items())],
+            "inventory": [
+                {"item_id": key, "name": DUEL_ITEM_NAMES.get(key, key), "count": value}
+                for key, value in sorted(inventory.items())
+            ],
         }
 
     @app.get("/api/v1/duel/opponents")

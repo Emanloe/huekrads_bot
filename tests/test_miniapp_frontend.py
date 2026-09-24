@@ -133,6 +133,9 @@ def test_frontend_has_only_session_and_challenge_posts():
     assert "chat_id" not in js
     assert "innerHTML" not in js
     assert "eval(" not in js
+    assert 'element("span", null, item.name || item.item_id)' in js
+    assert "ceremonial_bolt" not in js
+    assert "cork_with_bite_marks" not in js
     assert 'action.addEventListener("click", () => challengeOpponent(opponent.user_id))' in js
     assert 'body: { opponent_user_id: opponentUserId }' in js
     assert 'await navigate("duel")' in js

@@ -78,8 +78,12 @@ async def test_read_api_isolates_same_user_in_two_chats_and_hides_block_zone(
         me_b = (await client.get("/api/v1/me", headers=headers_b)).json()
         assert (me_a["username"], me_a["points"]) == ("hero_a", 25)
         assert (me_b["username"], me_b["points"]) == ("hero_b", 70)
-        assert me_a["inventory"] == [{"item_id": "rat_knuckle", "count": 1}]
-        assert me_b["inventory"] == [{"item_id": "vevangel_wing", "count": 1}]
+        assert me_a["inventory"] == [
+            {"item_id": "rat_knuckle", "name": "Крысиный кастет", "count": 1},
+        ]
+        assert me_b["inventory"] == [
+            {"item_id": "vevangel_wing", "name": "Крыло Вевангела", "count": 1},
+        ]
         assert "chat_id" not in me_a
         opponents_a = (await client.get(f"/api/v1/duel/opponents?chat_id={CHAT_B}",
                                         headers=extra)).json()["opponents"]
@@ -95,6 +99,26 @@ async def test_read_api_isolates_same_user_in_two_chats_and_hides_block_zone(
         assert active_defender["attack_zone"] is None and active_defender["role"] == "defender"
         assert "result" not in active_a and "outbox" not in active_a
         assert (await client.post("/api/v1/duel/active", headers=headers_a)).status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_me_inventory_uses_catalog_names_counts_and_legacy_id_fallback(temp_database):
+    register(CHAT_A, 101, "hero")
+    database.add_duel_inventory_item(CHAT_A, 101, "ceremonial_bolt")
+    database.add_duel_inventory_item(CHAT_A, 101, "ceremonial_bolt")
+    database.add_duel_inventory_item(CHAT_A, 101, "cork_with_bite_marks")
+    database.add_duel_inventory_item(CHAT_A, 101, "legacy_missing_id")
+    api = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        response = await client.get("/api/v1/me", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["inventory"] == [
+        {"item_id": "ceremonial_bolt", "name": "Парадный болт", "count": 2},
+        {"item_id": "cork_with_bite_marks", "name": "Пробка со следами укусов", "count": 1},
+        {"item_id": "legacy_missing_id", "name": "legacy_missing_id", "count": 1},
+    ]
 
 
 @pytest.mark.asyncio
