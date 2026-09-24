@@ -178,6 +178,14 @@ main { padding: 7px; min-height: 300px; }
 .action-box p { margin: 0 0 7px; font-size: 11px; color: var(--muted); }
 .zone-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
 .zone-row button { width: 100%; min-width: 0; padding: 5px 2px; white-space: normal; }
+.round-list { display: grid; gap: 5px; }
+.round-result { border: 1px solid #9da98e; background: #f5f4e5; padding: 6px 8px; overflow-wrap: anywhere; }
+.round-result strong, .round-result small { display: block; }
+.round-result strong { margin-bottom: 3px; }
+.round-result small { margin-top: 3px; color: var(--muted); }
+.duel-finished > .small-button { margin-top: 9px; }
+.previous-duel { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 7px; }
+.previous-duel summary { cursor: pointer; font-weight: bold; }
 .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; border-top: 1px solid #839474; padding: 6px 9px; background: #d6dec1; color: #4c6045; font-size: 10px; }
 
 @media (max-width: 420px) {

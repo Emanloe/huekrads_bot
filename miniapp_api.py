@@ -15,7 +15,11 @@ from starlette.concurrency import run_in_threadpool
 
 from config import BOT_TOKEN
 from database import format_user_title_plain
-from duel_session_repository import get_current_duel_session, get_duel_session, utc_unix_milliseconds
+from duel_outbox_repository import list_persisted_duel_round_resolutions
+from duel_session_repository import (
+    get_current_duel_session, get_duel_session,
+    get_latest_finished_participant_duel_session, utc_unix_milliseconds,
+)
 from handlers.duel_items import DUEL_ITEM_NAMES
 from handlers.duel_service import (
     get_duel_profile, list_duel_opponents, start_persistent_duel,
@@ -73,6 +77,105 @@ _MOVE_FAILURES = {
     "terminal_pending": (409, "Дуэль завершается."),
     "turn_expired": (409, "Время хода вышло. Обновите дуэль."),
 }
+
+
+def _duel_participant(session: dict, user_id: int) -> dict:
+    snapshot = (session["player1_snapshot"] if user_id == session["player1_user_id"]
+                else session["player2_snapshot"])
+    return {"user_id": user_id, "username": snapshot["username"],
+            "display_name": format_user_title_plain(snapshot)}
+
+
+def _round_read_model(session: dict, resolution: dict) -> dict | None:
+    participants = {session["player1_user_id"], session["player2_user_id"]}
+    attacker_id = resolution.get("attacker_user_id")
+    defender_id = resolution.get("defender_user_id")
+    if (attacker_id not in participants or defender_id not in participants
+            or attacker_id == defender_id
+            or resolution.get("outcome") not in ("miss", "block", "hit", "suicide")
+            or resolution.get("strike_zone") not in ("head", "body", "dick")
+            or resolution.get("block_zone") not in ("head", "body", "dick")
+            or type(resolution.get("round_no")) is not int
+            or type(resolution.get("resolved_turn_id")) is not int):
+        return None
+    timeout_ids = resolution.get("timeout_user_ids", [])
+    if not isinstance(timeout_ids, list):
+        timeout_ids = []
+    return {
+        "round": resolution["round_no"],
+        "resolved_turn_id": resolution["resolved_turn_id"],
+        "attacker": _duel_participant(session, attacker_id),
+        "defender": _duel_participant(session, defender_id),
+        "attack_zone": resolution["strike_zone"],
+        "defense_zone": resolution["block_zone"],
+        "outcome": resolution["outcome"],
+        "outcome_text": resolution.get("outcome_phrase") if isinstance(
+            resolution.get("outcome_phrase"), str) else None,
+        "timed_out": [
+            _duel_participant(session, user_id) for user_id in timeout_ids
+            if type(user_id) is int and user_id in participants
+        ],
+    }
+
+
+def _duel_rounds(session: dict) -> list[dict]:
+    resolutions = list_persisted_duel_round_resolutions(session["chat_id"], session["id"])
+    latest = session["result"]
+    if isinstance(latest, dict):
+        if latest.get("kind") == "finalized":
+            latest = latest.get("terminal_resolution")
+        if isinstance(latest, dict) and latest.get("kind") in (
+            "round_resolution", "terminal_resolution",
+        ):
+            resolutions.append(latest)
+    by_turn = {}
+    for resolution in resolutions:
+        model = _round_read_model(session, resolution)
+        if model is not None:
+            by_turn[model["resolved_turn_id"]] = model
+    return [by_turn[turn] for turn in sorted(by_turn)]
+
+
+def _finished_duel_read_model(session: dict) -> dict | None:
+    result = session["result"]
+    if not isinstance(result, dict) or result.get("kind") != "finalized":
+        return None
+    winner_id, loser_id = result["winner_user_id"], result["loser_user_id"]
+    snapshots = {
+        session["player1_user_id"]: session["player1_snapshot"],
+        session["player2_user_id"]: session["player2_snapshot"],
+    }
+    stolen_item = result.get("stolen_item")
+    berserk = result.get("berserk")
+    berserk_model = None
+    if (isinstance(berserk, dict)
+            and berserk.get("berserker_user_id") in snapshots
+            and berserk.get("victim_user_id") in snapshots):
+        berserk_model = {
+            "berserker": _duel_participant(session, berserk["berserker_user_id"]),
+            "victim": _duel_participant(session, berserk["victim_user_id"]),
+            "dick_lost": bool(berserk.get("applied")),
+        }
+    return {
+        "id": session["id"], "status": "finished", "finished_at": session["finished_at"],
+        "player1": _duel_participant(session, session["player1_user_id"]),
+        "player2": _duel_participant(session, session["player2_user_id"]),
+        "winner": _duel_participant(session, winner_id),
+        "loser": _duel_participant(session, loser_id),
+        "points": {
+            "winner_before": snapshots[winner_id]["points"],
+            "winner_after": result["winner_points"],
+            "winner_delta": result["winner_points"] - snapshots[winner_id]["points"],
+            "loser_before": snapshots[loser_id]["points"],
+            "loser_after": result["loser_points"],
+            "loser_delta": result["loser_points"] - snapshots[loser_id]["points"],
+        },
+        "dick_stolen": bool(result["is_dick_stolen"]),
+        "stolen_item": ({"item_id": stolen_item["item_id"],
+                         "name": stolen_item["item_name"]} if stolen_item else None),
+        "berserk": berserk_model,
+        "rounds": _duel_rounds(session),
+    }
 
 
 def create_miniapp_api(*, bot_token: str | None = None,
@@ -240,12 +343,12 @@ def create_miniapp_api(*, bot_token: str | None = None,
     @app.get("/api/v1/duel/active")
     def active(session: MiniAppSession = Depends(require_session)):
         duel = get_current_duel_session(session.chat_id)
+        finished = get_latest_finished_participant_duel_session(
+            session.chat_id, session.user_id,
+        )
+        recent_finished = _finished_duel_read_model(finished) if finished else None
         if duel is None:
-            return {"duel": None}
-        players = {
-            duel["player1_user_id"]: duel["player1_snapshot"],
-            duel["player2_user_id"]: duel["player2_snapshot"],
-        }
+            return {"duel": None, "recent_finished": recent_finished}
         role = ("attacker" if session.user_id == duel["attacker_user_id"] else
                 "defender" if session.user_id == duel["defender_user_id"] else "spectator")
         is_active = duel["status"] == "active"
@@ -254,20 +357,16 @@ def create_miniapp_api(*, bot_token: str | None = None,
             (duel["phase"] == "block" and role == "defender")
         ) and duel["deadline_at"] is not None and duel["deadline_at"] > utc_unix_milliseconds()
 
-        def participant(user_id: int) -> dict:
-            snapshot = players[user_id]
-            return {"user_id": user_id, "username": snapshot["username"],
-                    "display_name": format_user_title_plain(snapshot)}
-
         return {"duel": {
             "id": duel["id"], "status": duel["status"], "phase": duel["phase"],
             "round": duel["round_no"], "turn_id": duel["turn_id"],
-            "attacker": participant(duel["attacker_user_id"]),
-            "defender": participant(duel["defender_user_id"]),
+            "attacker": _duel_participant(duel, duel["attacker_user_id"]),
+            "defender": _duel_participant(duel, duel["defender_user_id"]),
             "attack_zone": duel["attack_zone"] if role == "attacker" and duel["phase"] == "block" else None,
             "deadline_at": duel["deadline_at"] if is_active else None,
             "role": role, "can_act": can_act,
-        }}
+            "rounds": _duel_rounds(duel) if role != "spectator" else [],
+        }, "recent_finished": recent_finished}
 
     @app.get("/", include_in_schema=False)
     @app.get("/app", include_in_schema=False)

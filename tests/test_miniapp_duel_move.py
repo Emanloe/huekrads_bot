@@ -311,7 +311,9 @@ async def test_terminal_http_block_uses_existing_finalization_and_finished_duel_
         finished = get_duel_session(CHAT_A, duel_id)
         assert finished["status"] == "finished"
         assert finished["result"]["kind"] == "finalized"
-        assert (await client.get("/api/v1/duel/active", headers=attacker)).json() == {"duel": None}
+        finished_view = (await client.get("/api/v1/duel/active", headers=attacker)).json()
+        assert finished_view["duel"] is None
+        assert finished_view["recent_finished"]["id"] == duel_id
         assert [kind for kind, _, _ in outbox(CHAT_A)] == [
             "attack_prompt", "block_prompt", "final_result",
         ]

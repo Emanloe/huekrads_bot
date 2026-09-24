@@ -14,6 +14,7 @@
   const ZONE_NAMES = { head: "Голова", body: "Торс", dick: "Хуй" };
   const PHASE_NAMES = { attack: "Атака", block: "Блок" };
   const ROLE_NAMES = { attacker: "Атакующий", defender: "Защищающийся", spectator: "Наблюдатель" };
+  const OUTCOME_NAMES = { miss: "Промах", block: "Блок", hit: "Попадание", suicide: "Самопоражение" };
 
   let sessionToken = null;
   let currentView = "home";
@@ -151,7 +152,7 @@
     } else if (!Array.isArray(data.opponents) || data.opponents.length === 0) {
       content.append(notice("В этом чате сейчас нет доступных соперников."));
     } else {
-      content.append(element("p", "hint", "Соперники из текущего чата. Ходы пока выполняются в Telegram."));
+      content.append(element("p", "hint", "Соперники из текущего чата. Ходить можно здесь или в Telegram."));
       const head = element("div", "opponent-head");
       head.append(element("span", null, "Гном"), element("span", null, "Действие"));
       const list = element("div", "opponent-list");
@@ -181,7 +182,7 @@
         method: "POST", body: { opponent_user_id: opponentUserId },
       });
       if (await navigate("duel")) {
-        setStatus("Дуэль начата. Ходы выполняются в Telegram.");
+        setStatus("Дуэль начата. Ходите в Mini App или Telegram.");
       }
     } catch (error) {
       if (error.status === 401) {
@@ -196,15 +197,66 @@
     }
   }
 
+  function renderRoundHistory(rounds) {
+    const history = element("section", "round-history");
+    addHeading(history, "Завершённые раунды");
+    const list = element("div", "round-list");
+    for (const round of rounds) {
+      const entry = element("div", "round-result");
+      entry.append(element("strong", null, `Раунд ${round.round} · ${OUTCOME_NAMES[round.outcome] || "Итог раунда"}`));
+      entry.append(
+        element("div", null, `${round.attacker.display_name} — атака: ${ZONE_NAMES[round.attack_zone] || "—"}`),
+        element("div", null, `${round.defender.display_name} — защита: ${ZONE_NAMES[round.defense_zone] || "—"}`)
+      );
+      if (round.outcome_text) entry.append(element("small", null, round.outcome_text));
+      if (Array.isArray(round.timed_out) && round.timed_out.length) {
+        entry.append(element("small", null,
+          `Время вышло: ${round.timed_out.map(player => player.display_name).join(", ")}.`));
+      }
+      list.append(entry);
+    }
+    history.append(list);
+    return history;
+  }
+
+  function renderFinished(finished) {
+    const content = element("section", "duel-finished");
+    addHeading(content, `Дуэль №${finished.id} завершена`);
+    content.append(element("p", "hint", `${finished.player1.display_name} против ${finished.player2.display_name}`));
+    const points = finished.points;
+    const signed = value => value > 0 ? `+${value}` : String(value);
+    const grid = element("div", "data-grid");
+    grid.append(
+      dataCell("Победитель", finished.winner.display_name),
+      dataCell("Проигравший", finished.loser.display_name),
+      dataCell("Очки победителя", `${points.winner_before} → ${points.winner_after} (${signed(points.winner_delta)})`),
+      dataCell("Очки проигравшего", `${points.loser_before} → ${points.loser_after} (${signed(points.loser_delta)})`)
+    );
+    content.append(grid);
+    if (finished.dick_stolen) content.append(notice("У проигравшего украден хуй."));
+    if (finished.stolen_item) content.append(notice(`Украден предмет: ${finished.stolen_item.name}.`));
+    if (finished.berserk) {
+      content.append(notice(finished.berserk.dick_lost ?
+        `Берсерк ${finished.berserk.berserker.display_name} откусил хуй ${finished.berserk.victim.display_name}.` :
+        `Берсерк ${finished.berserk.berserker.display_name} набросился на ${finished.berserk.victim.display_name}, но хуй уже был украден.`));
+    }
+    if (Array.isArray(finished.rounds) && finished.rounds.length) {
+      content.append(renderRoundHistory(finished.rounds));
+    }
+    const opponents = element("button", "small-button", "К соперникам");
+    opponents.type = "button";
+    opponents.addEventListener("click", () => navigate("opponents"));
+    content.append(opponents);
+    return content;
+  }
+
   function renderDuel(data) {
     const body = document.getElementById("duel-content");
-    const previouslyVisible = activeDuel !== null;
     activeDuel = data.duel || null;
     countdownNode = null;
     if (!activeDuel) {
-      body.replaceChildren(notice(previouslyVisible ?
-        "Дуэль больше не активна. Итог появится в Telegram." :
-        "Сейчас в этом чате нет активной дуэли."));
+      body.replaceChildren(data.recent_finished ? renderFinished(data.recent_finished) :
+        notice("Сейчас в этом чате нет активной дуэли."));
       return;
     }
     const duel = activeDuel;
@@ -238,13 +290,25 @@
     }
     content.append(grid);
 
+    if (Array.isArray(duel.rounds) && duel.rounds.length) {
+      content.append(renderRoundHistory(duel.rounds));
+    }
+    if (duel.status === "publishing") {
+      const justResolved = duel.rounds?.some(round => round.resolved_turn_id === duel.turn_id - 1);
+      content.append(notice(justResolved ? "Раунд разрешён. Ожидаем публикацию итога…" :
+        duel.phase === "block" && duel.role === "attacker" ?
+          "Выбор принят. Ожидаем соперника…" : "Публикуем следующий ход в Telegram…"));
+    }
+
     if (duel.status === "active" && (duel.phase === "attack" || duel.phase === "block")) {
       const canChoose = duel.can_act && Number.isFinite(duel.deadline_at) &&
         duel.deadline_at > Date.now() && !moveInFlight;
       const actions = element("div", "action-box");
       actions.append(
         element("h3", null, duel.phase === "attack" ? "Атака" : "Блок"),
-        element("p", null, canChoose ? "Выберите зону хода." : "Ожидаем сервер или другого участника.")
+        element("p", null, canChoose ? "Выберите зону хода." :
+          duel.phase === "block" && duel.role === "attacker" ?
+            "Выбор принят. Ожидаем соперника…" : "Ожидаем сервер или другого участника.")
       );
       const zones = element("div", "zone-row");
       for (const [zone, label] of Object.entries(ZONE_NAMES)) {
@@ -256,6 +320,12 @@
       }
       actions.append(zones);
       content.append(actions);
+    }
+    if (data.recent_finished && data.recent_finished.id !== duel.id) {
+      const previous = element("details", "previous-duel");
+      previous.append(element("summary", null, "Последняя завершённая дуэль"),
+        renderFinished(data.recent_finished));
+      content.append(previous);
     }
     body.replaceChildren(content);
     updateCountdown();
@@ -291,7 +361,8 @@
     if (!refreshed) {
       setStatus("Не удалось проверить состояние дуэли. Обновите экран перед новым ходом.", true);
     } else if (accepted) {
-      setStatus("Выбор принят. Дальше ждём состояние сервера.");
+      setStatus(activeDuel ? "Выбор принят. Дальше ждём состояние сервера." :
+        "Результат дуэли обновлён.");
     } else {
       setStatus(failure || "Проверьте состояние дуэли перед повторным выбором.", true);
     }

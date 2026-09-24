@@ -99,7 +99,9 @@ async def test_cross_chat_target_and_client_chat_override_cannot_cross_world(
         assert valid.status_code == 201
         assert get_current_duel_session(CHAT_A) is None
         assert get_current_duel_session(CHAT_B)["id"] == valid.json()["duel_id"]
-        assert (await client.get("/api/v1/duel/active", headers=headers_a)).json() == {"duel": None}
+        assert (await client.get("/api/v1/duel/active", headers=headers_a)).json() == {
+            "duel": None, "recent_finished": None,
+        }
 
 
 @pytest.mark.asyncio

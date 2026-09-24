@@ -30,6 +30,7 @@ from duel_outbox_repository import (
     cancel_duel_publication_in_transaction,
     create_duel_publication_in_transaction,
     get_duel_publication_by_kind_in_transaction,
+    get_duel_prompt_for_turn_in_transaction,
     get_duel_publication_in_transaction,
     mark_duel_publication_delivered_in_transaction,
 )
@@ -210,7 +211,13 @@ def _prompt_payload(session: dict) -> dict:
                 resolution["strike_zone"], resolution["outcome_phrase"],
                 attacker_title, defender_title, DUEL_MOVE_TIMEOUT_SECONDS,
             )
-    return {"text": text, "phase": session["phase"]}
+    payload = {"text": text, "phase": session["phase"]}
+    # The next attack prompt is durable even after result_json is cleared by
+    # the next move. Keep this already resolved domain outcome with that intent.
+    if (session["phase"] == "attack" and isinstance(session["result"], dict)
+            and session["result"].get("kind") == "round_resolution"):
+        payload["round_resolution"] = session["result"]
+    return payload
 
 
 def _validated_terminal_checkpoint(session: dict) -> dict | None:
@@ -661,6 +668,7 @@ def compensate_persistent_duel_drop(
 
 def _apply_persistent_attack(
     cursor, chat_id: int, duel_id: int, session: dict, zone: str, now_ms: int,
+    *, timed_out: bool = False,
 ) -> PersistentDuelActionResult:
     if not save_duel_attack_in_transaction(
         chat_id, duel_id, session["turn_id"], session["attacker_user_id"],
@@ -668,18 +676,31 @@ def _apply_persistent_attack(
     ):
         raise RuntimeError("Validated duel attack could not be saved")
     current = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
+    payload = _prompt_payload(current)
+    if timed_out:
+        payload["attack_timed_out_user_id"] = session["attacker_user_id"]
     create_duel_publication_in_transaction(
         cursor, chat_id, duel_id, "block_prompt", current["turn_id"],
-        _prompt_payload(current), now_ms,
+        payload, now_ms,
     )
     return PersistentDuelActionResult("success", current)
 
 
 def _apply_persistent_block(
     cursor, chat_id: int, duel_id: int, session: dict, zone: str, now_ms: int,
+    *, timed_out: bool = False,
 ) -> PersistentDuelActionResult:
     round_result = resolve_duel_round(session["attack_zone"], zone, random)
     terminal = round_result.outcome in ("suicide", "hit")
+    block_prompt = get_duel_prompt_for_turn_in_transaction(
+        cursor, chat_id, duel_id, "block_prompt", session["turn_id"],
+    )
+    timeout_user_ids = []
+    if (block_prompt is not None and block_prompt["payload"].get("attack_timed_out_user_id")
+            == session["attacker_user_id"]):
+        timeout_user_ids.append(session["attacker_user_id"])
+    if timed_out:
+        timeout_user_ids.append(session["defender_user_id"])
     # result_json is a server-generated, recoverable checkpoint until Stage 2B-4
     # applies a terminal result. It also preserves nonterminal flavor across send failures.
     resolution = {
@@ -693,6 +714,7 @@ def _apply_persistent_block(
         "defender_user_id": session["defender_user_id"],
         "round_no": session["round_no"],
         "resolved_turn_id": session["turn_id"],
+        "timeout_user_ids": timeout_user_ids,
     }
     if terminal:
         winner = (
@@ -799,9 +821,13 @@ def resolve_persistent_duel_timeout(
 
         zone = random.choice(["head", "body", "dick"])
         if session["phase"] == "attack":
-            result = _apply_persistent_attack(cursor, chat_id, duel_id, session, zone, now_ms)
+            result = _apply_persistent_attack(
+                cursor, chat_id, duel_id, session, zone, now_ms, timed_out=True,
+            )
         else:
-            result = _apply_persistent_block(cursor, chat_id, duel_id, session, zone, now_ms)
+            result = _apply_persistent_block(
+                cursor, chat_id, duel_id, session, zone, now_ms, timed_out=True,
+            )
         return PersistentDuelActionResult(
             result.reason, result.session, result.resolution, timeout_zone=zone,
         )

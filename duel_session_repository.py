@@ -279,6 +279,21 @@ def get_current_duel_session(chat_id: int) -> dict | None:
         return _session_from_row(row)
 
 
+def get_latest_finished_participant_duel_session(chat_id: int, user_id: int) -> dict | None:
+    """Return only this user's latest finalized duel in this chat."""
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT * FROM duel_sessions
+               WHERE chat_id = ? AND status = 'finished'
+                 AND (player1_user_id = ? OR player2_user_id = ?)
+                 AND json_extract(result_json, '$.kind') = 'finalized'
+               ORDER BY id DESC LIMIT 1""",
+            (chat_id, user_id, user_id),
+        ).fetchone()
+        return _session_from_row(row)
+
+
 def bind_duel_session_message(
     chat_id: int,
     duel_id: int,

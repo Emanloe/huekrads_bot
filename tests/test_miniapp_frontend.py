@@ -148,7 +148,17 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert "button.disabled = !canChoose" in js
     assert "if (loading.duel) await loading.duel" in js
     assert 'const refreshed = await loadView("duel", true)' in js
-    assert "Дуэль больше не активна. Итог появится в Telegram." in js
+    assert 'renderRoundHistory(duel.rounds)' in js
+    assert 'renderFinished(data.recent_finished)' in js
+    assert 'renderRoundHistory(finished.rounds)' in js
+    assert 'round.timed_out.map(player => player.display_name)' in js
+    assert 'data.recent_finished.id !== duel.id' in js
+    assert 'previous.append(element("summary", null, "Последняя завершённая дуэль")' in js
+    assert '"Выбор принят. Ожидаем соперника…"' in js
+    assert 'opponents.addEventListener("click", () => navigate("opponents"))' in js
+    assert 'node.textContent = String(value)' in js
+    assert "Math.random" not in js
+    assert 'const OUTCOME_NAMES = { miss: "Промах", block: "Блок", hit: "Попадание", suicide: "Самопоражение" }' in js
     assert 'const ACTIVE_POLL_MS = 8000' in js
     assert "button.disabled = true" in js
     for path in ("/api/v1/duel/attack", "/api/v1/duel/block",

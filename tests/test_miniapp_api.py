@@ -187,7 +187,9 @@ async def test_auth_failures_extra_chat_id_and_gets_do_not_write_game_state(temp
         headers = await session_for(client, CHAT_A, 101)
         assert (await client.get("/api/v1/me", headers=headers)).json()["points"] == 20
         assert (await client.get("/api/v1/duel/opponents", headers=headers)).status_code == 200
-        assert (await client.get("/api/v1/duel/active", headers=headers)).json() == {"duel": None}
+        assert (await client.get("/api/v1/duel/active", headers=headers)).json() == {
+            "duel": None, "recent_finished": None,
+        }
         with database.get_db() as conn:
             row = conn.execute("SELECT points, last_activity_date FROM duel_users "
                                "WHERE chat_id = ? AND user_id = 101", (CHAT_A,)).fetchone()

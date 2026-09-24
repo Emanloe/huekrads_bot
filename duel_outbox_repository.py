@@ -53,6 +53,23 @@ def get_duel_publication(chat_id: int, publication_id: int) -> dict | None:
         return get_duel_publication_in_transaction(conn.cursor(), chat_id, publication_id)
 
 
+def list_persisted_duel_round_resolutions(chat_id: int, duel_id: int) -> list[dict]:
+    """Read resolved rounds archived with their next prompt, including pending sends."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT payload_json FROM duel_outbox
+               WHERE chat_id = ? AND duel_id = ? AND kind = 'attack_prompt'
+                 AND turn_id > 1 ORDER BY turn_id""",
+            (chat_id, duel_id),
+        ).fetchall()
+    resolutions = []
+    for (payload_json,) in rows:
+        resolution = json.loads(payload_json).get("round_resolution")
+        if isinstance(resolution, dict) and resolution.get("kind") == "round_resolution":
+            resolutions.append(resolution)
+    return resolutions
+
+
 def get_delivered_pocket_drop_for_event(chat_id: int, event_id: int) -> dict | None:
     """Find the durable announcement tied to one published pickup button."""
     with get_db() as conn:
@@ -75,6 +92,17 @@ def get_duel_publication_by_kind_in_transaction(
     cursor.execute(
         "SELECT * FROM duel_outbox WHERE chat_id = ? AND duel_id = ? AND kind = ?",
         (chat_id, duel_id, kind),
+    )
+    return _publication_from_row(cursor.fetchone(), cursor.description)
+
+
+def get_duel_prompt_for_turn_in_transaction(
+    cursor: sqlite3.Cursor, chat_id: int, duel_id: int, kind: str, turn_id: int,
+) -> dict | None:
+    cursor.execute(
+        """SELECT * FROM duel_outbox
+           WHERE chat_id = ? AND duel_id = ? AND kind = ? AND turn_id = ?""",
+        (chat_id, duel_id, kind, turn_id),
     )
     return _publication_from_row(cursor.fetchone(), cursor.description)
 
