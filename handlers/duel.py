@@ -1129,8 +1129,10 @@ async def _finish_duel(
 
     # Шанс кражи не зависит от раундов: база +1% за каждую победу
     # проигравшего за сегодня (накапливается, когда он побеждал).
-    steal_chance = get_dick_steal_chance(loser.get("daily_wins", 0))
-    is_dick_stolen = random.random() < steal_chance
+    is_dick_stolen = (
+        loser["points"] == 0
+        or random.random() < get_dick_steal_chance(loser.get("daily_wins", 0))
+    )
 
     try:
 
@@ -1378,21 +1380,6 @@ async def _process_duel_fight(
 
         return
 
-    if initiator_ineligibility == "no_points":
-
-        bot_msg = await context.bot.send_message(
-            chat_id,
-            get_text("duel.admission.initiator.no_points"),
-        )
-
-        schedule_auto_delete(
-            context,
-            chat_id,
-            [bot_msg.message_id],
-        )
-
-        return
-
     opponent = get_duel_user_by_username(
         target_username,
         chat_id,
@@ -1445,24 +1432,6 @@ async def _process_duel_fight(
             chat_id,
             (
                 get_text("duel.admission.participant.no_dick", title=opp_title)
-            ),
-            parse_mode="HTML",
-        )
-
-        schedule_auto_delete(
-            context,
-            chat_id,
-            [bot_msg.message_id],
-        )
-
-        return
-
-    if opponent_ineligibility == "no_points":
-
-        bot_msg = await context.bot.send_message(
-            chat_id,
-            (
-                get_text("duel.admission.opponent.no_points", title=opp_title)
             ),
             parse_mode="HTML",
         )
@@ -1558,14 +1527,6 @@ async def duel_command(
 
     if not target_username:
 
-        if initiator_ineligibility == "no_points":
-            await send_and_schedule(
-                update,
-                context,
-                get_text("duel.admission.initiator.no_points"),
-            )
-            return
-
         top_list = get_duel_top(
             chat_id=chat_id,
             limit=20,
@@ -1596,10 +1557,7 @@ async def duel_command(
             if not opponent:
                 continue
 
-            if (
-                opponent["points"] <= 0
-                or opponent["dick_stolen_today"]
-            ):
+            if opponent["dick_stolen_today"]:
                 continue
 
             clean_label = format_user_title_plain({

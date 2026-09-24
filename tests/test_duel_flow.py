@@ -577,9 +577,7 @@ async def test_attack_timeout_moves_to_block_and_stale_timer_is_ignored(
     ("blocked_user", "field", "value"),
     [
         ("initiator", "dick_stolen_today", 1),
-        ("initiator", "points", 0),
         ("opponent", "dick_stolen_today", 1),
-        ("opponent", "points", 0),
     ],
 )
 @pytest.mark.asyncio
@@ -626,6 +624,53 @@ async def test_duel_command_rejects_ineligible_participant(
     start_fight.assert_not_awaited()
     assert CHAT_ID not in duel.ACTIVE_DUELS
     assert message.reply_text.await_count + fake_context.bot.send_message.await_count == 1
+
+
+@pytest.mark.parametrize("zero_user", ("initiator", "opponent"))
+@pytest.mark.parametrize("via_callback", (False, True))
+@pytest.mark.asyncio
+async def test_zero_point_participant_can_start_direct_or_selected_duel(
+    monkeypatch, fixed_duel_database, fake_context, zero_user, via_callback,
+):
+    import database
+    from handlers import duel
+
+    initiator_tg = make_user(211, "initiator")
+    opponent_tg = make_user(212, "opponent")
+    database.get_or_create_duel_user(initiator_tg, CHAT_ID)
+    database.get_or_create_duel_user(opponent_tg, CHAT_ID)
+    zero_id = initiator_tg.id if zero_user == "initiator" else opponent_tg.id
+    with sqlite3.connect(fixed_duel_database) as connection:
+        connection.execute(
+            "UPDATE duel_users SET points = 0 WHERE chat_id = ? AND user_id = ?",
+            (CHAT_ID, zero_id),
+        )
+
+    start_fight = AsyncMock()
+    monkeypatch.setattr(duel, "_start_interactive_fight", start_fight)
+    monkeypatch.setattr(duel.random, "choice", lambda values: values[0])
+    if via_callback:
+        update, query = callback_update(
+            "start_duel_opponent", initiator_tg,
+            SimpleNamespace(delete=AsyncMock()),
+        )
+        await duel.duel_select_callback(update, fake_context)
+        query.answer.assert_awaited_once_with()
+    else:
+        message = SimpleNamespace(
+            from_user=initiator_tg,
+            chat=SimpleNamespace(id=CHAT_ID),
+            chat_id=CHAT_ID,
+            message_id=303,
+            text="/duel @opponent",
+        )
+        fake_context.args = ["@opponent"]
+        await duel.duel_command(SimpleNamespace(message=message), fake_context)
+
+    start_fight.assert_awaited_once()
+    started = start_fight.await_args.kwargs
+    assert started["chat_id"] == CHAT_ID
+    assert started["attacker_data"]["points"] == 0 or started["defender_data"]["points"] == 0
 
 
 def admission_user(user_id, username, *, points=20, dick_stolen_today=False):
@@ -1324,7 +1369,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     monkeypatch.setattr(
         duel,
         "get_or_create_duel_user",
-        Mock(return_value=admission_user(initiator_tg.id, initiator_tg.username)),
+        Mock(return_value=admission_user(initiator_tg.id, initiator_tg.username, points=0)),
     )
     monkeypatch.setattr(duel, "_extract_username", lambda *_args: None)
     monkeypatch.setattr(
@@ -1335,7 +1380,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     monkeypatch.setattr(
         duel,
         "get_duel_user_by_username",
-        lambda username, _chat_id: admission_user(702, username),
+        lambda username, _chat_id: admission_user(702, username, points=0),
     )
 
     await duel.duel_command(update, fake_context)
@@ -1355,7 +1400,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     sent.assert_awaited_once_with(
         update,
         fake_context,
-        "❌ В чате нет доступных соперников для дуэли (все без очков или без хуев).",
+        "❌ В чате нет доступных соперников для дуэли.",
     )
 
 

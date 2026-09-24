@@ -30,8 +30,6 @@ def _resolve_zone_outcome(strike_zone: str, block_zone: str) -> str:
 def _get_duel_participant_ineligibility(user: dict) -> str | None:
     if user["dick_stolen_today"]:
         return "no_dick"
-    if user["points"] <= 0:
-        return "no_points"
     return None
 
 
@@ -42,7 +40,7 @@ def _build_duel_result_plan(
     winner_title: str,
     max_daily_points: int,
 ) -> dict:
-    winner_points = min(max_daily_points, winner["points"] + 10)
+    winner_points = max(0, min(max_daily_points, winner["points"] + 10))
     loser_points = max(0, loser["points"] - 5)
     result_plan = {
         "is_dick_stolen": is_dick_stolen,

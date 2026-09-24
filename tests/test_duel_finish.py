@@ -676,6 +676,92 @@ async def test_finish_duel_rng_orders_berserk_after_all_existing_finish_rng(
 
 
 @pytest.mark.asyncio
+async def test_zero_point_loser_has_guaranteed_steal_without_decision_rng(
+    monkeypatch, fixed_duel_database, fake_context,
+):
+    import database
+    from handlers import duel
+
+    winner_tg = make_user(701, "zero_winner")
+    loser_tg = make_user(702, "zero_loser")
+    database.get_or_create_duel_user(winner_tg, CHAT_ID)
+    database.get_or_create_duel_user(loser_tg, CHAT_ID)
+    set_duel_stats(
+        fixed_duel_database, winner_tg.id,
+        points=0, wins=2, losses=1, daily_wins=0,
+        stolen_dicks_count=3, dick_stolen_count=0,
+        dick_stolen_today=0, last_stolen_by=None,
+    )
+    set_duel_stats(
+        fixed_duel_database, loser_tg.id,
+        points=0, wins=1, losses=4, daily_wins=0,
+        stolen_dicks_count=0, dick_stolen_count=5,
+        dick_stolen_today=0, last_stolen_by=None,
+    )
+    database.add_duel_inventory_item(CHAT_ID, loser_tg.id, "vevangel_wing")
+    winner = database.get_duel_user_by_username("zero_winner", CHAT_ID)
+    loser = database.get_duel_user_by_username("zero_loser", CHAT_ID)
+    events = []
+    rolls = iter((
+        ("item_steal_roll", duel.DUEL_ITEM_STEAL_CHANCE - 0.001),
+        ("berserk_roll", duel.BERSERK_CHANCE),
+        ("post_message_roll", duel.DUEL_POST_MESSAGE_CHANCE - 0.001),
+    ))
+    post_messages = ("post message",)
+
+    def random_roll():
+        name, value = next(rolls)
+        events.append(name)
+        return value
+
+    def choose(values):
+        if values and isinstance(values[0], dict):
+            events.append("item_steal_choice")
+        elif values is duel.DWARFS_FACTS:
+            events.append("dwarf_fact_choice")
+        elif values is post_messages:
+            events.append("post_message_choice")
+        else:
+            events.append("round_flavor_choice")
+        return values[0]
+
+    monkeypatch.setattr(duel, "DUEL_POST_MESSAGES", post_messages)
+    monkeypatch.setattr(duel.random, "random", random_roll)
+    monkeypatch.setattr(duel.random, "choice", choose)
+    fake_context.bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1701)
+    )
+
+    await duel._finish_duel(fake_context, CHAT_ID, winner, loser, "Final.\n")
+
+    assert events == [
+        "item_steal_roll",
+        "item_steal_choice",
+        "round_flavor_choice",
+        "dwarf_fact_choice",
+        "berserk_roll",
+        "post_message_roll",
+        "post_message_choice",
+    ]
+    refreshed_winner = database.get_duel_user_by_username("zero_winner", CHAT_ID)
+    refreshed_loser = database.get_duel_user_by_username("zero_loser", CHAT_ID)
+    assert (refreshed_winner["points"], refreshed_winner["wins"],
+            refreshed_winner["daily_wins"], refreshed_winner["stolen_dicks_count"]) == (10, 3, 1, 4)
+    assert (refreshed_loser["points"], refreshed_loser["losses"],
+            refreshed_loser["dick_stolen_count"], refreshed_loser["dick_stolen_today"],
+            refreshed_loser["last_stolen_by"]) == (0, 5, 6, True, "zero_winner")
+    assert database.get_monthly_chat_stats(CHAT_ID, database.moscow_month_key()) == {
+        "dicks_stolen": 1, "duels": 1, "bosses_killed": 0,
+    }
+    assert [item["item_id"] for item in database.get_duel_inventory(CHAT_ID, winner_tg.id)] == ["vevangel_wing"]
+    assert database.get_duel_inventory(CHAT_ID, loser_tg.id) == []
+    output = fake_context.bot.send_message.await_args.kwargs["text"]
+    assert get_text("duel.finish.item_stolen", item_name=duel.get_duel_item_name("vevangel_wing")) in output
+    assert duel.DWARFS_FACTS[0] in output
+    assert output.endswith("post message")
+
+
+@pytest.mark.asyncio
 async def test_finish_duel_transaction_error_clears_state_and_schedules_error(
     monkeypatch,
     fixed_duel_database,
