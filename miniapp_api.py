@@ -1,5 +1,6 @@
 """Chat-scoped Mini App API for reads and persistent duel challenges."""
 
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -7,7 +8,7 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, PositiveInt
 from starlette.concurrency import run_in_threadpool
@@ -22,6 +23,11 @@ from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "miniapp_static"
+
+
+def _versioned_static_url(filename: str) -> str:
+    digest = hashlib.sha256((_STATIC_DIR / filename).read_bytes()).hexdigest()
+    return f"/static/{filename}?v={digest}"
 
 
 class SessionRequest(BaseModel):
@@ -192,7 +198,14 @@ def create_miniapp_api(*, bot_token: str | None = None,
     @app.get("/", include_in_schema=False)
     @app.get("/app", include_in_schema=False)
     def miniapp_index():
-        return FileResponse(_STATIC_DIR / "index.html", media_type="text/html")
+        html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        html = html.replace(
+            'href="/static/app.css"', f'href="{_versioned_static_url("app.css")}"',
+        )
+        html = html.replace(
+            'src="/static/app.js"', f'src="{_versioned_static_url("app.js")}"',
+        )
+        return HTMLResponse(html)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():

@@ -13,6 +13,14 @@ from miniapp_sessions import create_launch_token
 _BOT_USERNAME = re.compile(r"[A-Za-z0-9_]{5,32}\Z")
 
 
+async def _reply_and_delete_command(message, chat_id: int, text: str, **kwargs) -> None:
+    await message.reply_text(text, **kwargs)
+    try:
+        await message.delete()
+    except Exception as exc:
+        logging.warning("Could not delete /duel_app command in chat %s: %s", chat_id, exc)
+
+
 async def duel_app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     chat = update.effective_chat
@@ -23,7 +31,9 @@ async def duel_app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await message.reply_text("Откройте /duel_app в группе, где идёт игра.")
         return
     if get_duel_profile(chat.id, user.id, read_only=True) is None:
-        await message.reply_text("Сначала зарегистрируйтесь в дуэлях этой группы через /duel.")
+        await _reply_and_delete_command(
+            message, chat.id, "Сначала зарегистрируйтесь в дуэлях этой группы через /duel.",
+        )
         return
     username = getattr(context.bot, "username", None)
     if not isinstance(username, str) or not _BOT_USERNAME.fullmatch(username):
@@ -31,11 +41,13 @@ async def duel_app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         username = me.username
     if not isinstance(username, str) or not _BOT_USERNAME.fullmatch(username):
         logging.error("Cannot create Mini App launch link without bot username")
-        await message.reply_text("Ссылка на приложение временно недоступна.")
+        await _reply_and_delete_command(message, chat.id, "Ссылка на приложение временно недоступна.")
         return
     # Telegram routes this startapp parameter to the bot's configured Main Mini App.
     token = create_launch_token(chat.id, user.id)
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Открыть дуэли", url=f"https://t.me/{username}?startapp={token}"),
     ]])
-    await message.reply_text("Мини-приложение для этого чата:", reply_markup=keyboard)
+    await _reply_and_delete_command(
+        message, chat.id, "Мини-приложение для этого чата:", reply_markup=keyboard,
+    )
