@@ -1,8 +1,9 @@
 "use strict";
 
 (() => {
-  const ACTIVE_POLL_MS = 8000;
-  const COUNTDOWN_TICK_MS = 1000;
+  const ACTIVE_POLL_MS = 1000;
+  const IDLE_POLL_MS = 8000;
+  const COUNTDOWN_TICK_MS = 250;
   const REQUEST_TIMEOUT_MS = 12000;
   const START_DUEL_PATH = "/api/v1/duel/start";
   const MOVE_DUEL_PATH = "/api/v1/duel/move";
@@ -20,6 +21,8 @@
   let currentView = "home";
   let activeDuel = null;
   let countdownNode = null;
+  let countdownTurn = null;
+  let duelPollStartedAt = -Infinity;
   let expiredDeadlineRefresh = null;
   let challengeInFlight = false;
   let moveInFlight = false;
@@ -45,8 +48,10 @@
     sessionToken = null;
     activeDuel = null;
     countdownNode = null;
+    countdownTurn = null;
     refreshButton.disabled = true;
-    document.getElementById("header-player").textContent = "Гном не загружен";
+    document.getElementById("header-player").hidden = true;
+    document.getElementById("header-player").textContent = "";
     for (const view of Object.keys(API_PATHS)) {
       document.getElementById(`screen-${view}`).querySelector(".panel-body").replaceChildren(
         element("p", "empty-content", "Данные доступны после открытия из Telegram.")
@@ -94,6 +99,7 @@
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let response;
+    const requestStartedAt = performance.now();
     try {
       response = await fetch(path, {
         method: options.method || "GET",
@@ -108,6 +114,7 @@
     } finally {
       window.clearTimeout(timer);
     }
+    const responseReceivedAt = performance.now();
     let data;
     try {
       if (!response.headers.get("content-type")?.includes("application/json")) throw new Error();
@@ -126,6 +133,16 @@
       error.status = response.status;
       error.code = detail?.code;
       throw error;
+    }
+    if (path === API_PATHS.duel) {
+      const serverNow = Number(response.headers.get("X-Duel-Server-Time-Ms"));
+      if (Number.isFinite(serverNow) && serverNow > 0) {
+        // Count the whole request as elapsed so latency never promises extra time.
+        data._clock = {
+          serverNow: serverNow + Math.max(0, responseReceivedAt - requestStartedAt),
+          observedAt: responseReceivedAt,
+        };
+      }
     }
     return data;
   }
@@ -167,7 +184,9 @@
     }
     if (data.pet) content.append(notice(data.pet));
     body.replaceChildren(content);
-    document.getElementById("header-player").textContent = data.dwarf_name || data.display_name || data.username || "Гном";
+    const headerPlayer = document.getElementById("header-player");
+    headerPlayer.textContent = data.dwarf_name || data.display_name || data.username || "Гном";
+    headerPlayer.hidden = false;
   }
 
   function renderOpponents(data) {
@@ -294,6 +313,7 @@
     const body = document.getElementById("duel-content");
     activeDuel = data.duel || null;
     countdownNode = null;
+    countdownTurn = null;
     if (!activeDuel) {
       body.replaceChildren(data.recent_finished ? renderFinished(data.recent_finished) :
         notice("Сейчас в этом чате нет активной дуэли."));
@@ -324,15 +344,17 @@
     }
     if (Number.isFinite(duel.deadline_at)) {
       countdownNode = element("span", "value");
+      const clock = data._clock || { serverNow: Date.now(), observedAt: performance.now() };
+      countdownTurn = {
+        duelId: duel.id, turnId: duel.turn_id, deadlineAt: duel.deadline_at,
+        node: countdownNode, serverNow: clock.serverNow, observedAt: clock.observedAt,
+      };
       const deadlineCell = element("div", "data-cell");
       deadlineCell.append(element("span", "label", "До конца хода"), countdownNode);
       grid.append(deadlineCell);
     }
     content.append(grid);
 
-    if (Array.isArray(duel.rounds) && duel.rounds.length) {
-      content.append(renderRoundHistory(duel.rounds));
-    }
     if (duel.status === "publishing") {
       const justResolved = duel.rounds?.some(round => round.resolved_turn_id === duel.turn_id - 1);
       content.append(notice(justResolved ? "Раунд разрешён. Ожидаем публикацию итога…" :
@@ -342,7 +364,7 @@
 
     if (duel.status === "active" && (duel.phase === "attack" || duel.phase === "block")) {
       const canChoose = duel.can_act && Number.isFinite(duel.deadline_at) &&
-        duel.deadline_at > Date.now() && !moveInFlight;
+        remainingCountdownMs() > 0 && !moveInFlight;
       const actions = element("div", "action-box");
       actions.append(
         element("h3", null, duel.phase === "attack" ? "Атака" : "Блок"),
@@ -361,6 +383,9 @@
       actions.append(zones);
       content.append(actions);
     }
+    if (Array.isArray(duel.rounds) && duel.rounds.length) {
+      content.append(renderRoundHistory(duel.rounds));
+    }
     if (data.recent_finished && data.recent_finished.id !== duel.id) {
       const previous = element("details", "previous-duel");
       previous.append(element("summary", null, "Последняя завершённая дуэль"),
@@ -374,7 +399,7 @@
   async function submitMove(zone) {
     const duel = activeDuel;
     if (!sessionToken || moveInFlight || !duel?.can_act ||
-        !Number.isFinite(duel.deadline_at) || duel.deadline_at <= Date.now()) return;
+        !Number.isFinite(duel.deadline_at) || remainingCountdownMs() <= 0) return;
     moveInFlight = true;
     for (const button of document.querySelectorAll(".zone-row button")) button.disabled = true;
     setStatus("Передаём выбор…");
@@ -408,18 +433,33 @@
     }
   }
 
+  function remainingCountdownMs() {
+    const turn = countdownTurn;
+    if (!turn || !Number.isFinite(turn.deadlineAt) || !Number.isFinite(turn.serverNow)) return 0;
+    const elapsed = Math.max(0, performance.now() - turn.observedAt);
+    return Math.max(0, turn.deadlineAt - turn.serverNow - elapsed);
+  }
+
   function updateCountdown() {
-    if (!activeDuel || !countdownNode || !Number.isFinite(activeDuel.deadline_at)) return;
-    const remaining = Math.max(0, Math.ceil((activeDuel.deadline_at - Date.now()) / 1000));
+    const turn = countdownTurn;
+    if (currentView !== "duel" || document.hidden || !activeDuel || !turn ||
+        turn.node !== countdownNode || turn.duelId !== activeDuel.id ||
+        turn.turnId !== activeDuel.turn_id || turn.deadlineAt !== activeDuel.deadline_at) return;
+    const remaining = Math.ceil(remainingCountdownMs() / 1000);
     countdownNode.textContent = remaining > 0 ? `${remaining} сек.` : "Время вышло · ждём сервер";
     if (remaining === 0) {
       for (const button of document.querySelectorAll(".zone-row button")) button.disabled = true;
     }
-    if (remaining === 0 && currentView === "duel" && !document.hidden && sessionToken) {
+    if (remaining === 0 && sessionToken) {
       const key = `${activeDuel.id}:${activeDuel.turn_id}:${activeDuel.deadline_at}`;
       if (expiredDeadlineRefresh !== key) {
         expiredDeadlineRefresh = key;
-        loadView("duel", true);
+        // Let the current response finish before the one authoritative refresh.
+        window.setTimeout(() => {
+          if (countdownTurn === turn && !document.hidden && currentView === "duel") {
+            loadView("duel", true);
+          }
+        }, 0);
       }
     }
   }
@@ -427,6 +467,7 @@
   async function loadView(view, silent = false) {
     if (!sessionToken) return false;
     if (loading[view]) return loading[view];
+    if (view === "duel") duelPollStartedAt = performance.now();
     const request = (async () => {
       if (!silent) setStatus("Загрузка данных…");
       try {
@@ -449,6 +490,10 @@
 
   function navigate(view) {
     currentView = view;
+    if (view !== "duel") {
+      countdownNode = null;
+      countdownTurn = null;
+    }
     for (const tab of document.querySelectorAll(".tab")) {
       const active = tab.dataset.view === view;
       tab.classList.toggle("is-active", active);
@@ -466,10 +511,25 @@
   }
   refreshButton.addEventListener("click", () => loadView(currentView));
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && currentView === "duel") loadView("duel", true);
+    if (document.hidden || currentView !== "duel") return;
+    updateCountdown();
+    // An older request may have started before the WebView was backgrounded.
+    // Finish it first, then fetch a fresh authoritative state on return.
+    if (loading.duel) {
+      loading.duel.then(() => {
+        window.setTimeout(() => {
+          if (!document.hidden && currentView === "duel") loadView("duel", true);
+        }, 0);
+      });
+    } else {
+      loadView("duel", true);
+    }
   });
   window.setInterval(() => {
-    if (!document.hidden && currentView === "duel") loadView("duel", true);
+    if (!document.hidden && currentView === "duel" && sessionToken &&
+        performance.now() - duelPollStartedAt >= (activeDuel ? ACTIVE_POLL_MS : IDLE_POLL_MS)) {
+      loadView("duel", true);
+    }
   }, ACTIVE_POLL_MS);
   window.setInterval(updateCountdown, COUNTDOWN_TICK_MS);
 

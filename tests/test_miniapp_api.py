@@ -42,6 +42,28 @@ async def session_for(client, chat_id, user_id):
 
 
 @pytest.mark.asyncio
+async def test_active_read_exposes_server_clock_without_changing_body_or_deadline(
+    temp_database, monkeypatch,
+):
+    register(CHAT_A, 101, "hero")
+    from handlers import duel_service
+    monkeypatch.setattr(duel_service.random, "random",
+                        lambda: (_ for _ in ()).throw(AssertionError("GET used RNG")))
+    monkeypatch.setattr(duel_service.random, "choice",
+                        lambda _: (_ for _ in ()).throw(AssertionError("GET used RNG")))
+    monkeypatch.setattr("miniapp_api.utc_unix_milliseconds", lambda: 1_700_000_000_000)
+    api = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        response = await client.get("/api/v1/duel/active", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["X-Duel-Server-Time-Ms"] == "1700000000000"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"duel": None, "recent_finished": None}
+
+
+@pytest.mark.asyncio
 async def test_read_api_isolates_same_user_in_two_chats_and_hides_block_zone(
     temp_database, monkeypatch,
 ):

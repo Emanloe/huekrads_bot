@@ -3,6 +3,8 @@
 from pathlib import Path
 import hashlib
 import re
+import shutil
+import subprocess
 
 import httpx
 import pytest
@@ -14,6 +16,14 @@ from tests.test_miniapp_auth import TEST_BOT_TOKEN
 
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "miniapp_static"
+
+
+def test_duel_timer_and_action_layout_in_browser_runtime():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is unavailable for the vanilla JS runtime check")
+    harness = Path(__file__).with_name("miniapp_timer_harness.cjs")
+    subprocess.run([node, str(harness)], check=True, timeout=10)
 
 
 @pytest.mark.asyncio
@@ -41,7 +51,15 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
             response = await client.get(path)
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
-            assert "Дуэли гномов" in response.text
+            assert "Гномьи бои на ножах" in response.text
+            assert '<span id="header-player" hidden></span>' in response.text
+            for removed in ("Чатовая арена", "Арена</span>",
+                            "Игровой мир текущего чата", "Дуэли гномов",
+                            "Гном не загружен"):
+                assert removed not in response.text
+            assert 'class="eyebrow"' not in response.text
+            assert 'class="header-badge"' not in response.text
+            assert 'class="header-strip"' not in response.text
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["referrer-policy"] == "no-referrer"
             assert response.headers["x-content-type-options"] == "nosniff"
@@ -169,7 +187,15 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'node.textContent = String(value)' in js
     assert "Math.random" not in js
     assert 'const OUTCOME_NAMES = { miss: "Промах", block: "Блок", hit: "Попадание", suicide: "Самопоражение" }' in js
-    assert 'const ACTIVE_POLL_MS = 8000' in js
+    assert 'const ACTIVE_POLL_MS = 1000' in js
+    assert 'const IDLE_POLL_MS = 8000' in js
+    assert 'const COUNTDOWN_TICK_MS = 250' in js
+    assert 'X-Duel-Server-Time-Ms' in js
+    assert 'remainingCountdownMs()' in js
+    assert 'Math.ceil(remainingCountdownMs() / 1000)' in js
+    assert 'if (loading.duel) await loading.duel' in js
+    assert 'const refreshed = await loadView("duel", true)' in js
+    assert 'performance.now() - duelPollStartedAt' in js
     assert "button.disabled = true" in js
     for path in ("/api/v1/duel/attack", "/api/v1/duel/block",
                  "/api/v1/dig", "/api/v1/boss"):
@@ -204,3 +230,19 @@ def test_home_and_opponents_render_full_read_only_stats_safely():
     assert 'overflow-wrap: anywhere' in css
     assert '.title-list.compact' in css
     assert 'Math.random' not in js
+
+
+def test_compact_header_keeps_dwarf_name_without_mobile_overflow():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert '<h1>Гномьи бои на ножах</h1>' in html
+    assert html.index('<h1>Гномьи бои на ножах</h1>') < html.index('class="tab-bar"')
+    assert 'headerPlayer.textContent = data.dwarf_name || data.display_name' in js
+    assert 'headerPlayer.hidden = false' in js
+    assert 'document.getElementById("header-player").hidden = true' in js
+    assert '#header-player { flex: 0 1 45%; min-width: 0;' in css
+    assert '.brand-line h1 { min-width: 0;' in css
+    assert 'overflow-wrap: anywhere' in css
+    assert '.brand-line { padding: 6px 8px; }' in css

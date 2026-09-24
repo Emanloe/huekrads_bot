@@ -8,7 +8,7 @@ from html import unescape
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -407,11 +407,13 @@ def create_miniapp_api(*, bot_token: str | None = None,
         return {"accepted": True, "duel_id": request.duel_id, "turn_id": request.turn_id}
 
     @app.get("/api/v1/duel/active")
-    def active(session: MiniAppSession = Depends(require_session)):
+    def active(response: Response, session: MiniAppSession = Depends(require_session)):
         duel = get_current_duel_session(session.chat_id)
         finished = get_latest_finished_participant_duel_session(
             session.chat_id, session.user_id,
         )
+        server_now = utc_unix_milliseconds()
+        response.headers["X-Duel-Server-Time-Ms"] = str(server_now)
         recent_finished = _finished_duel_read_model(finished) if finished else None
         if duel is None:
             return {"duel": None, "recent_finished": recent_finished}
@@ -421,7 +423,7 @@ def create_miniapp_api(*, bot_token: str | None = None,
         can_act = is_active and (
             (duel["phase"] == "attack" and role == "attacker") or
             (duel["phase"] == "block" and role == "defender")
-        ) and duel["deadline_at"] is not None and duel["deadline_at"] > utc_unix_milliseconds()
+        ) and duel["deadline_at"] is not None and duel["deadline_at"] > server_now
 
         return {"duel": {
             "id": duel["id"], "status": duel["status"], "phase": duel["phase"],
