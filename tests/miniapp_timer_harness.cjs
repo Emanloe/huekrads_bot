@@ -34,7 +34,7 @@ class Node {
 }
 
 const nodes = new Map();
-for (const id of ["duel-content", "app-status", "refresh-button", "header-player"]) {
+for (const id of ["duel-content", "app-status", "refresh-button"]) {
   nodes.set(id, new Node());
 }
 const intervals = [];
@@ -109,7 +109,8 @@ const round = { round: 1, outcome: "hit", attacker: { display_name: "A" },
 function duel(overrides = {}) {
   return {
     id: 1, turn_id: 2, round: 2, status: "active", phase: "attack",
-    role: "attacker", can_act: true, deadline_at: epoch + 9600,
+    role: "attacker", can_act: true, own_attack_accepted: false,
+    deadline_at: epoch + 9600,
     attacker: { display_name: "A" }, defender: { display_name: "B" },
     rounds: [round], ...overrides,
   };
@@ -121,6 +122,12 @@ function findClass(node, className) {
   return node.children.find(child => child.className.split(" ").includes(className));
 }
 function countdownText() { return app.countdownTurn?.node.textContent; }
+function actionPanel() {
+  return findClass(nodes.get("duel-content").children[0], "action-box");
+}
+function actionButtons() {
+  return nodes.get("duel-content").querySelectorAll(".zone-row button");
+}
 
 // The server's 9.6 seconds round up to 10; local ticks need no HTTP response.
 render(duel());
@@ -137,6 +144,8 @@ const root = nodes.get("duel-content").children[0];
 assert.ok(root.children.indexOf(findClass(root, "action-box")) <
   root.children.indexOf(findClass(root, "round-history")));
 assert.equal(nodes.get("duel-content").querySelectorAll(".zone-row button").length, 3);
+assert.equal(actionPanel().children[0].textContent, "Атака");
+assert.ok(actionButtons().every(button => !button.disabled));
 
 // The visual clock follows the server sample even if the device clock is wrong.
 wallOffset = 60_000;
@@ -156,13 +165,46 @@ const secondRoot = nodes.get("duel-content").children[0];
 assert.ok(secondRoot.children.indexOf(findClass(secondRoot, "action-box")) <
   secondRoot.children.indexOf(findClass(secondRoot, "round-history")));
 
-// Block and waiting phases keep controls above history, with correct disabled state.
+// The panel describes this user's action, while the state grid retains server phase.
 render(duel({ turn_id: 4, phase: "block", role: "defender" }));
 const blockRoot = nodes.get("duel-content").children[0];
 assert.ok(blockRoot.children.indexOf(findClass(blockRoot, "action-box")) <
   blockRoot.children.indexOf(findClass(blockRoot, "round-history")));
-render(duel({ turn_id: 5, phase: "block", role: "attacker", can_act: false }));
-assert.ok(nodes.get("duel-content").querySelectorAll(".zone-row button").every(button => button.disabled));
+assert.equal(actionPanel().children[0].textContent, "Блок");
+assert.ok(actionButtons().every(button => !button.disabled));
+
+// The server distinguishes a submitted attack from a timeout-selected zone.
+render(duel({ turn_id: 5, phase: "block", role: "attacker", can_act: false,
+  attack_zone: "head", own_attack_accepted: true }));
+assert.equal(actionPanel().children[0].textContent, "Атака");
+assert.equal(actionPanel().children[1].textContent, "Атака принята. Ожидаем соперника…");
+assert.ok(actionButtons().every(button => button.disabled));
+assert.ok(!actionPanel().children[1].textContent.includes("Блок принят"));
+render(duel({ turn_id: 5, phase: "block", role: "attacker", can_act: false,
+  attack_zone: null }));
+assert.equal(actionPanel().children[1].textContent, "Ожидаем сервер или другого участника.");
+
+// Waiting for the attack must not claim the defender has submitted a block.
+render(duel({ turn_id: 6, phase: "attack", role: "defender", can_act: false }));
+assert.equal(actionPanel().children[0].textContent, "Блок");
+assert.equal(actionPanel().children[1].textContent, "Ожидаем атаку соперника…");
+assert.ok(actionButtons().every(button => button.disabled));
+
+// A submitted block resolves the round immediately; there is no active
+// "block accepted" state to claim while the next prompt is publishing.
+render(duel({ turn_id: 7, status: "publishing", phase: "attack",
+  role: "attacker", can_act: false, deadline_at: null }));
+assert.equal(actionPanel(), undefined);
+render(duel({ turn_id: 8, status: "publishing", phase: "block",
+  role: "attacker", can_act: false, attack_zone: "body",
+  own_attack_accepted: true, deadline_at: null }));
+assert.equal(actionPanel().children[0].textContent, "Атака");
+assert.equal(actionPanel().children[1].textContent,
+  "Атака принята. Ожидаем соперника…");
+assert.equal(actionButtons().length, 0);
+render(duel({ turn_id: 9, phase: "block", role: "spectator", can_act: false }));
+assert.equal(actionPanel(), undefined);
+
 render(duel({ turn_id: 6, rounds: [] }));
 assert.equal(findClass(nodes.get("duel-content").children[0], "round-history"), undefined);
 

@@ -93,6 +93,8 @@ async def test_http_attack_uses_shared_service_and_keeps_defender_zone_hidden(
         initial_defender = (await client.get("/api/v1/duel/active", headers=defender)).json()["duel"]
         assert initial_attacker["can_act"] is True
         assert initial_defender["can_act"] is False
+        assert initial_attacker["own_attack_accepted"] is False
+        assert initial_defender["own_attack_accepted"] is False
         assert initial_attacker["attack_zone"] is initial_defender["attack_zone"] is None
         assert initial_attacker["turn_id"] == 1
 
@@ -107,8 +109,11 @@ async def test_http_attack_uses_shared_service_and_keeps_defender_zone_hidden(
         visible_defender = (await client.get("/api/v1/duel/active", headers=defender)).json()["duel"]
         visible_spectator = (await client.get("/api/v1/duel/active", headers=spectator)).json()["duel"]
         assert visible_attacker["attack_zone"] == zone
+        assert visible_attacker["own_attack_accepted"] is True
         assert visible_defender["attack_zone"] is None
+        assert visible_defender["own_attack_accepted"] is False
         assert visible_spectator["attack_zone"] is None
+        assert visible_spectator["own_attack_accepted"] is False
         assert visible_spectator["can_act"] is False
         assert visible_attacker["can_act"] is False
         assert visible_defender["can_act"] is True
@@ -137,6 +142,8 @@ async def test_mixed_interfaces_share_one_round_and_rng_trace(
             query = await telegram_move(fake_context, duel_id, 1, 101, "strike")
             query.answer.assert_awaited_once_with()
         assert get_duel_session(CHAT_A, duel_id)["phase"] == "block"
+        assert (await client.get("/api/v1/duel/active", headers=attacker)).json()[
+            "duel"]["own_attack_accepted"] is True
 
         if block_ui == "http":
             assert (await http_move(client, defender, duel_id, 2)).status_code == 200
@@ -157,6 +164,33 @@ async def test_mixed_interfaces_share_one_round_and_rng_trace(
         assert rng.trace == [
             "choice:start", "random", "random", "choice:flavor", "choice:flavor",
         ]
+
+
+@pytest.mark.asyncio
+async def test_timeout_selected_attack_zone_is_not_a_user_accepted_action(
+    temp_database, fake_context, monkeypatch,
+):
+    duel_id, rng = await started_duel(fake_context, monkeypatch)
+    deadline = get_duel_session(CHAT_A, duel_id)["deadline_at"]
+    timed_out = duel_service.resolve_persistent_duel_timeout(
+        CHAT_A, duel_id, 1, deadline,
+    )
+    assert timed_out.reason == "success"
+    assert timed_out.session["phase"] == "block"
+    assert timed_out.session["attack_zone"] == "head"
+    async with client_for(fake_context) as client:
+        attacker = await session_for(client, CHAT_A, 101)
+        pending = (await client.get("/api/v1/duel/active", headers=attacker)).json()["duel"]
+        assert pending["attack_zone"] == "head"
+        assert pending["own_attack_accepted"] is False
+        await recover_persistent_duel_chat(
+            CHAT_A, fake_context.bot, now_ms=deadline + 1,
+            job_queue=fake_context.job_queue,
+        )
+        active = (await client.get("/api/v1/duel/active", headers=attacker)).json()["duel"]
+        assert active["phase"] == "block"
+        assert active["own_attack_accepted"] is False
+    assert rng.trace == ["choice:start", "choice:timeout"]
 
 
 @pytest.mark.asyncio

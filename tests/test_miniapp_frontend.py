@@ -51,8 +51,8 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
             response = await client.get(path)
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
-            assert "Гномьи бои на ножах" in response.text
-            assert '<span id="header-player" hidden></span>' in response.text
+            assert '<h1>ГНОМЬИ БОИ НА НОЖАХ</h1>' in response.text
+            assert 'id="header-player"' not in response.text
             for removed in ("Чатовая арена", "Арена</span>",
                             "Игровой мир текущего чата", "Дуэли гномов",
                             "Гном не загружен"):
@@ -182,7 +182,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'finished.note_prefix' in js
     assert 'data.recent_finished.id !== duel.id' in js
     assert 'previous.append(element("summary", null, "Последняя завершённая дуэль")' in js
-    assert '"Выбор принят. Ожидаем соперника…"' in js
+    assert '"Атака принята. Ожидаем соперника…"' in js
     assert 'opponents.addEventListener("click", () => navigate("opponents"))' in js
     assert 'node.textContent = String(value)' in js
     assert "Math.random" not in js
@@ -232,17 +232,54 @@ def test_home_and_opponents_render_full_read_only_stats_safely():
     assert 'Math.random' not in js
 
 
-def test_compact_header_keeps_dwarf_name_without_mobile_overflow():
+def test_compact_header_only_has_centered_title_and_profile_keeps_dwarf_name():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
     js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
-    assert '<h1>Гномьи бои на ножах</h1>' in html
-    assert html.index('<h1>Гномьи бои на ножах</h1>') < html.index('class="tab-bar"')
-    assert 'headerPlayer.textContent = data.dwarf_name || data.display_name' in js
-    assert 'headerPlayer.hidden = false' in js
-    assert 'document.getElementById("header-player").hidden = true' in js
-    assert '#header-player { flex: 0 1 45%; min-width: 0;' in css
-    assert '.brand-line h1 { min-width: 0;' in css
+    header = re.search(r'<header class="site-header">(.*?)</header>', html, re.S).group(1)
+    assert re.sub(r"<[^>]+>", "", header).strip() == "ГНОМЬИ БОИ НА НОЖАХ"
+    assert header.count("<h1>") == 1
+    assert html.index('<h1>ГНОМЬИ БОИ НА НОЖАХ</h1>') < html.index('class="tab-bar"')
+    assert 'dataCell("Имя гнома", data.dwarf_name' in js
+    assert 'header-player' not in html + css + js
+    assert 'text-align: center' in css
+    assert '.brand-line h1 { margin: 0;' in css
     assert 'overflow-wrap: anywhere' in css
     assert '.brand-line { padding: 6px 8px; }' in css
+
+
+def test_blue_theme_semantic_colors_keep_text_readable():
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    tokens = dict(re.findall(r"--([a-z-]+):\s*(#[0-9a-f]{6});", css))
+
+    def luminance(color):
+        channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [channel / 12.92 if channel <= 0.04045 else
+                  ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+        return sum(channel * weight for channel, weight in zip(
+            linear, (0.2126, 0.7152, 0.0722),
+        ))
+
+    def contrast(first, second):
+        light, dark = sorted((luminance(tokens[first]), luminance(tokens[second])),
+                             reverse=True)
+        return (light + 0.05) / (dark + 0.05)
+
+    for first, second in (
+        ("text", "surface"), ("text", "surface-raised"),
+        ("text-muted", "surface"), ("text-on-dark", "header"),
+        ("text-on-dark", "accent-dark"), ("text-on-dark", "accent"),
+        ("button-text", "button-bg"),
+        ("button-disabled-text", "button-disabled-bg"),
+        ("danger", "danger-bg"),
+    ):
+        assert contrast(first, second) >= 4.5, (first, second)
+
+    for token in ("bg", "header", "accent", "accent-dark"):
+        red, green, blue = (int(tokens[token][index:index + 2], 16)
+                            for index in (1, 3, 5))
+        assert blue > green > red
+    assert ".tab.is-active" in css and "border-top: 2px solid var(--accent)" in css
+    assert ".small-button:disabled" in css and "var(--button-disabled-bg)" in css
+    assert ".brand-line h1" in css and "overflow-wrap: anywhere" in css

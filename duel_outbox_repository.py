@@ -107,6 +107,16 @@ def get_duel_prompt_for_turn_in_transaction(
     return _publication_from_row(cursor.fetchone(), cursor.description)
 
 
+def get_duel_prompt_for_turn(
+    chat_id: int, duel_id: int, kind: str, turn_id: int,
+) -> dict | None:
+    """Read the chat-scoped durable prompt intent without altering publication."""
+    with get_db() as conn:
+        return get_duel_prompt_for_turn_in_transaction(
+            conn.cursor(), chat_id, duel_id, kind, turn_id,
+        )
+
+
 def list_retryable_duel_publications(
     chat_id: int, now_ms: int, *, limit: int = 100,
 ) -> list[dict]:

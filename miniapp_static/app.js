@@ -50,8 +50,6 @@
     countdownNode = null;
     countdownTurn = null;
     refreshButton.disabled = true;
-    document.getElementById("header-player").hidden = true;
-    document.getElementById("header-player").textContent = "";
     for (const view of Object.keys(API_PATHS)) {
       document.getElementById(`screen-${view}`).querySelector(".panel-body").replaceChildren(
         element("p", "empty-content", "Данные доступны после открытия из Telegram.")
@@ -184,9 +182,6 @@
     }
     if (data.pet) content.append(notice(data.pet));
     body.replaceChildren(content);
-    const headerPlayer = document.getElementById("header-player");
-    headerPlayer.textContent = data.dwarf_name || data.display_name || data.username || "Гном";
-    headerPlayer.hidden = false;
   }
 
   function renderOpponents(data) {
@@ -355,22 +350,25 @@
     }
     content.append(grid);
 
-    if (duel.status === "publishing") {
+    const attackAccepted = duel.role === "attacker" && duel.phase === "block" &&
+      duel.own_attack_accepted === true;
+    if (duel.status === "publishing" && !attackAccepted) {
       const justResolved = duel.rounds?.some(round => round.resolved_turn_id === duel.turn_id - 1);
       content.append(notice(justResolved ? "Раунд разрешён. Ожидаем публикацию итога…" :
-        duel.phase === "block" && duel.role === "attacker" ?
-          "Выбор принят. Ожидаем соперника…" : "Публикуем следующий ход в Telegram…"));
+        "Публикуем следующий ход в Telegram…"));
     }
 
-    if (duel.status === "active" && (duel.phase === "attack" || duel.phase === "block")) {
+    if ((duel.status === "active" && (duel.role === "attacker" || duel.role === "defender")) ||
+        (duel.status === "publishing" && attackAccepted)) {
       const canChoose = duel.can_act && Number.isFinite(duel.deadline_at) &&
         remainingCountdownMs() > 0 && !moveInFlight;
       const actions = element("div", "action-box");
       actions.append(
-        element("h3", null, duel.phase === "attack" ? "Атака" : "Блок"),
+        element("h3", null, duel.role === "attacker" ? "Атака" : "Блок"),
         element("p", null, canChoose ? "Выберите зону хода." :
-          duel.phase === "block" && duel.role === "attacker" ?
-            "Выбор принят. Ожидаем соперника…" : "Ожидаем сервер или другого участника.")
+          attackAccepted ? "Атака принята. Ожидаем соперника…" :
+            duel.role === "defender" && duel.phase === "attack" ?
+              "Ожидаем атаку соперника…" : "Ожидаем сервер или другого участника.")
       );
       const zones = element("div", "zone-row");
       for (const [zone, label] of Object.entries(ZONE_NAMES)) {
@@ -380,7 +378,7 @@
         button.addEventListener("click", () => submitMove(zone));
         zones.append(button);
       }
-      actions.append(zones);
+      if (duel.status === "active") actions.append(zones);
       content.append(actions);
     }
     if (Array.isArray(duel.rounds) && duel.rounds.length) {

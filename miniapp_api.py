@@ -20,7 +20,9 @@ from database import (
     format_user_title, format_user_title_plain, get_bosses_defeated,
     get_duel_user_by_id, has_huecrab,
 )
-from duel_outbox_repository import list_persisted_duel_round_resolutions
+from duel_outbox_repository import (
+    get_duel_prompt_for_turn, list_persisted_duel_round_resolutions,
+)
 from duel_session_repository import (
     get_current_duel_session, get_duel_session,
     get_latest_finished_participant_duel_session, utc_unix_milliseconds,
@@ -424,6 +426,14 @@ def create_miniapp_api(*, bot_token: str | None = None,
             (duel["phase"] == "attack" and role == "attacker") or
             (duel["phase"] == "block" and role == "defender")
         ) and duel["deadline_at"] is not None and duel["deadline_at"] > server_now
+        own_attack_accepted = False
+        if role == "attacker" and duel["phase"] == "block" and duel["attack_zone"]:
+            block_prompt = get_duel_prompt_for_turn(
+                session.chat_id, duel["id"], "block_prompt", duel["turn_id"],
+            )
+            own_attack_accepted = block_prompt is not None and (
+                block_prompt["payload"].get("attack_timed_out_user_id") is None
+            )
 
         return {"duel": {
             "id": duel["id"], "status": duel["status"], "phase": duel["phase"],
@@ -431,6 +441,7 @@ def create_miniapp_api(*, bot_token: str | None = None,
             "attacker": _duel_participant(duel, duel["attacker_user_id"]),
             "defender": _duel_participant(duel, duel["defender_user_id"]),
             "attack_zone": duel["attack_zone"] if role == "attacker" and duel["phase"] == "block" else None,
+            "own_attack_accepted": own_attack_accepted,
             "deadline_at": duel["deadline_at"] if is_active else None,
             "role": role, "can_act": can_act,
             "rounds": _duel_rounds(duel) if role != "spectator" else [],
