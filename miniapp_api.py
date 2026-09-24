@@ -1,10 +1,13 @@
 """Read-only game API behind a chat-scoped Mini App bearer session."""
 
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from config import BOT_TOKEN
@@ -13,6 +16,9 @@ from duel_session_repository import get_current_duel_session, utc_unix_milliseco
 from handlers.duel_service import get_duel_profile, list_duel_opponents
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
+
+
+_STATIC_DIR = Path(__file__).resolve().parent / "miniapp_static"
 
 
 class SessionRequest(BaseModel):
@@ -30,6 +36,16 @@ def create_miniapp_api(*, bot_token: str | None = None,
         raise RuntimeError("BOT_TOKEN is required for Mini App initData validation")
     origin = os.getenv("MINIAPP_ORIGIN", "").strip() if allowed_origin is None else allowed_origin
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def frontend_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path in ("/", "/app") or request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     if origin:
         parsed = urlparse(origin)
         if (parsed.scheme != "https" or not parsed.netloc or parsed.path or
@@ -119,5 +135,12 @@ def create_miniapp_api(*, bot_token: str | None = None,
             "deadline_at": duel["deadline_at"] if is_active else None,
             "role": role, "can_act": can_act,
         }}
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/app", include_in_schema=False)
+    def miniapp_index():
+        return FileResponse(_STATIC_DIR / "index.html", media_type="text/html")
+
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="miniapp_static")
 
     return app

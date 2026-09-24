@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Дуэли гномов</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="game-shell">
+    <header class="site-header">
+      <div class="brand-line">
+        <div>
+          <p class="eyebrow">Чатовая арена · Mini App</p>
+          <h1>Дуэли гномов</h1>
+        </div>
+        <span class="header-badge">Просмотр</span>
+      </div>
+      <div class="header-strip">
+        <span>Игровой мир текущего чата</span>
+        <span id="header-player">Гном не загружен</span>
+      </div>
+    </header>
+
+    <nav class="tab-bar" aria-label="Разделы">
+      <button class="tab is-active" type="button" data-view="home" aria-current="page">Главная</button>
+      <button class="tab" type="button" data-view="opponents">Соперники</button>
+      <button class="tab" type="button" data-view="duel">Дуэль</button>
+    </nav>
+
+    <main>
+      <div class="toolbar">
+        <span id="app-status" role="status" aria-live="polite">Подключение к Telegram…</span>
+        <button id="refresh-button" class="small-button" type="button" disabled>Обновить</button>
+      </div>
+
+      <section id="screen-home" class="screen" aria-labelledby="home-title">
+        <div class="panel-title"><h2 id="home-title">Личное дело</h2><span>01 / 03</span></div>
+        <div id="home-content" class="panel-body empty-content">Данные появятся после открытия из Telegram.</div>
+      </section>
+
+      <section id="screen-opponents" class="screen" aria-labelledby="opponents-title" hidden>
+        <div class="panel-title"><h2 id="opponents-title">Список соперников</h2><span>02 / 03</span></div>
+        <div id="opponents-content" class="panel-body empty-content">Список появится после открытия из Telegram.</div>
+      </section>
+
+      <section id="screen-duel" class="screen" aria-labelledby="duel-title" hidden>
+        <div class="panel-title"><h2 id="duel-title">Текущая дуэль</h2><span>03 / 03</span></div>
+        <div id="duel-content" class="panel-body empty-content">Состояние дуэли появится после открытия из Telegram.</div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Обычная дуэль · текущий чат</span>
+      <span>Ходы пока доступны только в Telegram</span>
+    </footer>
+  </div>
+</body>
+</html>
