@@ -362,23 +362,26 @@
         (duel.status === "publishing" && attackAccepted)) {
       const canChoose = duel.can_act && Number.isFinite(duel.deadline_at) &&
         remainingCountdownMs() > 0 && !moveInFlight;
+      const waitingForAttack = duel.role === "defender" && duel.phase === "attack";
       const actions = element("div", "action-box");
       actions.append(
-        element("h3", null, duel.role === "attacker" ? "Атака" : "Блок"),
+        element("h3", null, canChoose ? (duel.phase === "attack" ? "Атака" : "Блок") :
+          attackAccepted ? "Атака" : "Ожидание"),
         element("p", null, canChoose ? "Выберите зону хода." :
           attackAccepted ? "Атака принята. Ожидаем соперника…" :
-            duel.role === "defender" && duel.phase === "attack" ?
-              "Ожидаем атаку соперника…" : "Ожидаем сервер или другого участника.")
+            waitingForAttack ? "Соперник выбирает зону атаки…" :
+              "Ожидаем сервер или другого участника.")
       );
-      const zones = element("div", "zone-row");
-      for (const [zone, label] of Object.entries(ZONE_NAMES)) {
-        const button = element("button", "small-button", label);
-        button.type = "button";
-        button.disabled = !canChoose;
-        button.addEventListener("click", () => submitMove(zone));
-        zones.append(button);
+      if (canChoose) {
+        const zones = element("div", "zone-row");
+        for (const [zone, label] of Object.entries(ZONE_NAMES)) {
+          const button = element("button", "small-button", label);
+          button.type = "button";
+          button.addEventListener("click", () => submitMove(zone));
+          zones.append(button);
+        }
+        actions.append(zones);
       }
-      if (duel.status === "active") actions.append(zones);
       content.append(actions);
     }
     if (Array.isArray(duel.rounds) && duel.rounds.length) {

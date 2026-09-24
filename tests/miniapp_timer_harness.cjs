@@ -178,17 +178,19 @@ render(duel({ turn_id: 5, phase: "block", role: "attacker", can_act: false,
   attack_zone: "head", own_attack_accepted: true }));
 assert.equal(actionPanel().children[0].textContent, "Атака");
 assert.equal(actionPanel().children[1].textContent, "Атака принята. Ожидаем соперника…");
-assert.ok(actionButtons().every(button => button.disabled));
+assert.equal(actionButtons().length, 0);
 assert.ok(!actionPanel().children[1].textContent.includes("Блок принят"));
 render(duel({ turn_id: 5, phase: "block", role: "attacker", can_act: false,
   attack_zone: null }));
+assert.equal(actionPanel().children[0].textContent, "Ожидание");
 assert.equal(actionPanel().children[1].textContent, "Ожидаем сервер или другого участника.");
+assert.equal(actionButtons().length, 0);
 
 // Waiting for the attack must not claim the defender has submitted a block.
 render(duel({ turn_id: 6, phase: "attack", role: "defender", can_act: false }));
-assert.equal(actionPanel().children[0].textContent, "Блок");
-assert.equal(actionPanel().children[1].textContent, "Ожидаем атаку соперника…");
-assert.ok(actionButtons().every(button => button.disabled));
+assert.equal(actionPanel().children[0].textContent, "Ожидание");
+assert.equal(actionPanel().children[1].textContent, "Соперник выбирает зону атаки…");
+assert.equal(actionButtons().length, 0);
 
 // A submitted block resolves the round immediately; there is no active
 // "block accepted" state to claim while the next prompt is publishing.
@@ -213,7 +215,8 @@ render(duel({ turn_id: 7, deadline_at: epoch + now + 100 }));
 now += 150;
 app.updateCountdown();
 assert.equal(countdownText(), "Время вышло · ждём сервер");
-assert.ok(nodes.get("duel-content").querySelectorAll(".zone-row button").every(button => button.disabled));
+assert.equal(actionButtons().length, 3);
+assert.ok(actionButtons().every(button => button.disabled));
 const scheduled = timeouts.filter(item => item.delay === 0).length;
 app.updateCountdown();
 assert.equal(timeouts.filter(item => item.delay === 0).length, scheduled);
@@ -259,6 +262,24 @@ async function testPolling() {
   document.listeners.visibilitychange();
   await Promise.resolve();
   assert.equal(fetchCount, idleCount + 1);
+
+  // The next authoritative poll promotes waiting defender to actionable block.
+  now = 30_000;
+  serverDuel = duel({ turn_id: 10, phase: "attack", role: "defender",
+    can_act: false, deadline_at: epoch + now + 10_000 });
+  await app.loadView("duel", true);
+  assert.equal(actionPanel().children[0].textContent, "Ожидание");
+  assert.equal(actionButtons().length, 0);
+  serverDuel = duel({ turn_id: 11, phase: "block", role: "defender",
+    can_act: true, deadline_at: epoch + now + 10_000 });
+  await app.loadView("duel", true);
+  assert.equal(actionPanel().children[0].textContent, "Блок");
+  assert.equal(actionButtons().length, 3);
+  assert.ok(actionButtons().every(button => !button.disabled));
+  serverDuel = duel({ turn_id: 12, status: "publishing", phase: "attack",
+    role: "attacker", can_act: false, deadline_at: null });
+  await app.loadView("duel", true);
+  assert.equal(actionPanel(), undefined);
 
   // Accepted and uncertain writes each trigger a fresh GET, never a blind retry.
   await app.loadView("duel", true);

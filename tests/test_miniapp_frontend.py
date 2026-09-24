@@ -163,7 +163,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'const ZONE_NAMES = { head: "Голова", body: "Торс", dick: "Хуй" }' in js
     assert 'body: { duel_id: duel.id, turn_id: duel.turn_id, zone }' in js
     assert 'button.addEventListener("click", () => submitMove(zone))' in js
-    assert "button.disabled = !canChoose" in js
+    assert "if (canChoose) {" in js
     assert "if (loading.duel) await loading.duel" in js
     assert 'const refreshed = await loadView("duel", true)' in js
     assert 'renderRoundHistory(duel.rounds)' in js

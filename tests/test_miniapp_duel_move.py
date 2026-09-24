@@ -294,10 +294,16 @@ async def test_move_validates_auth_schema_zone_role_and_finished_state(
 ):
     duel_id, rng = await started_duel(fake_context, monkeypatch)
     register(CHAT_A, 303, "spectator")
+    assert duel_service.submit_persistent_duel_block(
+        CHAT_A, duel_id, 202, 1, "head",
+    ).reason == "wrong_phase"
+    assert rng.trace == ["choice:start"]
     async with client_for(fake_context) as client:
         attacker = await session_for(client, CHAT_A, 101)
         defender = await session_for(client, CHAT_A, 202)
-        assert (await http_move(client, defender, duel_id, 1)).json()["detail"]["code"] == "wrong_actor"
+        wrong_actor = await http_move(client, defender, duel_id, 1)
+        assert wrong_actor.status_code == 403
+        assert wrong_actor.json()["detail"]["code"] == "wrong_actor"
         for payload in (
             {}, {"turn_id": 1, "zone": "head"},
             {"duel_id": duel_id, "zone": "head"},
