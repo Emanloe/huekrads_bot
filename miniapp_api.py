@@ -13,21 +13,25 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictInt
 from starlette.concurrency import run_in_threadpool
 
-from config import BOT_TOKEN
-from database import format_user_title_plain
+from config import BOT_TOKEN, MAX_DAILY_POINTS
+from database import (
+    format_user_title_plain, get_bosses_defeated, get_duel_user_by_id, has_huecrab,
+)
 from duel_outbox_repository import list_persisted_duel_round_resolutions
 from duel_session_repository import (
     get_current_duel_session, get_duel_session,
     get_latest_finished_participant_duel_session, utc_unix_milliseconds,
 )
-from handlers.duel_items import DUEL_ITEM_NAMES
+from handlers.duel_items import get_duel_display_inventory_rows
 from handlers.duel_service import (
     get_duel_profile, list_duel_opponents, start_persistent_duel,
     submit_persistent_duel_attack, submit_persistent_duel_block,
 )
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
+from handlers.duel_text import get_duel_title_read_model
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
+from text_resources import get_text
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "miniapp_static"
@@ -233,29 +237,44 @@ def create_miniapp_api(*, bot_token: str | None = None,
         if profile is None:
             raise HTTPException(status_code=404, detail="Player not found")
         user = profile.user
-        inventory = {}
-        for item in profile.inventory:
-            inventory[item["item_id"]] = inventory.get(item["item_id"], 0) + 1
+        has_dick = not user["dick_stolen_today"]
         return {
             "user_id": user["user_id"], "username": user["username"],
             "display_name": user["display_name"], "dwarf_name": user["dwarf_name"],
-            "points": user["points"], "wins": user["wins"], "losses": user["losses"],
+            "points": user["points"], "max_points": MAX_DAILY_POINTS,
+            "wins": user["wins"], "losses": user["losses"],
             "daily_wins": user["daily_wins"],
             "dick_stolen_today": user["dick_stolen_today"],
+            "dick_status": {
+                "has_dick": has_dick,
+                "text": get_text("duel.stats.status.has_dick" if has_dick
+                                 else "duel.stats.status.no_dick"),
+            },
+            "titles": get_duel_title_read_model(user),
+            "boss_wins": get_bosses_defeated(session.user_id, session.chat_id),
             "ineligibility": profile.ineligibility,
-            "inventory": [
-                {"item_id": key, "name": DUEL_ITEM_NAMES.get(key, key), "count": value}
-                for key, value in sorted(inventory.items())
-            ],
+            "inventory": get_duel_display_inventory_rows(profile.inventory),
+            "pet": (get_text("huecrab.inventory") if has_huecrab(
+                session.chat_id, session.user_id) else None),
         }
 
     @app.get("/api/v1/duel/opponents")
     def opponents(session: MiniAppSession = Depends(require_session)):
         found = list_duel_opponents(session.chat_id, session.user_id, read_only=True)
+        rows = []
+        for item in found.opponents:
+            user = get_duel_user_by_id(session.chat_id, item.user_id, read_only=True)
+            if user is None:
+                continue
+            rows.append({
+                "user_id": item.user_id, "username": item.username,
+                "title": item.title, "points": user["points"],
+                "wins": user["wins"], "losses": user["losses"],
+                "titles": get_duel_title_read_model(user),
+            })
         return {
             "ineligibility": found.ineligibility,
-            "opponents": [{"user_id": item.user_id, "username": item.username,
-                           "title": item.title} for item in found.opponents],
+            "opponents": rows,
         }
 
     @app.post("/api/v1/duel/start", status_code=201)

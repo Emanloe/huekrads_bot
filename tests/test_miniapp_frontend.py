@@ -164,3 +164,32 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     for path in ("/api/v1/duel/attack", "/api/v1/duel/block",
                  "/api/v1/dig", "/api/v1/boss"):
         assert path not in js
+
+
+def test_home_and_opponents_render_full_read_only_stats_safely():
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+
+    assert 'dataCell("Очки", `${data.points} / ${data.max_points}`)' in js
+    assert 'dataCell("Побед сегодня", data.daily_wins)' in js
+    assert 'dataCell("Участие в дуэли"' in js
+    assert 'addHeading(content, "Хуяние")' in js
+    assert 'dataCell("Побеждено боссов", data.boss_wins)' in js
+    assert 'dataCell("Хуй сегодня", data.dick_status?.text' in js
+    assert 'if (data.pet) content.append(notice(data.pet))' in js
+
+    for category in ('["wins", "Победы"]', '["losses", "Поражения"]',
+                     '["stolen_dicks", "Украденные хуи"]'):
+        assert category in js
+    assert 'title?.text || "Нет звания"' in js
+    assert '`${label}: ${title?.count ?? 0}`' in js
+    assert 'content.append(renderTitles(data.titles))' in js
+    assert 'identity.append(renderTitles(opponent.titles, true))' in js
+    assert 'identity.append(element("span", "opponent-stats"' in js
+    assert 'action.addEventListener("click", () => challengeOpponent(opponent.user_id))' in js
+    assert 'element("span", null, item.name || item.item_id)' in js
+    assert 'body.replaceChildren(content)' in js
+    assert 'node.textContent = String(value)' in js
+    assert 'overflow-wrap: anywhere' in css
+    assert '.title-list.compact' in css
+    assert 'Math.random' not in js

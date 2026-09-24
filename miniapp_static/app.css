@@ -158,6 +158,14 @@ main { padding: 7px; min-height: 300px; }
 .inventory-list li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 7px; background: #f5f4e5; overflow-wrap: anywhere; }
 .inventory-list li + li { border-top: 1px solid #ccd1b7; }
 .inventory-list strong { flex: none; }
+.title-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; border: 1px solid #a3ae93; background: #a3ae93; }
+.title-list li { min-width: 0; padding: 4px 7px; background: #f5f4e5; overflow-wrap: anywhere; }
+.title-name, .title-count { display: block; }
+.title-name { font-weight: bold; }
+.title-count { color: var(--muted); font-size: 10px; }
+.title-list.compact { gap: 0; margin-top: 4px; border: 0; background: transparent; }
+.title-list.compact li { padding: 1px 0; background: transparent; }
+.title-list.compact .title-name { font-weight: normal; }
 .hint { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
 
 .opponent-head, .opponent-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 10px; }
@@ -167,6 +175,7 @@ main { padding: 7px; min-height: 300px; }
 .opponent-row:nth-child(even) { background: #ebedd8; }
 .opponent-name { min-width: 0; overflow-wrap: anywhere; font-weight: bold; }
 .opponent-handle { display: block; color: var(--muted); font-size: 11px; font-weight: normal; }
+.opponent-stats { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: normal; }
 
 .duel-heading { margin: 0 0 8px; font-weight: bold; }
 .duel-versus { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 9px; }

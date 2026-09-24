@@ -1730,6 +1730,7 @@ async def duel_stats_command(update, context):
         "duel.stats.summary",
         title=title,
         points=user["points"],
+        max_points=MAX_DAILY_POINTS,
         wins=user["wins"],
         losses=user["losses"],
         huyanie_text=huyanie_text,

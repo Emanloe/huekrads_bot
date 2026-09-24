@@ -79,9 +79,13 @@ async def test_read_api_isolates_same_user_in_two_chats_and_hides_block_zone(
         assert (me_a["username"], me_a["points"]) == ("hero_a", 25)
         assert (me_b["username"], me_b["points"]) == ("hero_b", 70)
         assert me_a["inventory"] == [
+            {"item_id": "oiled_vest", "name": "Промасленная жилетка", "count": 1},
+            {"item_id": "knife", "name": "Нож", "count": 1},
             {"item_id": "rat_knuckle", "name": "Крысиный кастет", "count": 1},
         ]
         assert me_b["inventory"] == [
+            {"item_id": "oiled_vest", "name": "Промасленная жилетка", "count": 1},
+            {"item_id": "knife", "name": "Нож", "count": 1},
             {"item_id": "vevangel_wing", "name": "Крыло Вевангела", "count": 1},
         ]
         assert "chat_id" not in me_a
@@ -115,8 +119,10 @@ async def test_me_inventory_uses_catalog_names_counts_and_legacy_id_fallback(tem
         response = await client.get("/api/v1/me", headers=headers)
     assert response.status_code == 200
     assert response.json()["inventory"] == [
-        {"item_id": "ceremonial_bolt", "name": "Парадный болт", "count": 2},
+        {"item_id": "oiled_vest", "name": "Промасленная жилетка", "count": 1},
+        {"item_id": "knife", "name": "Нож", "count": 1},
         {"item_id": "cork_with_bite_marks", "name": "Пробка со следами укусов", "count": 1},
+        {"item_id": "ceremonial_bolt", "name": "Парадный болт", "count": 2},
         {"item_id": "legacy_missing_id", "name": "legacy_missing_id", "count": 1},
     ]
 

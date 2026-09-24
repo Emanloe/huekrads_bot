@@ -69,6 +69,24 @@
     return element("p", bad ? "notice bad" : "notice", message);
   }
 
+  function renderTitles(titles, compact = false) {
+    const list = element("ul", compact ? "title-list compact" : "title-list");
+    const categories = [
+      ["wins", "Победы"], ["losses", "Поражения"],
+      ["stolen_dicks", "Украденные хуи"],
+    ];
+    for (const [key, label] of categories) {
+      const title = titles?.[key];
+      if (compact && !title?.text) continue;
+      const row = element("li");
+      row.append(element("span", "title-name", title?.text || "Нет звания"),
+        element("small", "title-count", `${label}: ${title?.count ?? 0}`));
+      list.append(row);
+    }
+    if (!list.childElementCount) list.append(element("li", null, "Нет званий"));
+    return list;
+  }
+
   async function apiRequest(path, options = {}) {
     const headers = { Accept: "application/json" };
     if (options.method === "POST") headers["Content-Type"] = "application/json";
@@ -120,12 +138,21 @@
     grid.append(
       dataCell("Имя", data.display_name || data.username || "Без имени"),
       dataCell("Имя гнома", data.dwarf_name || "Не задано"),
-      dataCell("Очки", data.points),
+      dataCell("Очки", `${data.points} / ${data.max_points}`),
       dataCell("Победы / поражения", `${data.wins} / ${data.losses}`),
       dataCell("Побед сегодня", data.daily_wins),
       dataCell("Участие в дуэли", data.ineligibility === "no_dick" ? "Недоступно до завтра" : "Доступно")
     );
     content.append(grid);
+    addHeading(content, "Хуяние");
+    content.append(renderTitles(data.titles));
+    addHeading(content, "Статус");
+    const status = element("div", "data-grid");
+    status.append(
+      dataCell("Побеждено боссов", data.boss_wins),
+      dataCell("Хуй сегодня", data.dick_status?.text || "—")
+    );
+    content.append(status);
     addHeading(content, "Инвентарь");
     if (!Array.isArray(data.inventory) || data.inventory.length === 0) {
       content.append(notice("В инвентаре пока нет предметов."));
@@ -138,6 +165,7 @@
       }
       content.append(inventory);
     }
+    if (data.pet) content.append(notice(data.pet));
     body.replaceChildren(content);
     document.getElementById("header-player").textContent = data.dwarf_name || data.display_name || data.username || "Гном";
   }
@@ -160,6 +188,9 @@
         const row = element("div", "opponent-row");
         const identity = element("div", "opponent-name", opponent.title || opponent.username || "Соперник");
         if (opponent.username) identity.append(element("span", "opponent-handle", `@${opponent.username}`));
+        identity.append(element("span", "opponent-stats",
+          `Очки: ${opponent.points} · Победы: ${opponent.wins} · Поражения: ${opponent.losses}`));
+        identity.append(renderTitles(opponent.titles, true));
         const action = element("button", "small-button", "Вызвать");
         action.type = "button";
         action.disabled = challengeInFlight;

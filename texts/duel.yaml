@@ -184,7 +184,7 @@ stats:
   summary: |-
     📊 <b>Статистика дуэлей: {title}</b>
 
-    Очки: <b>{points} / 100</b>
+    Очки: <b>{points} / {max_points}</b>
     Побед: <b>{wins}</b>
     Поражений: <b>{losses}</b>
     Хуяние:

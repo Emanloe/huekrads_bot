@@ -52,6 +52,18 @@ def get_stolen_dicks_title(stolen_dicks_count: int) -> str | None:
     return _get_highest_title(stolen_dicks_count, STOLEN_DICKS_TITLES)
 
 
+def get_duel_title_read_model(user: dict) -> dict:
+    """The three independent /duel_stats titles with their source counts."""
+    return {
+        "wins": {"text": get_win_title(user["wins"]), "count": user["wins"]},
+        "losses": {"text": get_loss_title(user["losses"]), "count": user["losses"]},
+        "stolen_dicks": {
+            "text": get_stolen_dicks_title(user["stolen_dicks_count"]),
+            "count": user["stolen_dicks_count"],
+        },
+    }
+
+
 def _plural_rounds(value):
     value = int(value)
     if value % 10 == 1 and value % 100 != 11:

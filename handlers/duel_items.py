@@ -87,8 +87,8 @@ def get_duel_item_name(item_id: str) -> str:
     return DUEL_ITEM_NAMES.get(item_id, get_text("duel.inventory.unknown_item"))
 
 
-def format_duel_display_inventory(collectible_instances: list[dict]) -> str:
-    """Format permanent base items followed by stored collectible instances."""
+def get_duel_display_inventory_rows(collectible_instances: list[dict]) -> list[dict]:
+    """Permanent base items and grouped collectibles, without changing storage."""
     counts = Counter(
         instance["item_id"]
         for instance in collectible_instances
@@ -101,10 +101,22 @@ def format_duel_display_inventory(collectible_instances: list[dict]) -> str:
             item_id,
         ),
     )
-    formatted = [escape(item["name"]) for item in BASE_DUEL_ITEMS]
-    for item_id in item_ids:
-        name = escape(get_duel_item_name(item_id))
-        count = counts[item_id]
+    return [
+        {"item_id": item["id"], "name": item["name"], "count": 1}
+        for item in BASE_DUEL_ITEMS
+    ] + [
+        {"item_id": item_id, "name": DUEL_ITEM_NAMES.get(item_id, item_id),
+         "count": counts[item_id]}
+        for item_id in item_ids
+    ]
+
+
+def format_duel_display_inventory(collectible_instances: list[dict]) -> str:
+    """Format permanent base items followed by stored collectible instances."""
+    formatted = []
+    for item in get_duel_display_inventory_rows(collectible_instances):
+        name = escape(get_duel_item_name(item["item_id"]))
+        count = item["count"]
         formatted.append(
             get_text("duel.inventory.counted_item", item=name, count=count)
             if count > 1
