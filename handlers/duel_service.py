@@ -50,7 +50,9 @@ from handlers.duel_items import (
     format_pocket_drop_announcement, get_droppable_duel_inventory, get_duel_item_name,
 )
 from handlers.duel_state import (
+    DUEL_LOSS_POINTS_AWARD,
     DUEL_MOVE_TIMEOUT_SECONDS,
+    DUEL_WIN_POINTS_AWARD,
     _build_duel_result_plan,
     _get_duel_participant_ineligibility,
     _is_berserk_roll,
@@ -60,7 +62,8 @@ from handlers.duel_state import (
 )
 from handlers.duel_text import (
     TARGET_NAMES, _build_berserk_text, _build_duel_block_text,
-    _build_duel_miss_text, _plural_rounds, get_round_flavor_text,
+    _build_duel_miss_text, _plural_rounds, get_duel_round_presentation,
+    get_round_flavor_text,
 )
 
 
@@ -204,12 +207,14 @@ def _prompt_payload(session: dict) -> dict:
                 previous_attacker, resolution["attack_phrase"],
                 resolution["strike_zone"], resolution["outcome_phrase"],
                 attacker_title, defender_title, DUEL_MOVE_TIMEOUT_SECONDS,
+                round_presentation=resolution.get("presentation_html"),
             )
         else:
             text = _build_duel_block_text(
                 previous_attacker, previous_defender, resolution["attack_phrase"],
                 resolution["strike_zone"], resolution["outcome_phrase"],
                 attacker_title, defender_title, DUEL_MOVE_TIMEOUT_SECONDS,
+                round_presentation=resolution.get("presentation_html"),
             )
     payload = {"text": text, "phase": session["phase"]}
     # The next attack prompt is durable even after result_json is cleared by
@@ -253,24 +258,11 @@ def _validated_terminal_checkpoint(session: dict) -> dict | None:
 
 
 def _terminal_custom_text(checkpoint: dict, attacker: dict, defender: dict) -> str:
+    if isinstance(checkpoint.get("presentation_html"), str):
+        return checkpoint["presentation_html"]
     attacker_title = format_user_title(attacker)
     defender_title = format_user_title(defender)
-    if checkpoint["outcome"] == "suicide":
-        return get_text(
-            "duel.live.outcomes.suicide",
-            attacker_title=attacker_title,
-            suicide_phrase=checkpoint["outcome_phrase"],
-            defender_title=defender_title,
-        )
-    return get_text(
-        "duel.live.outcomes.hit",
-        attacker_title=attacker_title,
-        attack_phrase=checkpoint["attack_phrase"],
-        strike_target=TARGET_NAMES[checkpoint["strike_zone"]],
-        defender_title=defender_title,
-        block_target=TARGET_NAMES[checkpoint["block_zone"]],
-        hit_phrase=checkpoint["outcome_phrase"],
-    )
+    return get_duel_round_presentation(checkpoint, attacker_title, defender_title)
 
 
 def _steal_persistent_item(cursor, chat_id: int, winner_id: int, loser_id: int) -> dict | None:
@@ -422,6 +414,8 @@ def finalize_persistent_duel(
             "kind": "finalized", "terminal_resolution": checkpoint,
             "winner_user_id": winner["user_id"], "loser_user_id": loser["user_id"],
             "winner_points": winner_points, "loser_points": loser_points,
+            "winner_points_awarded": DUEL_WIN_POINTS_AWARD,
+            "loser_points_awarded": DUEL_LOSS_POINTS_AWARD,
             "winner_reached_max": plan["winner_reached_max"],
             "is_dick_stolen": is_dick_stolen, "stolen_item": stolen_item,
             "round_flavor": round_flavor, "dwarf_fact": dwarf_fact,
@@ -727,6 +721,13 @@ def _apply_persistent_block(
         )
         resolution["winner_user_id"] = winner
         resolution["loser_user_id"] = loser
+
+    participants = _session_participants(session)
+    resolution["presentation_html"] = get_duel_round_presentation(
+        resolution,
+        format_user_title(participants[session["attacker_user_id"]]),
+        format_user_title(participants[session["defender_user_id"]]),
+    )
 
     if not save_duel_block_resolution_in_transaction(
         chat_id, duel_id, session["turn_id"], session["defender_user_id"],

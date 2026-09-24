@@ -101,8 +101,7 @@ phrases:
   - слишком широко замахивается и сам же вырубает себя рукоятью!
 templates:
   miss: |-
-    💨 <b>ПРОМАХ!</b>
-    <b>{attacker_title}</b> {attack_phrase} в зону ({target_name}), но {miss_phrase}
+    {round_presentation}
 
     🔄 <b>Смена ролей!</b>
     ⚔️ Атакует: <b>{next_attacker_title}</b>
@@ -110,14 +109,20 @@ templates:
 
     ⏳ У <b>{next_attacker_title}</b> есть {move_timeout} секунд на удар:
   block: |-
-    🛡️ <b>БЛОК СРАБОТАЛ!</b>
-    <b>{attacker_title}</b> {attack_phrase} в зону ({target_name}), но <b>{defender_title}</b> {block_phrase}
+    {round_presentation}
 
     🔄 <b>Инициатива переходит!</b>
     ⚔️ Атакует: <b>{next_attacker_title}</b>
     🛡️ Защищается: <b>{next_defender_title}</b>
 
     ⏳ У <b>{next_attacker_title}</b> есть {move_timeout} секунд на удар:
+round_presentation:
+  miss: |-
+    💨 <b>ПРОМАХ!</b>
+    <b>{attacker_title}</b> {attack_phrase} в зону ({target_name}), но {miss_phrase}
+  block: |-
+    🛡️ <b>БЛОК СРАБОТАЛ!</b>
+    <b>{attacker_title}</b> {attack_phrase} в зону ({target_name}), но <b>{defender_title}</b> {block_phrase}
 round_flavor:
   one:
   - ⚡ <b>Срезал в касание!</b> Противник даже не успел понять, что произошло.

@@ -3,6 +3,8 @@
 import hashlib
 import logging
 import os
+import re
+from html import unescape
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,7 +17,8 @@ from starlette.concurrency import run_in_threadpool
 
 from config import BOT_TOKEN, MAX_DAILY_POINTS
 from database import (
-    format_user_title_plain, get_bosses_defeated, get_duel_user_by_id, has_huecrab,
+    format_user_title, format_user_title_plain, get_bosses_defeated,
+    get_duel_user_by_id, has_huecrab,
 )
 from duel_outbox_repository import list_persisted_duel_round_resolutions
 from duel_session_repository import (
@@ -28,7 +31,9 @@ from handlers.duel_service import (
     submit_persistent_duel_attack, submit_persistent_duel_block,
 )
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
-from handlers.duel_text import get_duel_title_read_model
+from handlers.duel_text import (
+    _plural_rounds, get_duel_round_presentation, get_duel_title_read_model,
+)
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
 from text_resources import get_text
@@ -90,6 +95,13 @@ def _duel_participant(session: dict, user_id: int) -> dict:
             "display_name": format_user_title_plain(snapshot)}
 
 
+def _plain_duel_text(value: object) -> str | None:
+    """Remove only the bold/italic tags used by stored duel presentation."""
+    if not isinstance(value, str):
+        return None
+    return unescape(re.sub(r"</?(?:b|i)>", "", value))
+
+
 def _round_read_model(session: dict, resolution: dict) -> dict | None:
     participants = {session["player1_user_id"], session["player2_user_id"]}
     attacker_id = resolution.get("attacker_user_id")
@@ -105,6 +117,26 @@ def _round_read_model(session: dict, resolution: dict) -> dict | None:
     timeout_ids = resolution.get("timeout_user_ids", [])
     if not isinstance(timeout_ids, list):
         timeout_ids = []
+    presentation = resolution.get("presentation_html")
+    if not isinstance(presentation, str):
+        try:
+            presentation = get_duel_round_presentation(
+                resolution,
+                format_user_title(session["player1_snapshot"] if attacker_id ==
+                                  session["player1_user_id"] else session["player2_snapshot"]),
+                format_user_title(session["player1_snapshot"] if defender_id ==
+                                  session["player1_user_id"] else session["player2_snapshot"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            presentation = None
+    timeout_texts = []
+    for user_id in timeout_ids:
+        if type(user_id) is not int or user_id not in participants:
+            continue
+        snapshot = (session["player1_snapshot"] if user_id == session["player1_user_id"]
+                    else session["player2_snapshot"])
+        key = "duel.live.timeout.attack" if user_id == attacker_id else "duel.live.timeout.block"
+        timeout_texts.append(_plain_duel_text(get_text(key, title=format_user_title(snapshot))))
     return {
         "round": resolution["round_no"],
         "resolved_turn_id": resolution["resolved_turn_id"],
@@ -115,6 +147,8 @@ def _round_read_model(session: dict, resolution: dict) -> dict | None:
         "outcome": resolution["outcome"],
         "outcome_text": resolution.get("outcome_phrase") if isinstance(
             resolution.get("outcome_phrase"), str) else None,
+        "presentation_text": _plain_duel_text(presentation),
+        "timeout_texts": timeout_texts,
         "timed_out": [
             _duel_participant(session, user_id) for user_id in timeout_ids
             if type(user_id) is int and user_id in participants
@@ -159,7 +193,9 @@ def _finished_duel_read_model(session: dict) -> dict | None:
             "berserker": _duel_participant(session, berserk["berserker_user_id"]),
             "victim": _duel_participant(session, berserk["victim_user_id"]),
             "dick_lost": bool(berserk.get("applied")),
+            "text": _plain_duel_text(berserk.get("text")),
         }
+    duration_rounds = session["round_no"]
     return {
         "id": session["id"], "status": "finished", "finished_at": session["finished_at"],
         "player1": _duel_participant(session, session["player1_user_id"]),
@@ -170,10 +206,21 @@ def _finished_duel_read_model(session: dict) -> dict | None:
             "winner_before": snapshots[winner_id]["points"],
             "winner_after": result["winner_points"],
             "winner_delta": result["winner_points"] - snapshots[winner_id]["points"],
+            "winner_delta_awarded": result.get("winner_points_awarded") if type(
+                result.get("winner_points_awarded")) is int else None,
             "loser_before": snapshots[loser_id]["points"],
             "loser_after": result["loser_points"],
             "loser_delta": result["loser_points"] - snapshots[loser_id]["points"],
+            "loser_delta_awarded": result.get("loser_points_awarded") if type(
+                result.get("loser_points_awarded")) is int else None,
         },
+        "duration": {"rounds": duration_rounds,
+                     "text": f"{duration_rounds} {_plural_rounds(duration_rounds)}"},
+        "round_flavor": _plain_duel_text(result.get("round_flavor")),
+        "dwarf_fact": result.get("dwarf_fact") if isinstance(result.get("dwarf_fact"), str) else None,
+        "post_message": result.get("post_message") if isinstance(result.get("post_message"), str) else None,
+        "note_prefix": (get_text("duel.finish.post_message.prefix")
+                        if isinstance(result.get("post_message"), str) else None),
         "dick_stolen": bool(result["is_dick_stolen"]),
         "stolen_item": ({"item_id": stolen_item["item_id"],
                          "name": stolen_item["item_name"]} if stolen_item else None),

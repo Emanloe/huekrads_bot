@@ -12,6 +12,8 @@ from handlers.duel_text import (
 )
 
 DUEL_MOVE_TIMEOUT_SECONDS = 10
+DUEL_WIN_POINTS_AWARD = 10
+DUEL_LOSS_POINTS_AWARD = -5
 
 
 @dataclass(frozen=True)
@@ -86,8 +88,8 @@ def _build_duel_result_plan(
     winner_title: str,
     max_daily_points: int,
 ) -> dict:
-    winner_points = max(0, min(max_daily_points, winner["points"] + 10))
-    loser_points = max(0, loser["points"] - 5)
+    winner_points = max(0, min(max_daily_points, winner["points"] + DUEL_WIN_POINTS_AWARD))
+    loser_points = max(0, loser["points"] + DUEL_LOSS_POINTS_AWARD)
     result_plan = {
         "is_dick_stolen": is_dick_stolen,
         "winner_reached_max": (

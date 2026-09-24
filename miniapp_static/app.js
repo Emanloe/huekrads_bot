@@ -150,7 +150,7 @@
     const status = element("div", "data-grid");
     status.append(
       dataCell("Побеждено боссов", data.boss_wins),
-      dataCell("Хуй сегодня", data.dick_status?.text || "—")
+      dataCell("Статус на сегодня", data.dick_status?.text || "—")
     );
     content.append(status);
     addHeading(content, "Инвентарь");
@@ -239,10 +239,10 @@
         element("div", null, `${round.attacker.display_name} — атака: ${ZONE_NAMES[round.attack_zone] || "—"}`),
         element("div", null, `${round.defender.display_name} — защита: ${ZONE_NAMES[round.defense_zone] || "—"}`)
       );
-      if (round.outcome_text) entry.append(element("small", null, round.outcome_text));
-      if (Array.isArray(round.timed_out) && round.timed_out.length) {
-        entry.append(element("small", null,
-          `Время вышло: ${round.timed_out.map(player => player.display_name).join(", ")}.`));
+      if (round.presentation_text) entry.append(element("p", "round-prose", round.presentation_text));
+      else if (round.outcome_text) entry.append(element("small", null, round.outcome_text));
+      for (const timeoutText of round.timeout_texts || []) {
+        entry.append(element("small", "duel-presentation", timeoutText));
       }
       list.append(entry);
     }
@@ -256,20 +256,29 @@
     content.append(element("p", "hint", `${finished.player1.display_name} против ${finished.player2.display_name}`));
     const points = finished.points;
     const signed = value => value > 0 ? `+${value}` : String(value);
+    const pointLine = (before, after, awarded) =>
+      `${before} → ${after}${Number.isInteger(awarded) ? ` (${signed(awarded)})` : ""}`;
     const grid = element("div", "data-grid");
     grid.append(
       dataCell("Победитель", finished.winner.display_name),
       dataCell("Проигравший", finished.loser.display_name),
-      dataCell("Очки победителя", `${points.winner_before} → ${points.winner_after} (${signed(points.winner_delta)})`),
-      dataCell("Очки проигравшего", `${points.loser_before} → ${points.loser_after} (${signed(points.loser_delta)})`)
+      dataCell("Очки победителя", pointLine(points.winner_before, points.winner_after, points.winner_delta_awarded)),
+      dataCell("Очки проигравшего", pointLine(points.loser_before, points.loser_after, points.loser_delta_awarded))
     );
+    if (finished.duration?.text) grid.append(dataCell("Длительность", finished.duration.text));
     content.append(grid);
-    if (finished.dick_stolen) content.append(notice("У проигравшего украден хуй."));
     if (finished.stolen_item) content.append(notice(`Украден предмет: ${finished.stolen_item.name}.`));
+    if (finished.dick_stolen) content.append(notice("У проигравшего украден хуй."));
+    if (finished.round_flavor) content.append(element("p", "notice duel-presentation", finished.round_flavor));
+    if (finished.dwarf_fact) content.append(element("p", "notice duel-presentation", `📖 ${finished.dwarf_fact}`));
     if (finished.berserk) {
-      content.append(notice(finished.berserk.dick_lost ?
+      content.append(notice(finished.berserk.text || (finished.berserk.dick_lost ?
         `Берсерк ${finished.berserk.berserker.display_name} откусил хуй ${finished.berserk.victim.display_name}.` :
-        `Берсерк ${finished.berserk.berserker.display_name} набросился на ${finished.berserk.victim.display_name}, но хуй уже был украден.`));
+        `Берсерк ${finished.berserk.berserker.display_name} набросился на ${finished.berserk.victim.display_name}, но хуй уже был украден.`)));
+    }
+    if (finished.post_message) {
+      content.append(element("p", "notice duel-presentation",
+        `${finished.note_prefix || "Заметка:"}\n${finished.post_message}`));
     }
     if (Array.isArray(finished.rounds) && finished.rounds.length) {
       content.append(renderRoundHistory(finished.rounds));

@@ -1,5 +1,6 @@
 """Mini App reads durable, participant-scoped ordinary duel outcomes."""
 
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -12,7 +13,7 @@ from handlers import duel_service
 from handlers.duel_items import get_duel_item_name
 from handlers.duel_text import ATTACK_PHRASES, MISS_PHRASES
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
-from miniapp_api import create_miniapp_api
+from miniapp_api import _plain_duel_text, create_miniapp_api
 from tests.test_miniapp_api import CHAT_A, CHAT_B, register, session_for
 from tests.test_miniapp_auth import TEST_BOT_TOKEN
 from tests.test_miniapp_duel_move import client_for, http_move, started_duel, telegram_move
@@ -59,6 +60,19 @@ async def test_resolved_block_survives_next_attack_restart_and_uses_zero_read_rn
         assert (round_one["attack_zone"], round_one["defense_zone"]) == ("head", "head")
         assert round_one["attacker"]["user_id"] == 101
         assert round_one["defender"]["user_id"] == 202
+        persisted = list_persisted_duel_round_resolutions(CHAT_A, duel_id)[0]
+        assert round_one["presentation_text"] == _plain_duel_text(
+            persisted["presentation_html"]
+        )
+        with database.get_db() as conn:
+            payload_json = conn.execute(
+                "SELECT payload_json FROM duel_outbox WHERE chat_id = ? AND duel_id = ? "
+                "AND kind = 'attack_prompt' AND turn_id = 3",
+                (CHAT_A, duel_id),
+            ).fetchone()[0]
+        payload = json.loads(payload_json)
+        assert payload["round_resolution"] == persisted
+        assert persisted["presentation_html"] in payload["text"]
         assert (await client.get("/api/v1/duel/active", headers=defender)).json()["duel"]["rounds"] == [round_one]
         assert (await client.get("/api/v1/duel/active", headers=spectator)).json()["duel"]["rounds"] == []
 
@@ -118,6 +132,12 @@ async def test_miss_round_from_mixed_interfaces_is_persisted_without_extra_rng(
             "dick", "body",
         )
         assert isinstance(view["rounds"][0]["outcome_text"], str)
+        persisted = list_persisted_duel_round_resolutions(CHAT_A, duel_id)[0]
+        assert view["rounds"][0]["presentation_text"] == _plain_duel_text(
+            persisted["presentation_html"]
+        )
+        assert persisted["attack_phrase"] in persisted["presentation_html"]
+        assert persisted["outcome_phrase"] in persisted["presentation_html"]
         assert rng.trace == [
             ("choice", 2), ("random", 0.5), ("random", 0.01),
             ("choice", len(MISS_PHRASES)),
@@ -137,6 +157,7 @@ async def test_finished_result_is_authoritative_for_both_players_after_restart(
         assert (await http_move(client, defender, duel_id, 2, "body")).status_code == 200
         stored = get_duel_session(CHAT_A, duel_id)["result"]
         assert stored["kind"] == "finalized"
+        assert stored["terminal_resolution"]["presentation_html"] == stored["custom_text"]
         first = (await client.get("/api/v1/duel/active", headers=attacker)).json()
         second = (await client.get("/api/v1/duel/active", headers=defender)).json()
         assert first == second
@@ -148,13 +169,18 @@ async def test_finished_result_is_authoritative_for_both_players_after_restart(
         assert finished["points"] == {
             "winner_before": 20, "winner_after": stored["winner_points"],
             "winner_delta": stored["winner_points"] - 20,
+            "winner_delta_awarded": 10,
             "loser_before": 20, "loser_after": stored["loser_points"],
             "loser_delta": stored["loser_points"] - 20,
+            "loser_delta_awarded": -5,
         }
         assert finished["dick_stolen"] is stored["is_dick_stolen"]
         assert finished["rounds"][0]["outcome"] == "hit"
         assert finished["rounds"][0]["attack_zone"] == "head"
         assert finished["rounds"][0]["defense_zone"] == "body"
+        assert finished["rounds"][0]["presentation_text"] == _plain_duel_text(
+            stored["custom_text"]
+        )
         assert "final_text" not in finished and "result_json" not in finished
         trace = list(rng.trace)
         monkeypatch.setattr(duel_service, "random", SimpleNamespace(
@@ -228,6 +254,9 @@ async def test_timeout_resolution_is_read_from_server_not_client_clock(
         assert (after["recent_finished"]["rounds"][0]["attack_zone"],
                 after["recent_finished"]["rounds"][0]["defense_zone"]) == ("body", "head")
         assert [player["user_id"] for player in after["recent_finished"]["rounds"][0]["timed_out"]] == [202]
+        timeout_texts = after["recent_finished"]["rounds"][0]["timeout_texts"]
+        assert len(timeout_texts) == 1 and "зазевался" in timeout_texts[0]
+        assert "Время вышло:" not in timeout_texts[0]
         assert rng.trace.count("choice:timeout") == 1
 
 
@@ -249,6 +278,8 @@ async def test_attack_timeout_is_recorded_in_resolved_round_without_new_rng(
         after = (await client.get("/api/v1/duel/active", headers=defender)).json()["duel"]
         assert after["rounds"][0]["outcome"] == "block"
         assert [player["user_id"] for player in after["rounds"][0]["timed_out"]] == [101]
+        assert len(after["rounds"][0]["timeout_texts"]) == 1
+        assert "зазевался" in after["rounds"][0]["timeout_texts"][0]
         assert rng.trace.count("choice:timeout") == 1
 
 

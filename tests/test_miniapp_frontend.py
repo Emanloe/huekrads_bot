@@ -151,7 +151,17 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'renderRoundHistory(duel.rounds)' in js
     assert 'renderFinished(data.recent_finished)' in js
     assert 'renderRoundHistory(finished.rounds)' in js
-    assert 'round.timed_out.map(player => player.display_name)' in js
+    assert 'round.timeout_texts || []' in js
+    assert 'round.presentation_text' in js
+    assert 'Время вышло: ${round.timed_out' not in js
+    assert 'Number.isInteger(awarded)' in js
+    assert 'points.winner_delta_awarded' in js
+    assert 'points.loser_delta_awarded' in js
+    assert 'finished.duration?.text' in js
+    assert 'finished.round_flavor' in js
+    assert 'finished.dwarf_fact' in js
+    assert 'finished.post_message' in js
+    assert 'finished.note_prefix' in js
     assert 'data.recent_finished.id !== duel.id' in js
     assert 'previous.append(element("summary", null, "Последняя завершённая дуэль")' in js
     assert '"Выбор принят. Ожидаем соперника…"' in js
@@ -175,7 +185,8 @@ def test_home_and_opponents_render_full_read_only_stats_safely():
     assert 'dataCell("Участие в дуэли"' in js
     assert 'addHeading(content, "Хуяние")' in js
     assert 'dataCell("Побеждено боссов", data.boss_wins)' in js
-    assert 'dataCell("Хуй сегодня", data.dick_status?.text' in js
+    assert 'dataCell("Статус на сегодня", data.dick_status?.text' in js
+    assert 'dataCell("Хуй сегодня"' not in js
     assert 'if (data.pet) content.append(notice(data.pet))' in js
 
     for category in ('["wins", "Победы"]', '["losses", "Поражения"]',

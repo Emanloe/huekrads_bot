@@ -134,13 +134,17 @@ def _build_duel_miss_text(
     next_attacker_title: str,
     next_defender_title: str,
     move_timeout: int,
+    *,
+    round_presentation: str | None = None,
 ) -> str:
+    presentation = round_presentation or get_duel_round_presentation(
+        {"outcome": "miss", "attack_phrase": attack_phrase,
+         "outcome_phrase": miss_phrase, "strike_zone": strike_zone},
+        attacker_title, "",
+    )
     return get_text(
         "duel.templates.miss",
-        attacker_title=attacker_title,
-        attack_phrase=attack_phrase,
-        target_name=TARGET_NAMES[strike_zone],
-        miss_phrase=miss_phrase,
+        round_presentation=presentation,
         next_attacker_title=next_attacker_title,
         next_defender_title=next_defender_title,
         move_timeout=move_timeout,
@@ -156,17 +160,53 @@ def _build_duel_block_text(
     next_attacker_title: str,
     next_defender_title: str,
     move_timeout: int,
+    *,
+    round_presentation: str | None = None,
 ) -> str:
+    presentation = round_presentation or get_duel_round_presentation(
+        {"outcome": "block", "attack_phrase": attack_phrase,
+         "outcome_phrase": block_phrase, "strike_zone": strike_zone},
+        attacker_title, defender_title,
+    )
     return get_text(
         "duel.templates.block",
-        attacker_title=attacker_title,
-        defender_title=defender_title,
-        attack_phrase=attack_phrase,
-        target_name=TARGET_NAMES[strike_zone],
-        block_phrase=block_phrase,
+        round_presentation=presentation,
         next_attacker_title=next_attacker_title,
         next_defender_title=next_defender_title,
         move_timeout=move_timeout,
+    )
+
+
+def get_duel_round_presentation(
+    resolution: dict, attacker_title: str, defender_title: str,
+) -> str:
+    """Compose Telegram HTML from already selected round phrases, without RNG."""
+    outcome = resolution["outcome"]
+    if outcome == "suicide":
+        return get_text(
+            "duel.live.outcomes.suicide", attacker_title=attacker_title,
+            suicide_phrase=resolution["outcome_phrase"],
+            defender_title=defender_title,
+        )
+    if outcome == "hit":
+        return get_text(
+            "duel.live.outcomes.hit", attacker_title=attacker_title,
+            attack_phrase=resolution["attack_phrase"],
+            strike_target=TARGET_NAMES[resolution["strike_zone"]],
+            defender_title=defender_title,
+            block_target=TARGET_NAMES[resolution["block_zone"]],
+            hit_phrase=resolution["outcome_phrase"],
+        )
+    if outcome not in ("miss", "block"):
+        raise ValueError("Unknown resolved duel outcome")
+    key = "duel.round_presentation.miss" if outcome == "miss" else "duel.round_presentation.block"
+    return get_text(
+        key, attacker_title=attacker_title,
+        defender_title=defender_title,
+        attack_phrase=resolution["attack_phrase"],
+        target_name=TARGET_NAMES[resolution["strike_zone"]],
+        miss_phrase=resolution["outcome_phrase"],
+        block_phrase=resolution["outcome_phrase"],
     )
 
 

@@ -192,6 +192,8 @@ main { padding: 7px; min-height: 300px; }
 .round-result strong, .round-result small { display: block; }
 .round-result strong { margin-bottom: 3px; }
 .round-result small { margin-top: 3px; color: var(--muted); }
+.round-prose, .duel-presentation { white-space: pre-line; overflow-wrap: anywhere; }
+.round-prose { margin: 5px 0; }
 .duel-finished > .small-button { margin-top: 9px; }
 .previous-duel { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 7px; }
 .previous-duel summary { cursor: pointer; font-weight: bold; }
