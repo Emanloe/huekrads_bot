@@ -67,6 +67,7 @@ async def test_old_selection_button_rechecks_current_db_points_without_rng(
 ):
     import database
     from handlers import duel
+    monkeypatch.setattr(duel, "_process_persistent_duel_fight", duel._process_duel_fight)
 
     initiator, opponent = _user(1, "initiator"), _user(2, "opponent")
     database.get_or_create_duel_user(initiator, CHAT_ID)

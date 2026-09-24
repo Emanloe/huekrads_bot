@@ -803,10 +803,11 @@ def start_persistent_duel(
     opponent_user_id: int,
     *,
     now_ms: int | None = None,
+    original_message_id: int | None = None,
 ) -> PersistentDuelStartResult:
     """Reserve a chat's duel slot and snapshot two eligible registered users.
 
-    This operation is not wired to Telegram. SQLite serializes admission and
+    SQLite serializes admission and
     insertion, so a competing start sees the occupied slot before doing RNG.
     """
     with get_db() as conn:
@@ -851,6 +852,7 @@ def start_persistent_duel(
             defender_user_id,
             status="publishing",
             phase="attack",
+            original_message_id=original_message_id,
             now_ms=now_ms,
             cursor=cursor,
         )

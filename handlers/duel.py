@@ -85,6 +85,11 @@ from handlers.boss_state import (
 )
 from handlers.duel_input import extract_username as _extract_username
 from handlers.duel_service import list_duel_opponents
+from handlers.duel_service import (
+    start_persistent_duel, submit_persistent_duel_attack,
+    submit_persistent_duel_block,
+)
+from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_state import (
     _advance_duel_round,
     _build_duel_result_plan,
@@ -263,6 +268,8 @@ def _maybe_award_boss_item(chat_id: int, battle: dict) -> str | None:
 # ACTIVE_DUELS[chat_id] = duel_state
 #
 # В одном чате одновременно может идти только одна дуэль.
+# Legacy-only compatibility for direct unit tests below. bot.py registers the
+# persistent adapter; no production ordinary-duel handler reads this mapping.
 ACTIVE_DUELS = {}
 
 # ============================================================
@@ -358,7 +365,7 @@ BOSSES = [
 # КЛАВИАТУРЫ
 # ============================================================
 
-def _get_strike_keyboard(turn_id: int) -> InlineKeyboardMarkup:
+def _get_strike_keyboard(turn_id: int, duel_id: int | None = None) -> InlineKeyboardMarkup:
     """
     Кнопки атаки привязаны к конкретному turn_id.
 
@@ -370,15 +377,15 @@ def _get_strike_keyboard(turn_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.strike.head"),
-                callback_data=f"duel_strike_head_{turn_id}",
+                callback_data=f"duel_strike_head_{duel_id}_{turn_id}" if duel_id is not None else f"duel_strike_head_{turn_id}",
             ),
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.strike.body"),
-                callback_data=f"duel_strike_body_{turn_id}",
+                callback_data=f"duel_strike_body_{duel_id}_{turn_id}" if duel_id is not None else f"duel_strike_body_{turn_id}",
             ),
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.strike.dick"),
-                callback_data=f"duel_strike_dick_{turn_id}",
+                callback_data=f"duel_strike_dick_{duel_id}_{turn_id}" if duel_id is not None else f"duel_strike_dick_{turn_id}",
             ),
         ]
     ]
@@ -386,7 +393,7 @@ def _get_strike_keyboard(turn_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def _get_block_keyboard(turn_id: int) -> InlineKeyboardMarkup:
+def _get_block_keyboard(turn_id: int, duel_id: int | None = None) -> InlineKeyboardMarkup:
     """
     Кнопки защиты привязаны к конкретному turn_id.
     """
@@ -395,15 +402,15 @@ def _get_block_keyboard(turn_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.block.head"),
-                callback_data=f"duel_block_head_{turn_id}",
+                callback_data=f"duel_block_head_{duel_id}_{turn_id}" if duel_id is not None else f"duel_block_head_{turn_id}",
             ),
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.block.body"),
-                callback_data=f"duel_block_body_{turn_id}",
+                callback_data=f"duel_block_body_{duel_id}_{turn_id}" if duel_id is not None else f"duel_block_body_{turn_id}",
             ),
             InlineKeyboardButton(
                 get_text("duel.live.keyboards.block.dick"),
-                callback_data=f"duel_block_dick_{turn_id}",
+                callback_data=f"duel_block_dick_{duel_id}_{turn_id}" if duel_id is not None else f"duel_block_dick_{turn_id}",
             ),
         ]
     ]
@@ -1574,7 +1581,7 @@ async def duel_command(
         [update.message.message_id],
     )
 
-    await _process_duel_fight(
+    await _process_persistent_duel_fight(
         context,
         initiator_tg,
         target_username,
@@ -1616,7 +1623,7 @@ async def duel_select_callback(
     except Exception:
         pass
 
-    await _process_duel_fight(
+    await _process_persistent_duel_fight(
         context,
         initiator_tg,
         target_username,
@@ -1714,6 +1721,7 @@ async def duel_stats_command(update, context):
         else get_text("duel.stats.no_titles")
     )
 
+
     text = get_text(
         "duel.stats.summary",
         title=title,
@@ -1724,21 +1732,97 @@ async def duel_stats_command(update, context):
         bosses_defeated=bosses_defeated,
         status=status,
     )
-    inventory = get_duel_inventory(
-        chat_id,
-        update.message.from_user.id,
-    )
+    inventory = get_duel_inventory(chat_id, update.message.from_user.id)
     text += "\n" + get_text(
-        "duel.inventory.line",
-        items=format_duel_display_inventory(inventory),
+        "duel.inventory.line", items=format_duel_display_inventory(inventory),
     )
+    await send_and_schedule(update, context, text)
 
-    await send_and_schedule(
-        update,
-        context,
-        text,
-    )
 
+async def _process_persistent_duel_fight(
+    context, initiator_tg, target_username: str, chat_id: int,
+    original_msg_id: int | None = None,
+):
+    """Translate Telegram's target selection into one authoritative start."""
+    initiator = get_or_create_duel_user(initiator_tg, chat_id)
+    opponent = get_duel_user_by_username(target_username, chat_id)
+    opponent_id = opponent["user_id"] if opponent else -1
+    try:
+        started = start_persistent_duel(
+            chat_id, initiator["user_id"], opponent_id,
+            original_message_id=original_msg_id,
+        )
+    except Exception:
+        logging.exception("Persistent duel start failed in chat %s", chat_id)
+        return
+    if started.success:
+        try:
+            await recover_persistent_duel_chat(chat_id, context.bot, job_queue=context.job_queue)
+        except Exception:
+            logging.exception("Persistent duel publication failed in chat %s", chat_id)
+        return
+    reason = started.reason
+    if reason == "active_duel":
+        message = get_text("duel.admission.active_duel")
+    elif reason == "self_target":
+        message = get_text("duel.admission.self_target")
+    elif reason == "opponent_not_registered":
+        message = get_text("duel.admission.opponent.not_found", username=target_username)
+    elif reason == "initiator_no_points":
+        message = get_text("duel.admission.initiator.no_points")
+    elif reason == "opponent_no_points":
+        message = get_text("duel.admission.opponent.no_points", title=format_user_title(opponent))
+    elif reason in ("initiator_no_dick", "opponent_no_dick"):
+        person = initiator if reason.startswith("initiator") else opponent
+        message = get_text("duel.admission.participant.no_dick", title=format_user_title(person))
+    else:
+        logging.warning("Persistent duel admission rejected: %s in chat %s", reason, chat_id)
+        return
+    sent = await context.bot.send_message(chat_id, message, parse_mode="HTML")
+    schedule_auto_delete(context, chat_id, [sent.message_id])
+
+
+async def persistent_duel_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reject legacy buttons and apply only chat/duel/turn scoped actions."""
+    query = update.callback_query
+    if query is None or not isinstance(query.data, str):
+        return
+    parts = query.data.split("_")
+    if (len(parts) != 5 or parts[0] != "duel" or
+            parts[1] not in ("strike", "block") or
+            parts[2] not in TARGET_NAMES or
+            not parts[3].isdecimal() or not parts[4].isdecimal()):
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    action, zone, duel_id, turn_id = parts[1], parts[2], int(parts[3]), int(parts[4])
+    if duel_id <= 0 or turn_id <= 0:
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    chat_id = update.effective_chat.id
+    try:
+        operation = (submit_persistent_duel_attack if action == "strike"
+                     else submit_persistent_duel_block)
+        result = operation(chat_id, duel_id, query.from_user.id, turn_id, zone)
+    except Exception:
+        logging.exception("Persistent duel callback failed in chat %s", chat_id)
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    if not result.accepted:
+        if result.reason == "wrong_actor":
+            key = f"duel.action_alert.{action}.wrong_actor"
+        elif result.reason == "wrong_phase":
+            key = f"duel.action_alert.{action}.wrong_phase"
+        elif result.reason == "not_found":
+            key = "duel.action_alert.no_active_duel"
+        else:
+            key = "duel.action_alert.turn_ended"
+        await query.answer(get_text(key), show_alert=True)
+        return
+    await query.answer()
+    try:
+        await recover_persistent_duel_chat(chat_id, context.bot, job_queue=context.job_queue)
+    except Exception:
+        logging.exception("Persistent duel follow-up failed in chat %s", chat_id)
 
 # ============================================================
 # ТОП

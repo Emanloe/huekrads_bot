@@ -82,6 +82,7 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
 ):
     import database
     from handlers import duel
+    monkeypatch.setattr(duel, "_process_persistent_duel_fight", duel._process_duel_fight)
 
     attacker_tg = make_user(1, "attacker")
     defender_tg = make_user(2, "defender")
@@ -257,6 +258,7 @@ async def test_completed_duel_callback_sends_prefixed_post_message_last(
 ):
     import database
     from handlers import duel, duel_text
+    monkeypatch.setattr(duel, "_process_persistent_duel_fight", duel._process_duel_fight)
     from text_resources import get_text_list
 
     attacker_tg = make_user(3, "post_attacker")

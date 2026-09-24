@@ -278,7 +278,7 @@ def init_db():
             )
         """)
 
-        # Dormant Mini App infrastructure. Telegram duels still use ACTIVE_DUELS.
+        # Durable ordinary duels shared by the Telegram adapter and future clients.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS duel_sessions (
                 id INTEGER PRIMARY KEY,

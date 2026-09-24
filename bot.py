@@ -75,7 +75,7 @@ from text_resources import get_text
 from handlers.duel import (
     duel_command,
     duel_select_callback,
-    duel_action_callback,
+    persistent_duel_action_callback as duel_action_callback,
     duel_stats_command,
     duel_top_command,
     duel_delete_command,
@@ -87,6 +87,7 @@ from handlers.duel import (
     hyperboreic_huy_daily_job,
     hyperboreic_huy_callback,
 )
+from handlers.persistent_duel_publisher import recover_persistent_duels, persistent_duel_worker_job
 from handlers.duel_items import (
     duel_item_event_callback,
     duel_item_event_job,
@@ -137,6 +138,9 @@ async def post_init(application: Application):
         )
     except Exception:
         logger.exception("Не удалось установить команды бота")
+
+
+    await recover_persistent_duels(application.bot, job_queue=application.job_queue)
 
 
 async def bot_chat_member_update(
@@ -193,6 +197,10 @@ async def main():
     # ============================================================
 
     if application.job_queue:
+        application.job_queue.run_repeating(
+            persistent_duel_worker_job, interval=2, first=2,
+            name="persistent_duel_worker",
+        )
         tz = pytz.timezone(DUEL_TIMEZONE)
 
         # Ежедневная игра / красотка

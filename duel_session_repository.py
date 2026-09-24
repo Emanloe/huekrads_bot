@@ -318,6 +318,17 @@ def list_due_duel_sessions(chat_id: int, now_ms: int, *, limit: int = 100) -> li
         return [_session_from_row(row) for row in rows]
 
 
+def list_recoverable_duel_chat_ids() -> list[int]:
+    """Discover chats with an unfinished session or unfinished pocket stage."""
+    with get_db() as conn:
+        return [row[0] for row in conn.execute(
+            """SELECT DISTINCT chat_id FROM duel_sessions
+               WHERE status IN ('publishing', 'active')
+                  OR (status = 'finished' AND pocket_done_at IS NULL)
+               ORDER BY chat_id"""
+        )]
+
+
 def list_terminal_pending_duel_sessions(chat_id: int, *, limit: int = 100) -> list[dict]:
     """Recover terminal checkpoints not yet finalized after a process restart."""
     if limit < 1:
