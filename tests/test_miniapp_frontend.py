@@ -6,11 +6,28 @@ import httpx
 import pytest
 from fastapi.routing import APIRoute
 
+import miniapp_api
 from miniapp_api import create_miniapp_api
 from tests.test_miniapp_auth import TEST_BOT_TOKEN
 
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "miniapp_static"
+
+
+@pytest.mark.asyncio
+async def test_healthz_needs_no_session_or_game_reads(monkeypatch):
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("health check accessed game state")
+
+    for name in ("get_miniapp_session", "get_duel_profile", "list_duel_opponents",
+                 "get_current_duel_session"):
+        monkeypatch.setattr(miniapp_api, name, unexpected_call)
+    app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        response = await client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 @pytest.mark.asyncio
@@ -40,6 +57,11 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
         assert (await client.post("/api/v1/session", json={
             "init_data": "bad", "launch_token": "bad",
         })).status_code == 401
+        health = await client.get("/healthz")
+        assert health.status_code == 200
+        assert health.json() == {"status": "ok"}
+        assert health.headers["cache-control"] == "no-store"
+        assert (await client.post("/healthz")).status_code == 405
 
 
 def test_frontend_has_only_session_post_and_read_only_game_api():
@@ -52,6 +74,7 @@ def test_frontend_has_only_session_post_and_read_only_game_api():
         "/api/v1/duel/active": {"GET"},
         "/": {"GET"},
         "/app": {"GET"},
+        "/healthz": {"GET"},
     }
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

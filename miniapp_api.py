@@ -42,7 +42,7 @@ def create_miniapp_api(*, bot_token: str | None = None,
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        if request.url.path in ("/", "/app") or request.url.path.startswith("/api/"):
+        if request.url.path in ("/", "/app", "/healthz") or request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -140,6 +140,10 @@ def create_miniapp_api(*, bot_token: str | None = None,
     @app.get("/app", include_in_schema=False)
     def miniapp_index():
         return FileResponse(_STATIC_DIR / "index.html", media_type="text/html")
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        return {"status": "ok"}
 
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="miniapp_static")
 
