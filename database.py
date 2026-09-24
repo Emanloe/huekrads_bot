@@ -1330,6 +1330,7 @@ def claim_duel_item_event(
     chat_id: int,
     user_id: int,
     item_selector,
+    huegryz_decider=None,
 ) -> tuple[str, dict | None]:
     """
     Атомарно бронирует event и выдаёт один item instance.
@@ -1383,12 +1384,29 @@ def claim_duel_item_event(
             "UPDATE duel_item_events SET item_id = ? WHERE event_id = ?",
             (item_id, event_id),
         )
-        return "claimed", {
+        instance = {
             "id": instance_id,
             "chat_id": chat_id,
             "user_id": user_id,
             "item_id": item_id,
         }
+        if huegryz_decider is not None:
+            instance["huegryz_outcome"] = None
+            if huegryz_decider():
+                cursor.execute(
+                    """
+                    UPDATE duel_users
+                    SET dick_stolen_today = 1,
+                        dick_stolen_count = dick_stolen_count + 1,
+                        last_stolen_by = NULL
+                    WHERE chat_id = ? AND user_id = ? AND dick_stolen_today = 0
+                    """,
+                    (chat_id, user_id),
+                )
+                instance["huegryz_outcome"] = (
+                    "bitten" if cursor.rowcount == 1 else "already_dickless"
+                )
+        return "claimed", instance
 
 
 def get_duel_top(
