@@ -746,6 +746,8 @@ def submit_persistent_duel_attack(
         if not isinstance(zone, str) or zone not in TARGET_NAMES:
             return PersistentDuelActionResult("invalid_zone")
         timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        if timestamp >= session["deadline_at"]:
+            return PersistentDuelActionResult("turn_expired")
         return _apply_persistent_attack(cursor, chat_id, duel_id, session, zone, timestamp)
 
 
@@ -773,6 +775,8 @@ def submit_persistent_duel_block(
         if not isinstance(zone, str) or zone not in TARGET_NAMES:
             return PersistentDuelActionResult("invalid_zone")
         timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
+        if timestamp >= session["deadline_at"]:
+            return PersistentDuelActionResult("turn_expired")
         return _apply_persistent_block(cursor, chat_id, duel_id, session, zone, timestamp)
 
 

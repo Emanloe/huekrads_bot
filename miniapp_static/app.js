@@ -5,6 +5,7 @@
   const COUNTDOWN_TICK_MS = 1000;
   const REQUEST_TIMEOUT_MS = 12000;
   const START_DUEL_PATH = "/api/v1/duel/start";
+  const MOVE_DUEL_PATH = "/api/v1/duel/move";
   const API_PATHS = {
     home: "/api/v1/me",
     opponents: "/api/v1/duel/opponents",
@@ -20,7 +21,8 @@
   let countdownNode = null;
   let expiredDeadlineRefresh = null;
   let challengeInFlight = false;
-  const loading = { home: false, opponents: false, duel: false };
+  let moveInFlight = false;
+  const loading = { home: null, opponents: null, duel: null };
 
   const statusNode = document.getElementById("app-status");
   const toolbar = document.querySelector(".toolbar");
@@ -196,10 +198,13 @@
 
   function renderDuel(data) {
     const body = document.getElementById("duel-content");
+    const previouslyVisible = activeDuel !== null;
     activeDuel = data.duel || null;
     countdownNode = null;
     if (!activeDuel) {
-      body.replaceChildren(notice("Сейчас в этом чате нет активной дуэли."));
+      body.replaceChildren(notice(previouslyVisible ?
+        "Дуэль больше не активна. Итог появится в Telegram." :
+        "Сейчас в этом чате нет активной дуэли."));
       return;
     }
     const duel = activeDuel;
@@ -219,7 +224,7 @@
       dataCell("Фаза", PHASE_NAMES[duel.phase] || duel.phase || "—"),
       dataCell("Сейчас ходит", duel.phase === "attack" ? duel.attacker?.display_name : duel.defender?.display_name),
       dataCell("Ваша роль", ROLE_NAMES[duel.role] || "Наблюдатель"),
-      dataCell("Ваш ход", duel.can_act ? "Да — через Telegram" : "Нет"),
+      dataCell("Ваш ход", duel.can_act ? "Да — Mini App или Telegram" : "Нет"),
       dataCell("Ход", duel.turn_id)
     );
     if (duel.attack_zone && Object.prototype.hasOwnProperty.call(ZONE_NAMES, duel.attack_zone)) {
@@ -234,16 +239,19 @@
     content.append(grid);
 
     if (duel.status === "active" && (duel.phase === "attack" || duel.phase === "block")) {
+      const canChoose = duel.can_act && Number.isFinite(duel.deadline_at) &&
+        duel.deadline_at > Date.now() && !moveInFlight;
       const actions = element("div", "action-box");
       actions.append(
         element("h3", null, duel.phase === "attack" ? "Атака" : "Блок"),
-        element("p", null, "Кнопки для будущего этапа. Сейчас ход выполняется в Telegram.")
+        element("p", null, canChoose ? "Выберите зону хода." : "Ожидаем сервер или другого участника.")
       );
       const zones = element("div", "zone-row");
-      for (const zone of Object.values(ZONE_NAMES)) {
-        const button = element("button", "readonly-button", zone);
+      for (const [zone, label] of Object.entries(ZONE_NAMES)) {
+        const button = element("button", "small-button", label);
         button.type = "button";
-        button.disabled = true;
+        button.disabled = !canChoose;
+        button.addEventListener("click", () => submitMove(zone));
         zones.append(button);
       }
       actions.append(zones);
@@ -253,10 +261,49 @@
     updateCountdown();
   }
 
+  async function submitMove(zone) {
+    const duel = activeDuel;
+    if (!sessionToken || moveInFlight || !duel?.can_act ||
+        !Number.isFinite(duel.deadline_at) || duel.deadline_at <= Date.now()) return;
+    moveInFlight = true;
+    for (const button of document.querySelectorAll(".zone-row button")) button.disabled = true;
+    setStatus("Передаём выбор…");
+    let accepted = false;
+    let failure = null;
+    try {
+      await apiRequest(MOVE_DUEL_PATH, {
+        method: "POST", body: { duel_id: duel.id, turn_id: duel.turn_id, zone },
+      });
+      accepted = true;
+    } catch (error) {
+      if (error.status === 401) {
+        showUnavailable(error.message);
+      } else {
+        failure = error.message || "Не удалось выполнить ход.";
+      }
+    }
+    // A timed-out HTTP response may still follow a committed move. Wait for any
+    // older poll, then fetch the authoritative turn before enabling controls.
+    if (loading.duel) await loading.duel;
+    moveInFlight = false;
+    if (!sessionToken) return;
+    const refreshed = await loadView("duel", true);
+    if (!refreshed) {
+      setStatus("Не удалось проверить состояние дуэли. Обновите экран перед новым ходом.", true);
+    } else if (accepted) {
+      setStatus("Выбор принят. Дальше ждём состояние сервера.");
+    } else {
+      setStatus(failure || "Проверьте состояние дуэли перед повторным выбором.", true);
+    }
+  }
+
   function updateCountdown() {
     if (!activeDuel || !countdownNode || !Number.isFinite(activeDuel.deadline_at)) return;
     const remaining = Math.max(0, Math.ceil((activeDuel.deadline_at - Date.now()) / 1000));
     countdownNode.textContent = remaining > 0 ? `${remaining} сек.` : "Время вышло · ждём сервер";
+    if (remaining === 0) {
+      for (const button of document.querySelectorAll(".zone-row button")) button.disabled = true;
+    }
     if (remaining === 0 && currentView === "duel" && !document.hidden && sessionToken) {
       const key = `${activeDuel.id}:${activeDuel.turn_id}:${activeDuel.deadline_at}`;
       if (expiredDeadlineRefresh !== key) {
@@ -267,23 +314,26 @@
   }
 
   async function loadView(view, silent = false) {
-    if (!sessionToken || loading[view]) return;
-    loading[view] = true;
-    if (!silent) setStatus("Загрузка данных…");
-    try {
-      const data = await apiRequest(API_PATHS[view]);
-      if (view === "home") renderHome(data);
-      else if (view === "opponents") renderOpponents(data);
-      else renderDuel(data);
-      if (!silent) setStatus("Данные обновлены");
-      return true;
-    } catch (error) {
-      if (error.status === 401) showUnavailable(error.message);
-      else setStatus(error.message || "Не удалось загрузить данные.", true);
-      return false;
-    } finally {
-      loading[view] = false;
-    }
+    if (!sessionToken) return false;
+    if (loading[view]) return loading[view];
+    const request = (async () => {
+      if (!silent) setStatus("Загрузка данных…");
+      try {
+        const data = await apiRequest(API_PATHS[view]);
+        if (view === "home") renderHome(data);
+        else if (view === "opponents") renderOpponents(data);
+        else renderDuel(data);
+        if (!silent) setStatus("Данные обновлены");
+        return true;
+      } catch (error) {
+        if (error.status === 401) showUnavailable(error.message);
+        else setStatus(error.message || "Не удалось загрузить данные.", true);
+        return false;
+      }
+    })();
+    loading[view] = request;
+    try { return await request; }
+    finally { if (loading[view] === request) loading[view] = null; }
   }
 
   function navigate(view) {

@@ -107,7 +107,7 @@ async def test_asset_content_change_rotates_app_urls_without_release_constant(tm
             assert response.headers["cache-control"] == "no-store"
 
 
-def test_frontend_has_only_session_and_challenge_posts():
+def test_frontend_has_only_session_and_ordinary_duel_posts():
     app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
     routes = {route.path: route.methods for route in app.routes if isinstance(route, APIRoute)}
     assert routes == {
@@ -116,6 +116,7 @@ def test_frontend_has_only_session_and_challenge_posts():
         "/api/v1/duel/opponents": {"GET"},
         "/api/v1/duel/active": {"GET"},
         "/api/v1/duel/start": {"POST"},
+        "/api/v1/duel/move": {"POST"},
         "/": {"GET"},
         "/app": {"GET"},
         "/healthz": {"GET"},
@@ -141,6 +142,14 @@ def test_frontend_has_only_session_and_challenge_posts():
     assert 'await navigate("duel")' in js
     assert 'challengeInFlight' in js
     assert "action.disabled = challengeInFlight" in js
+    assert 'const ZONE_NAMES = { head: "Голова", body: "Торс", dick: "Хуй" }' in js
+    assert 'body: { duel_id: duel.id, turn_id: duel.turn_id, zone }' in js
+    assert 'button.addEventListener("click", () => submitMove(zone))' in js
+    assert "button.disabled = !canChoose" in js
+    assert "if (loading.duel) await loading.duel" in js
+    assert 'const refreshed = await loadView("duel", true)' in js
+    assert "Дуэль больше не активна. Итог появится в Telegram." in js
+    assert 'const ACTIVE_POLL_MS = 8000' in js
     assert "button.disabled = true" in js
     for path in ("/api/v1/duel/attack", "/api/v1/duel/block",
                  "/api/v1/dig", "/api/v1/boss"):

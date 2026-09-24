@@ -514,11 +514,25 @@ def test_user_action_winning_before_timeout_makes_timeout_rng_free(temp_database
     session = attack_session()
     rng = install_rng(monkeypatch)
     assert duel_service.submit_persistent_duel_attack(
-        CHAT_A, session["id"], 1, 1, "body", now_ms=DEADLINE,
+        CHAT_A, session["id"], 1, 1, "body", now_ms=DEADLINE - 1,
     ).reason == "success"
     assert duel_service.resolve_persistent_duel_timeout(
         CHAT_A, session["id"], 1, DEADLINE,
     ).reason == "stale_turn"
+    assert rng.trace == []
+
+
+@pytest.mark.parametrize("phase", ["attack", "block"])
+def test_user_action_at_deadline_is_rejected_without_rng(temp_database, monkeypatch, phase):
+    session = attack_session() if phase == "attack" else block_session()
+    rng = install_rng(monkeypatch)
+    operation = (duel_service.submit_persistent_duel_attack if phase == "attack"
+                 else duel_service.submit_persistent_duel_block)
+    actor = 1 if phase == "attack" else 2
+    assert operation(
+        CHAT_A, session["id"], actor, session["turn_id"], "head", now_ms=DEADLINE,
+    ).reason == "turn_expired"
+    assert get_duel_session(CHAT_A, session["id"]) == session
     assert rng.trace == []
 
 
@@ -553,18 +567,15 @@ def test_timeout_vs_user_action_race_has_one_transition_and_one_rng_trace(
         timeout_result = timeout_future.result()
         user_result = user_future.result()
 
-    assert sum(result.accepted for result in (timeout_result, user_result)) == 1
+    assert timeout_result.accepted
+    assert user_result.reason in ("turn_expired", "stale_turn")
     assert get_duel_session(CHAT_A, session["id"])["turn_id"] == expected_turn + 1
     assert get_duel_session(CHAT_A, session["id"])["status"] == "publishing"
     if phase == "attack":
-        assert rng.trace == (
-            [("choice", "zone")] if timeout_result.accepted else []
-        )
+        assert rng.trace == [("choice", "zone")]
     else:
         expected_resolution_trace = [
             ("random", 0.5), ("random", 0.5),
             ("choice", "block"), ("choice", "attack"),
         ]
-        assert rng.trace == (
-            [("choice", "zone")] if timeout_result.accepted else []
-        ) + expected_resolution_trace
+        assert rng.trace == [("choice", "zone")] + expected_resolution_trace

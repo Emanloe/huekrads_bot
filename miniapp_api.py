@@ -10,14 +10,17 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictInt
 from starlette.concurrency import run_in_threadpool
 
 from config import BOT_TOKEN
 from database import format_user_title_plain
-from duel_session_repository import get_current_duel_session, utc_unix_milliseconds
+from duel_session_repository import get_current_duel_session, get_duel_session, utc_unix_milliseconds
 from handlers.duel_items import DUEL_ITEM_NAMES
-from handlers.duel_service import get_duel_profile, list_duel_opponents, start_persistent_duel
+from handlers.duel_service import (
+    get_duel_profile, list_duel_opponents, start_persistent_duel,
+    submit_persistent_duel_attack, submit_persistent_duel_block,
+)
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
@@ -44,6 +47,14 @@ class StartDuelRequest(BaseModel):
     opponent_user_id: PositiveInt
 
 
+class DuelMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duel_id: StrictInt = Field(gt=0)
+    turn_id: StrictInt = Field(gt=0)
+    zone: str
+
+
 _START_FAILURES = {
     "active_duel": (409, "В этом чате уже идёт дуэль."),
     "self_target": (409, "Нельзя вызвать себя на дуэль."),
@@ -51,6 +62,16 @@ _START_FAILURES = {
     "opponent_not_registered": (404, "Соперник недоступен в этом чате."),
     "initiator_no_dick": (403, "Сегодня ваш гном не может участвовать в дуэли."),
     "opponent_no_dick": (403, "Сегодня соперник не может участвовать в дуэли."),
+}
+
+_MOVE_FAILURES = {
+    "stale_turn": (409, "Этот ход уже закончился. Обновите дуэль."),
+    "wrong_actor": (403, "Сейчас ход другого участника."),
+    "wrong_phase": (409, "Фаза дуэли изменилась. Обновите дуэль."),
+    "publishing": (409, "Ожидаем публикацию хода в Telegram."),
+    "not_active": (409, "Дуэль уже не активна."),
+    "terminal_pending": (409, "Дуэль завершается."),
+    "turn_expired": (409, "Время хода вышло. Обновите дуэль."),
 }
 
 
@@ -166,6 +187,55 @@ def create_miniapp_api(*, bot_token: str | None = None,
             except Exception:
                 logging.exception("Mini App duel publication failed in chat %s", session.chat_id)
         return {"duel_id": started.session["id"]}
+
+    @app.post("/api/v1/duel/move")
+    async def move_duel(request: DuelMoveRequest,
+                        session: MiniAppSession = Depends(require_session)):
+        if request.zone not in ("head", "body", "dick"):
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_zone", "message": "Недопустимая зона хода.",
+            })
+        # This read only chooses the shared operation and hides inaccessible duels.
+        # The chosen service rechecks phase, actor, turn and deadline in its write txn.
+        duel = get_duel_session(session.chat_id, request.duel_id)
+        if duel is None or session.user_id not in (
+            duel["player1_user_id"], duel["player2_user_id"],
+        ):
+            raise HTTPException(status_code=404, detail={
+                "code": "inaccessible_duel", "message": "Дуэль недоступна в этом чате.",
+            })
+        operation = (submit_persistent_duel_attack if duel["phase"] == "attack"
+                     else submit_persistent_duel_block)
+        try:
+            result = await run_in_threadpool(
+                operation, session.chat_id, request.duel_id, session.user_id,
+                request.turn_id, request.zone,
+            )
+        except Exception:
+            logging.exception("Mini App persistent duel move failed in chat %s", session.chat_id)
+            raise HTTPException(status_code=500, detail={
+                "code": "move_failed", "message": "Не удалось выполнить ход. Обновите дуэль.",
+            }) from None
+        if not result.accepted:
+            if result.reason == "not_found":
+                raise HTTPException(status_code=404, detail={
+                    "code": "inaccessible_duel", "message": "Дуэль недоступна в этом чате.",
+                })
+            status, message = _MOVE_FAILURES.get(
+                result.reason, (409, "Ход сейчас недоступен. Обновите дуэль."),
+            )
+            raise HTTPException(status_code=status, detail={
+                "code": result.reason if result.reason in _MOVE_FAILURES else "move_unavailable",
+                "message": message,
+            })
+        if telegram_bot is not None:
+            try:
+                await recover_persistent_duel_chat(
+                    session.chat_id, telegram_bot, job_queue=job_queue,
+                )
+            except Exception:
+                logging.exception("Mini App duel follow-up failed in chat %s", session.chat_id)
+        return {"accepted": True, "duel_id": request.duel_id, "turn_id": request.turn_id}
 
     @app.get("/api/v1/duel/active")
     def active(session: MiniAppSession = Depends(require_session)):
