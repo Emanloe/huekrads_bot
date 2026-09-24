@@ -381,6 +381,20 @@ async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
             "first": 120,
             "name": "duel_item_event_job",
         }
+    assert [entry for entry in repeating if entry[0] is bot.huecrab_event_job] == [
+        (bot.huecrab_event_job, {
+            "interval": bot.HUECRAB_CHECK_MINUTES * 60,
+            "first": 180,
+            "name": "huecrab_event_job",
+        })
+    ]
+    assert [entry for entry in repeating if entry[0] is bot.huecrab_autoloot_job] == [
+        (bot.huecrab_autoloot_job, {
+            "interval": 5,
+            "first": 5,
+            "name": "huecrab_autoloot_job",
+        })
+    ]
 
 
 @pytest.mark.asyncio
@@ -424,6 +438,12 @@ async def test_duel_item_callback_handler_is_registered(monkeypatch):
         and handler.callback is bot.duel_item_event_callback
     )
     assert item_handler.pattern.pattern == r"^duel_item_claim_\d+$"
+    pet_handler = next(
+        handler for handler in handlers
+        if isinstance(handler, CallbackQueryHandler)
+        and handler.callback is bot.huecrab_tame_callback
+    )
+    assert pet_handler.pattern.pattern == r"^huecrab_tame_\d+$"
 
 
 @pytest.mark.asyncio

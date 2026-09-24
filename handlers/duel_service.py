@@ -45,7 +45,9 @@ from duel_session_repository import (
     utc_unix_milliseconds,
 )
 from handlers.duel_catalog import DUEL_POST_MESSAGES, DWARFS_FACTS
-from handlers.duel_items import get_droppable_duel_inventory, get_duel_item_name
+from handlers.duel_items import (
+    format_pocket_drop_announcement, get_droppable_duel_inventory, get_duel_item_name,
+)
 from handlers.duel_state import (
     DUEL_MOVE_TIMEOUT_SECONDS,
     _build_duel_result_plan,
@@ -547,7 +549,8 @@ def acknowledge_persistent_duel_publication(
         elif kind == "pocket_drop":
             drop = publication["payload"]["drop"]
             if not bind_duel_item_event_message_in_transaction(
-                cursor, chat_id, drop["event_id"], message_id,
+                cursor, chat_id, drop["event_id"], message_id, published_at_ms,
+                format_pocket_drop_announcement(publication, session),
             ):
                 return PersistentDuelPublicationResult("event_unavailable", publication, session)
         else:

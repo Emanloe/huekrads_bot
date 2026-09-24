@@ -173,7 +173,8 @@ async def _spawn_duel_item_event(
         logging.exception("Не удалось отправить item event в чат %s", chat_id)
         return
 
-    set_duel_item_event_message(event_id, message.message_id)
+    if not set_duel_item_event_message(event_id, message.message_id, intro):
+        logging.error("Could not bind published item event %s", event_id)
 
 
 async def duel_item_event_job(context: ContextTypes.DEFAULT_TYPE):

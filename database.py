@@ -248,13 +248,54 @@ def init_db():
                 claimed_by INTEGER,
                 item_id TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                claimed_at TEXT
+                claimed_at TEXT,
+                published_at REAL,
+                origin_text TEXT,
+                autoloot_claimed INTEGER NOT NULL DEFAULT 0,
+                autoloot_announced_at TEXT
             )
         """)
+        cursor.execute("PRAGMA table_info(duel_item_events)")
+        item_event_columns = {column[1] for column in cursor.fetchall()}
+        for column, column_type in (
+            ("published_at", "REAL"),
+            ("origin_text", "TEXT"),
+            ("autoloot_claimed", "INTEGER NOT NULL DEFAULT 0"),
+            ("autoloot_announced_at", "TEXT"),
+        ):
+            if column not in item_event_columns:
+                cursor.execute(f"ALTER TABLE duel_item_events ADD COLUMN {column} {column_type}")
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_duel_item_events_active_chat
             ON duel_item_events (chat_id)
             WHERE claimed = 0
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_duel_item_events_autoloot
+            ON duel_item_events (claimed, published_at)
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS huecrab_owners (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                obtained_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (chat_id, user_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS huecrab_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER,
+                consumed INTEGER NOT NULL DEFAULT 0,
+                attempted_by INTEGER,
+                tamed INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_huecrab_events_active_chat
+            ON huecrab_events (chat_id) WHERE consumed = 0
         """)
 
         cursor.execute("""
@@ -1252,35 +1293,41 @@ def cancel_unpublished_duel_dig(dig: dict, message_id: int | None = None) -> boo
         return True
 
 
-def set_duel_item_event_message(event_id: int, message_id: int) -> bool:
+def set_duel_item_event_message(
+    event_id: int, message_id: int, origin_text: str | None = None,
+) -> bool:
     with get_db() as conn:
         return set_duel_item_event_message_in_transaction(
-            conn.cursor(), event_id, message_id,
+            conn.cursor(), event_id, message_id, origin_text,
         )
 
 
-def set_duel_item_event_message_in_transaction(cursor, event_id: int, message_id: int) -> bool:
+def set_duel_item_event_message_in_transaction(
+    cursor, event_id: int, message_id: int, origin_text: str | None = None,
+) -> bool:
     cursor.execute(
         """
         UPDATE duel_item_events
-        SET message_id = ?
-        WHERE event_id = ? AND claimed = 0
+        SET message_id = ?, published_at = ?, origin_text = ?
+        WHERE event_id = ? AND claimed = 0 AND message_id IS NULL
         """,
-        (message_id, event_id),
+        (message_id, _utc_now().timestamp(), origin_text, event_id),
     )
     return cursor.rowcount == 1
 
 
 def bind_duel_item_event_message_in_transaction(
     cursor, chat_id: int, event_id: int, message_id: int,
+    published_at_ms: int, origin_text: str,
 ) -> bool:
     """Bind a persistent drop's pickup button within its chat and outbox ack."""
     cursor.execute(
         """
-        UPDATE duel_item_events SET message_id = ?
+        UPDATE duel_item_events
+        SET message_id = ?, published_at = ?, origin_text = ?
         WHERE chat_id = ? AND event_id = ? AND claimed = 0 AND message_id IS NULL
         """,
-        (message_id, chat_id, event_id),
+        (message_id, published_at_ms / 1000, origin_text, chat_id, event_id),
     )
     return cursor.rowcount == 1
 
@@ -1304,7 +1351,8 @@ def get_duel_item_event(event_id: int) -> dict | None:
         cursor.execute(
             """
             SELECT event_id, chat_id, message_id, claimed, claimed_by,
-                   item_id, created_at, claimed_at
+                   item_id, created_at, claimed_at, published_at,
+                   origin_text, autoloot_announced_at
             FROM duel_item_events
             WHERE event_id = ?
             """,
@@ -1322,6 +1370,9 @@ def get_duel_item_event(event_id: int) -> dict | None:
             "item_id": row[5],
             "created_at": row[6],
             "claimed_at": row[7],
+            "published_at": row[8],
+            "origin_text": row[9],
+            "autoloot_announced_at": row[10],
         }
 
 
@@ -1359,37 +1410,11 @@ def claim_duel_item_event(
         )
         if not cursor.fetchone():
             return "not_registered", None
-
-        cursor.execute(
-            """
-            UPDATE duel_item_events
-            SET claimed = 1, claimed_by = ?, claimed_at = CURRENT_TIMESTAMP
-            WHERE event_id = ? AND chat_id = ? AND claimed = 0
-            """,
-            (user_id, event_id, chat_id),
+        instance = _claim_item_in_transaction(
+            cursor, event_id, chat_id, user_id, event[1], item_selector,
         )
-        if cursor.rowcount != 1:
+        if instance is None:
             return "already_claimed", None
-
-        item_id = event[1] if event[1] is not None else item_selector()
-        cursor.execute(
-            """
-            INSERT INTO duel_inventory (chat_id, user_id, item_id)
-            VALUES (?, ?, ?)
-            """,
-            (chat_id, user_id, item_id),
-        )
-        instance_id = cursor.lastrowid
-        cursor.execute(
-            "UPDATE duel_item_events SET item_id = ? WHERE event_id = ?",
-            (item_id, event_id),
-        )
-        instance = {
-            "id": instance_id,
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "item_id": item_id,
-        }
         if huegryz_decider is not None:
             instance["huegryz_outcome"] = None
             if huegryz_decider():
@@ -1407,6 +1432,211 @@ def claim_duel_item_event(
                     "bitten" if cursor.rowcount == 1 else "already_dickless"
                 )
         return "claimed", instance
+
+
+def _claim_item_in_transaction(
+    cursor, event_id: int, chat_id: int, user_id: int,
+    fixed_item_id: str | None, item_selector,
+) -> dict | None:
+    """One item-event CAS and inventory transfer for manual and pet pickup."""
+    cursor.execute(
+        """
+        UPDATE duel_item_events
+        SET claimed = 1, claimed_by = ?, claimed_at = CURRENT_TIMESTAMP
+        WHERE event_id = ? AND chat_id = ? AND claimed = 0
+        """,
+        (user_id, event_id, chat_id),
+    )
+    if cursor.rowcount != 1:
+        return None
+    item_id = fixed_item_id if fixed_item_id is not None else item_selector()
+    cursor.execute(
+        "INSERT INTO duel_inventory (chat_id, user_id, item_id) VALUES (?, ?, ?)",
+        (chat_id, user_id, item_id),
+    )
+    instance = {
+        "id": cursor.lastrowid,
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "item_id": item_id,
+    }
+    cursor.execute(
+        "UPDATE duel_item_events SET item_id = ? WHERE event_id = ?",
+        (item_id, event_id),
+    )
+    return instance
+
+
+def list_due_huecrab_item_events(now: float, delay_seconds: int) -> list[int]:
+    with get_db() as conn:
+        return [row[0] for row in conn.execute(
+            """SELECT event_id FROM duel_item_events
+               WHERE claimed = 0 AND published_at IS NOT NULL AND published_at <= ?
+               ORDER BY published_at, event_id""",
+            (now - delay_seconds,),
+        )]
+
+
+def claim_due_item_for_huecrab(
+    event_id: int, now: float, delay_seconds: int, item_selector, owner_selector,
+) -> tuple[str, dict | None]:
+    """Select a chat owner and claim under the same SQLite write lock as manual pickup."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        row = cursor.execute(
+            """SELECT chat_id, item_id, message_id, origin_text
+               FROM duel_item_events WHERE event_id = ? AND claimed = 0
+               AND published_at IS NOT NULL AND published_at <= ?""",
+            (event_id, now - delay_seconds),
+        ).fetchone()
+        if row is None or row[2] is None:
+            return "unavailable", None
+        chat_id, fixed_item_id, message_id, origin_text = row
+        owners = cursor.execute(
+            """SELECT u.user_id, u.username, u.display_name, u.dwarf_name
+               FROM huecrab_owners AS h JOIN duel_users AS u
+               ON u.chat_id = h.chat_id AND u.user_id = h.user_id
+               WHERE h.chat_id = ? ORDER BY u.user_id""",
+            (chat_id,),
+        ).fetchall()
+        if not owners:
+            return "no_owners", None
+        owner = owners[0] if len(owners) == 1 else owner_selector(owners)
+        user_id, username, display_name, dwarf_name = owner
+        instance = _claim_item_in_transaction(
+            cursor, event_id, chat_id, user_id, fixed_item_id, item_selector,
+        )
+        if instance is None:
+            return "unavailable", None
+        cursor.execute(
+            "UPDATE duel_item_events SET autoloot_claimed = 1 WHERE event_id = ?",
+            (event_id,),
+        )
+        return "claimed", {
+            **instance, "event_id": event_id, "message_id": message_id,
+            "origin_text": origin_text,
+            "owner": {
+                "user_id": user_id, "username": username,
+                "display_name": display_name, "dwarf_name": dwarf_name,
+            },
+        }
+
+
+def list_unannounced_huecrab_claims() -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT e.event_id, e.chat_id, e.message_id, e.item_id, e.origin_text,
+                      u.user_id, u.username, u.display_name, u.dwarf_name
+               FROM duel_item_events AS e JOIN duel_users AS u
+               ON u.chat_id = e.chat_id AND u.user_id = e.claimed_by
+               WHERE e.claimed = 1 AND e.autoloot_claimed = 1
+               AND e.autoloot_announced_at IS NULL ORDER BY e.event_id"""
+        ).fetchall()
+    return [
+        {
+            "event_id": r[0], "chat_id": r[1], "message_id": r[2],
+            "item_id": r[3], "origin_text": r[4],
+            "owner": {"user_id": r[5], "username": r[6],
+                      "display_name": r[7], "dwarf_name": r[8]},
+        }
+        for r in rows
+    ]
+
+
+def mark_huecrab_claim_announced(event_id: int) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE duel_item_events SET autoloot_announced_at = CURRENT_TIMESTAMP
+               WHERE event_id = ? AND claimed = 1 AND autoloot_announced_at IS NULL""",
+            (event_id,),
+        )
+
+
+def has_huecrab(chat_id: int, user_id: int) -> bool:
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM huecrab_owners WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone() is not None
+
+
+def create_huecrab_event(chat_id: int) -> int | None:
+    with get_db() as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO huecrab_events (chat_id) VALUES (?)", (chat_id,),
+        )
+        return cursor.lastrowid if cursor.rowcount == 1 else None
+
+
+def has_active_huecrab_event(chat_id: int) -> bool:
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM huecrab_events WHERE chat_id = ? AND consumed = 0",
+            (chat_id,),
+        ).fetchone() is not None
+
+
+def bind_huecrab_event(event_id: int, message_id: int) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE huecrab_events SET message_id = ?
+               WHERE event_id = ? AND consumed = 0 AND message_id IS NULL""",
+            (message_id, event_id),
+        )
+        return cursor.rowcount == 1
+
+
+def discard_unpublished_huecrab_event(event_id: int) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute(
+            """DELETE FROM huecrab_events
+               WHERE event_id = ? AND consumed = 0 AND message_id IS NULL""",
+            (event_id,),
+        )
+        return cursor.rowcount == 1
+
+
+def tame_huecrab_event(
+    event_id: int, chat_id: int, user_id: int, message_id: int, tame_decider,
+) -> str:
+    """The first registered petless attempt consumes one wild event."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        event = cursor.execute(
+            """SELECT consumed FROM huecrab_events
+               WHERE event_id = ? AND chat_id = ? AND message_id = ?""",
+            (event_id, chat_id, message_id),
+        ).fetchone()
+        if event is None or event[0]:
+            return "taken"
+        if cursor.execute(
+            "SELECT 1 FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone() is None:
+            return "not_registered"
+        if cursor.execute(
+            "SELECT 1 FROM huecrab_owners WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone() is not None:
+            return "already_owned"
+        cursor.execute(
+            """UPDATE huecrab_events SET consumed = 1, attempted_by = ?
+               WHERE event_id = ? AND chat_id = ? AND consumed = 0""",
+            (user_id, event_id, chat_id),
+        )
+        if cursor.rowcount != 1:
+            return "taken"
+        if not tame_decider():
+            cursor.execute("UPDATE huecrab_events SET tamed = 0 WHERE event_id = ?", (event_id,))
+            return "failed"
+        cursor.execute(
+            "INSERT INTO huecrab_owners (chat_id, user_id) VALUES (?, ?)",
+            (chat_id, user_id),
+        )
+        cursor.execute("UPDATE huecrab_events SET tamed = 1 WHERE event_id = ?", (event_id,))
+        return "tamed"
 
 
 def get_duel_top(

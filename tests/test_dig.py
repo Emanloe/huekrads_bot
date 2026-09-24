@@ -392,8 +392,8 @@ async def test_binding_failure_after_send_refunds_once_and_removes_button(
     monkeypatch.setattr(dig.random, "random", Mock(return_value=0.0))
     monkeypatch.setattr(dig.random, "choice", Mock(return_value=duel_items.DUEL_ITEMS[0]))
 
-    def bind_then_fail(event_id, message_id):
-        assert db.set_duel_item_event_message(event_id, message_id)
+    def bind_then_fail(event_id, message_id, text):
+        assert db.set_duel_item_event_message(event_id, message_id, text)
         raise RuntimeError("late acknowledgement failure")
 
     monkeypatch.setattr(dig, "set_duel_item_event_message", bind_then_fail)

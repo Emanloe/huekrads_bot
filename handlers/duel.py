@@ -36,6 +36,7 @@ from database import (
     set_boss_enabled,
     add_duel_inventory_item,
     get_duel_inventory,
+    has_huecrab,
     create_duel_item_event_from_inventory,
     restore_unpublished_duel_drop,
     set_duel_item_event_message,
@@ -193,16 +194,17 @@ async def _publish_duel_drop(context, drop: dict) -> None:
     )]])
     message = None
     try:
+        text = get_text(
+            "duel.finish.item_drop",
+            item_name=escape(get_duel_item_name(drop["item_id"])),
+        )
         message = await context.bot.send_message(
             chat_id=drop["chat_id"],
-            text=get_text(
-                "duel.finish.item_drop",
-                item_name=escape(get_duel_item_name(drop["item_id"])),
-            ),
+            text=text,
             parse_mode="HTML",
             reply_markup=keyboard,
         )
-        if not set_duel_item_event_message(drop["event_id"], message.message_id):
+        if not set_duel_item_event_message(drop["event_id"], message.message_id, text):
             raise RuntimeError("Could not bind duel drop to pickup message")
     except Exception:
         logging.exception("Не удалось опубликовать выпавший предмет в чате %s", drop["chat_id"])
@@ -1738,6 +1740,8 @@ async def duel_stats_command(update, context):
     text += "\n" + get_text(
         "duel.inventory.line", items=format_duel_display_inventory(inventory),
     )
+    if has_huecrab(chat_id, update.message.from_user.id):
+        text += "\n" + get_text("huecrab.inventory")
     await send_and_schedule(update, context, text)
 
 
