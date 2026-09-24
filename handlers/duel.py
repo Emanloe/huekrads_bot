@@ -1086,8 +1086,10 @@ async def _finish_duel(
 
     # Шанс кражи не зависит от раундов: база +1% за каждую победу
     # проигравшего за сегодня (накапливается, когда он побеждал).
-    steal_chance = get_dick_steal_chance(loser.get("daily_wins", 0))
-    is_dick_stolen = random.random() < steal_chance
+    is_dick_stolen = (
+        loser["points"] == 0
+        or random.random() < get_dick_steal_chance(loser.get("daily_wins", 0))
+    )
 
     try:
 

@@ -247,7 +247,7 @@ async def test_monthly_job_wiring_is_once_on_first_day_ten_moscow(monkeypatch, a
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     monkeypatch.setattr(bot, "schedule_past_pizda_job", lambda _queue: None)

@@ -338,7 +338,7 @@ def init_db():
             WHERE status = 'active'
         """)
 
-        # Dormant persistent-duel publication intents; no Telegram cutover.
+        # Durable ordinary-duel publication intents.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS duel_outbox (
                 id INTEGER PRIMARY KEY,
@@ -378,6 +378,36 @@ def init_db():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_duel_outbox_retry
             ON duel_outbox (chat_id, status, lease_until, id)
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS miniapp_launch_tokens (
+                token_digest TEXT PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                consumed_at INTEGER,
+                CHECK (expires_at > created_at)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_miniapp_launch_expiry
+            ON miniapp_launch_tokens (expires_at)
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS miniapp_sessions (
+                token_digest TEXT PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                CHECK (expires_at > created_at)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_miniapp_session_expiry
+            ON miniapp_sessions (expires_at)
         """)
 
         # Fix broken initial data where points=0 and losses=20 from prior seed bug
@@ -477,7 +507,7 @@ def set_boss_enabled(chat_id: int, enabled: bool):
 # 🗡️ ЛОГИКА ДУЭЛЕЙ
 # ==========================================
 
-def _reset_user_if_new_day(cursor, row) -> dict | None:
+def _reset_user_if_new_day(cursor, row, *, persist: bool = True) -> dict | None:
     if not row:
         return None
 
@@ -494,12 +524,13 @@ def _reset_user_if_new_day(cursor, row) -> dict | None:
         last_stolen_by = None
         daily_wins = 0
         last_activity_date = today_str
-        cursor.execute("""
-            UPDATE duel_users
-            SET points = 20, dick_stolen_today = 0, last_stolen_by = NULL,
-                daily_wins = 0, last_activity_date = ?
-            WHERE user_id = ? AND chat_id = ?
-        """, (today_str, user_id, chat_id))
+        if persist:
+            cursor.execute("""
+                UPDATE duel_users
+                SET points = 20, dick_stolen_today = 0, last_stolen_by = NULL,
+                    daily_wins = 0, last_activity_date = ?
+                WHERE user_id = ? AND chat_id = ?
+            """, (today_str, user_id, chat_id))
 
     return {
         "user_id": user_id,
@@ -564,7 +595,7 @@ def get_or_create_duel_user(tg_user, chat_id: int) -> dict:
         return _reset_user_if_new_day(cursor, row)
 
 
-def get_duel_user_by_id_in_transaction(cursor, chat_id: int, user_id: int) -> dict | None:
+def get_duel_user_by_id_in_transaction(cursor, chat_id: int, user_id: int, *, read_only: bool = False) -> dict | None:
     """Read a registered chat participant using the caller's transaction.
 
     Like the existing public getter, this applies the lazy daily reset.
@@ -576,16 +607,17 @@ def get_duel_user_by_id_in_transaction(cursor, chat_id: int, user_id: int) -> di
                last_activity_date, last_stolen_by, daily_wins, dwarf_name
         FROM duel_users WHERE chat_id = ? AND user_id = ?
     """, (chat_id, user_id))
-    return _reset_user_if_new_day(cursor, cursor.fetchone())
+    return _reset_user_if_new_day(cursor, cursor.fetchone(), persist=not read_only)
 
 
-def get_duel_user_by_id(chat_id: int, user_id: int) -> dict | None:
+def get_duel_user_by_id(chat_id: int, user_id: int, *, read_only: bool = False) -> dict | None:
     """Read an existing duel participant in one chat without registering them."""
     with get_db() as conn:
-        return get_duel_user_by_id_in_transaction(conn.cursor(), chat_id, user_id)
+        return get_duel_user_by_id_in_transaction(conn.cursor(), chat_id, user_id,
+                                                  read_only=read_only)
 
 
-def get_duel_user_by_username(username: str, chat_id: int) -> dict | None:
+def get_duel_user_by_username(username: str, chat_id: int, *, read_only: bool = False) -> dict | None:
     clean_search = _clean_username(username)
     if not clean_search:
         return None
@@ -603,7 +635,10 @@ def get_duel_user_by_username(username: str, chat_id: int) -> dict | None:
         row = cursor.fetchone()
 
         if row:
-            return _reset_user_if_new_day(cursor, row)
+            return _reset_user_if_new_day(cursor, row, persist=not read_only)
+
+        if read_only:
+            return None
 
         cursor.execute("""
             SELECT user_id, username, first_name 

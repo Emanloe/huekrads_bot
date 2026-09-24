@@ -319,7 +319,10 @@ def finalize_persistent_duel(
         defender = participants[checkpoint["defender_user_id"]]
 
         # Match _finish_duel's exact order. No pocket-drop RNG belongs here.
-        is_dick_stolen = random.random() < get_dick_steal_chance(loser["daily_wins"])
+        is_dick_stolen = (
+            loser["points"] == 0
+            or random.random() < get_dick_steal_chance(loser["daily_wins"])
+        )
         plan = _build_duel_result_plan(
             winner, loser, is_dick_stolen,
             format_user_title_plain(winner, include_dwarf_name=False),
@@ -863,9 +866,10 @@ def start_persistent_duel(
         return PersistentDuelStartResult(None, session)
 
 
-def get_duel_profile(chat_id: int, user_id: int) -> DuelProfile | None:
+def get_duel_profile(chat_id: int, user_id: int, *, read_only: bool = False) -> DuelProfile | None:
     """Return an existing participant's state and inventory in this chat only."""
-    user = get_duel_user_by_id(chat_id, user_id)
+    user = (get_duel_user_by_id(chat_id, user_id, read_only=True) if read_only
+            else get_duel_user_by_id(chat_id, user_id))
     if user is None:
         return None
     return DuelProfile(
@@ -875,9 +879,11 @@ def get_duel_profile(chat_id: int, user_id: int) -> DuelProfile | None:
     )
 
 
-def list_duel_opponents(chat_id: int, user_id: int, limit: int = 20) -> DuelOpponentList:
+def list_duel_opponents(chat_id: int, user_id: int, limit: int = 20, *,
+                        read_only: bool = False) -> DuelOpponentList:
     """Build the same eligible top-list used by /duel, without starting a fight."""
-    initiator = get_duel_user_by_id(chat_id, user_id)
+    initiator = (get_duel_user_by_id(chat_id, user_id, read_only=True) if read_only
+                 else get_duel_user_by_id(chat_id, user_id))
     if initiator is None:
         return DuelOpponentList("not_registered", [])
 
@@ -894,7 +900,8 @@ def list_duel_opponents(chat_id: int, user_id: int, limit: int = 20) -> DuelOppo
         if initiator["username"] and initiator["username"].lower() == username.lower():
             continue
 
-        opponent = get_duel_user_by_username(username, chat_id)
+        opponent = (get_duel_user_by_username(username, chat_id, read_only=True)
+                    if read_only else get_duel_user_by_username(username, chat_id))
         if opponent is None or _get_duel_participant_ineligibility(opponent) is not None:
             continue
 

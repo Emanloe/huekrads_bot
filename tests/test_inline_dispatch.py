@@ -251,7 +251,7 @@ async def test_one_inline_handler_and_one_ball_command_are_wired(monkeypatch):
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     await bot.main()

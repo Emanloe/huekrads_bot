@@ -219,10 +219,8 @@ def test_self_duel_does_not_roll(start_db, monkeypatch):
     "player,points,no_dick,reason",
     [
         ("initiator", 20, True, "initiator_no_dick"),
-        ("initiator", 0, False, "initiator_no_points"),
         ("initiator", 0, True, "initiator_no_dick"),
         ("opponent", 20, True, "opponent_no_dick"),
-        ("opponent", 0, False, "opponent_no_points"),
         ("opponent", 0, True, "opponent_no_dick"),
     ],
 )
@@ -241,6 +239,25 @@ def test_existing_admission_rules_and_no_dick_priority(
     )
     reject_without_rng(monkeypatch, CHAT_A, 1, 2, reason)
     assert active_count(start_db) == 0
+
+
+@pytest.mark.parametrize("zero_player", ("initiator", "opponent"))
+def test_zero_point_player_starts_persistent_duel(start_db, monkeypatch, zero_player):
+    register(CHAT_A, 1, points=0 if zero_player == "initiator" else 20)
+    register(CHAT_A, 2, points=0 if zero_player == "opponent" else 20)
+    choice = Mock(return_value=True)
+    roll = Mock(side_effect=AssertionError("start used random.random"))
+    monkeypatch.setattr(random, "choice", choice)
+    monkeypatch.setattr(random, "random", roll)
+
+    started = duel_service.start_persistent_duel(CHAT_A, 1, 2, now_ms=NOW_MS)
+
+    assert started.success
+    assert started.session["player1_snapshot"]["points"] == (0 if zero_player == "initiator" else 20)
+    assert started.session["player2_snapshot"]["points"] == (0 if zero_player == "opponent" else 20)
+    assert active_count(start_db) == 1
+    choice.assert_called_once_with([True, False])
+    roll.assert_not_called()
 
 
 @pytest.mark.parametrize("existing_status", ["publishing", "active"])

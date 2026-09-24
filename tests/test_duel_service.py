@@ -52,7 +52,7 @@ def test_profile_is_scoped_by_chat_and_does_not_register_missing_user(temp_datab
 
 def test_opponent_list_contains_only_eligible_users_from_requested_chat(temp_database):
     for chat_id, players in (
-        (CHAT_A, ((1, "initiator"), (2, "chat_a_opponent"), (4, "no_points"))),
+        (CHAT_A, ((1, "initiator"), (2, "chat_a_opponent"), (4, "zero_point_opponent"))),
         (CHAT_B, ((1, "initiator"), (3, "chat_b_opponent"))),
     ):
         for user_id, username in players:
@@ -64,6 +64,7 @@ def test_opponent_list_contains_only_eligible_users_from_requested_chat(temp_dat
     assert list_a.ineligibility is None
     assert [(item.user_id, item.username) for item in list_a.opponents] == [
         (2, "chat_a_opponent"),
+        (4, "zero_point_opponent"),
     ]
     assert [(item.user_id, item.username) for item in list_b.opponents] == [
         (3, "chat_b_opponent"),
@@ -83,12 +84,12 @@ def test_opponent_list_uses_own_chat_points_and_dick_state(temp_database):
 
     denied = list_duel_opponents(CHAT_A, 1)
     allowed = list_duel_opponents(CHAT_B, 1)
-    assert denied.ineligibility == "no_dick"  # Existing priority over no_points.
+    assert denied.ineligibility == "no_dick"
     assert denied.opponents == []
     assert [opponent.user_id for opponent in allowed.opponents] == [2]
 
     set_state(temp_database, CHAT_A, 1, 20)
-    assert list_duel_opponents(CHAT_A, 1).opponents == []
+    assert [opponent.user_id for opponent in list_duel_opponents(CHAT_A, 1).opponents] == [2]
     assert [opponent.user_id for opponent in list_duel_opponents(CHAT_B, 1).opponents] == [2]
 
 

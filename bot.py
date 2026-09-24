@@ -1,9 +1,10 @@
 import datetime
 import logging
+import os
 from zoneinfo import ZoneInfo
 
-import nest_asyncio
 import pytz
+import uvicorn
 
 from telegram import (
     BotCommand,
@@ -93,6 +94,8 @@ from handlers.duel_items import (
     duel_item_event_job,
 )
 from handlers.duel_name import name_command
+from handlers.miniapp import duel_app_command
+from miniapp_api import create_miniapp_api
 from handlers.monthly_summary import monthly_summary_job, summary_command
 from handlers.elite_ball import ball_command, elite_ball_callback, elite_ball_question, ELITE_BALL_CALLBACK_DATA
 from handlers.dig import dig_command
@@ -118,6 +121,7 @@ BOT_COMMANDS = [
     BotCommand("toggle_forward", get_text("menu.commands.toggle_forward")),
     BotCommand("toggle_autodelete", get_text("menu.commands.toggle_autodelete")),
     BotCommand("duel", get_text("menu.commands.duel")),
+    BotCommand("duel_app", "Дуэли: мини-приложение"),
     BotCommand("name", get_text("menu.commands.name")),
     BotCommand("summary", get_text("menu.commands.summary")),
     BotCommand("dig", get_text("menu.commands.dig")),
@@ -181,8 +185,6 @@ async def bot_chat_member_update(
 
 
 async def main():
-    nest_asyncio.apply()
-
     init_db()
 
     application = (
@@ -373,6 +375,7 @@ async def main():
             duel_command,
         )
     )
+    application.add_handler(CommandHandler("duel_app", duel_app_command))
 
     application.add_handler(CommandHandler("name", name_command))
     application.add_handler(CommandHandler("summary", summary_command))
@@ -496,9 +499,41 @@ async def main():
 
     logger.info("Bot starting...")
 
-    await application.run_polling(
-        drop_pending_updates=False,
-    )
+    await run_ptb_and_http(application)
+
+
+async def run_ptb_and_http(application: Application, http_server=None) -> None:
+    """Keep PTB polling, its jobs, and the one ASGI server on one event loop."""
+    if http_server is None:
+        http_server = uvicorn.Server(uvicorn.Config(
+            create_miniapp_api(), host=os.getenv("MINIAPP_HTTP_HOST", "127.0.0.1"),
+            port=int(os.getenv("MINIAPP_HTTP_PORT", "8000")),
+            workers=1, lifespan="off", access_log=False,
+        ))
+    initialized = polling = started = False
+    try:
+        await application.initialize()
+        initialized = True
+        if application.post_init is not None:
+            await application.post_init(application)
+        if application.updater is None:
+            raise RuntimeError("PTB polling updater is unavailable")
+        await application.updater.start_polling(drop_pending_updates=False)
+        polling = True
+        await application.start()
+        started = True
+        await http_server.serve()
+    finally:
+        try:
+            if polling:
+                await application.updater.stop()
+        finally:
+            try:
+                if started:
+                    await application.stop()
+            finally:
+                if initialized:
+                    await application.shutdown()
 
 
 if __name__ == "__main__":

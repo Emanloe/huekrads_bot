@@ -53,7 +53,11 @@ def test_bot_suppresses_http_client_info_logs():
 def test_bot_command_menu_preserves_descriptions_and_order():
     import bot
 
-    assert [(command.command, command.description) for command in bot.BOT_COMMANDS] == [
+    assert ("duel_app", "Дуэли: мини-приложение") in [
+        (command.command, command.description) for command in bot.BOT_COMMANDS
+    ]
+    assert [(command.command, command.description) for command in bot.BOT_COMMANDS
+            if command.command != "duel_app"] == [
         ("start", "Запустить бота"),
         ("help", "Хелп по командам"),
         ("donate", "Поддержать проект"),
@@ -107,7 +111,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
         def build(self):
             return self.application
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
 
@@ -116,6 +120,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
     for callback, command in (
         (bot.donate_command, "donate"),
         (bot.gnomed_command, "gnomed"),
+        (bot.duel_app_command, "duel_app"),
         (bot.name_command, "name"),
         (bot.summary_command, "summary"),
         (bot.dig_command, "dig"),
@@ -187,7 +192,7 @@ async def test_registered_duel_stats_handler_sends_virtual_base_inventory(
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     await bot.main()
@@ -297,7 +302,7 @@ async def test_boss_daily_job_is_scheduled_at_1337_moscow(monkeypatch):
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     monkeypatch.setattr(bot, "schedule_past_pizda_job", lambda _queue: None)
@@ -362,7 +367,7 @@ async def test_duel_item_periodic_job_registration_is_named_and_not_duplicated(
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     monkeypatch.setattr(bot, "schedule_past_pizda_job", lambda _queue: None)
@@ -407,7 +412,7 @@ async def test_duel_item_callback_handler_is_registered(monkeypatch):
         def build(self):
             return FakeApplication()
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
     await bot.main()
@@ -454,7 +459,7 @@ async def test_registered_hyperborean_callback_handler_routes_all_supported_payl
         def build(self):
             return self.application
 
-    monkeypatch.setattr(bot.nest_asyncio, "apply", lambda: None)
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
     monkeypatch.setattr(bot, "init_db", lambda: None)
     monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
 

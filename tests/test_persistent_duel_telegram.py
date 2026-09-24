@@ -71,6 +71,40 @@ async def test_telegram_selection_actions_final_and_stale_buttons(temp_database,
     assert database.get_monthly_chat_stats(CHAT, database.moscow_month_key())["duels"] == 1
 
 
+@pytest.mark.parametrize("entry", ("direct", "selection"))
+@pytest.mark.parametrize("zero_player", ("initiator", "opponent"))
+@pytest.mark.asyncio
+async def test_telegram_entry_allows_zero_point_player_and_uses_persistent_session(
+    temp_database, fake_context, monkeypatch, entry, zero_player,
+):
+    attacker, defender = register()
+    zero_id = attacker.id if zero_player == "initiator" else defender.id
+    with database.get_db() as conn:
+        conn.execute("UPDATE duel_users SET points = 0 WHERE chat_id = ? AND user_id = ?",
+                     (CHAT, zero_id))
+    monkeypatch.setattr(duel_service.random, "choice", lambda values: values[0])
+    monkeypatch.setattr(duel_service.random, "random",
+                        lambda: (_ for _ in ()).throw(AssertionError("start used random.random")))
+
+    if entry == "direct":
+        message = SimpleNamespace(
+            from_user=attacker, chat=SimpleNamespace(id=CHAT), chat_id=CHAT,
+            message_id=91, text="/duel @defender",
+        )
+        fake_context.args = ["@defender"]
+        await duel.duel_command(SimpleNamespace(message=message), fake_context)
+    else:
+        selection, query = callback("start_duel_defender", attacker)
+        await duel.duel_select_callback(selection, fake_context)
+        query.answer.assert_awaited_once_with()
+
+    session = get_current_duel_session(CHAT)
+    assert session["status"] == "active"
+    assert session["player1_snapshot"]["points"] == (0 if zero_player == "initiator" else 20)
+    assert session["player2_snapshot"]["points"] == (0 if zero_player == "opponent" else 20)
+    assert not duel.ACTIVE_DUELS
+
+
 @pytest.mark.asyncio
 async def test_restart_recovers_committed_start_and_terminal_without_reroll(
     temp_database, fake_context, monkeypatch,
@@ -140,17 +174,22 @@ async def test_restart_recovers_overdue_turn_and_isolates_chats(temp_database, f
     assert get_duel_session(CHAT - 1, two["id"])["phase"] == "attack"
 
 
+@pytest.mark.parametrize("loser_points", (20, 0))
 @pytest.mark.asyncio
 async def test_production_telegram_rng_order_and_duplicate_is_rng_free(
-    temp_database, fake_context, monkeypatch,
+    temp_database, fake_context, monkeypatch, loser_points,
 ):
     attacker, defender = register()
+    with database.get_db() as conn:
+        conn.execute("UPDATE duel_users SET points = ? WHERE chat_id = ? AND user_id = ?",
+                     (loser_points, CHAT, defender.id))
     database.add_duel_inventory_item(CHAT, defender.id, "vevangel_wing")
     database.add_duel_inventory_item(CHAT, defender.id, "formangnome_whisker")
 
     class Rng:
         def __init__(self):
-            self.values = iter((0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0))
+            self.values = iter((0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0)
+                               if loser_points else (0.5, 0.5, 0.0, 1.0, 1.0, 0.0))
             self.trace = []
 
         def random(self):
@@ -172,7 +211,7 @@ async def test_production_telegram_rng_order_and_duplicate_is_rng_free(
     assert rng.trace == ["choice"]
     block, _ = callback(f"duel_block_body_{duel_id}_2", defender)
     await duel.persistent_duel_action_callback(block, fake_context)
-    assert rng.trace == [
+    expected = [
         "choice",                    # initial attacker
         "random", "random",         # suicide, miss
         "choice", "choice",         # hit phrase, attack phrase
@@ -181,8 +220,13 @@ async def test_production_telegram_rng_order_and_duplicate_is_rng_free(
         "random", "random",         # berserk, post-message
         "random", "choice",         # pocket after final publication
     ]
+    if loser_points == 0:
+        expected.pop(5)  # Guaranteed steal skips only the dick decision roll.
+    assert rng.trace == expected
     final = get_duel_session(CHAT, duel_id)
     assert final["pocket_done_at"] is not None
+    assert final["result"]["is_dick_stolen"] is True
+    assert final["result"]["loser_points"] == max(0, loser_points - 5)
     assert final["result"]["stolen_item"] is not None
     trace = rng.trace[:]
     await duel.persistent_duel_action_callback(block, fake_context)

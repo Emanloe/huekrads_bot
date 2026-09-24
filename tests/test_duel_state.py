@@ -26,18 +26,18 @@ def test_duel_participant_ineligibility_reports_no_dick():
     }) == "no_dick"
 
 
-def test_duel_participant_ineligibility_reports_no_points_at_zero():
+def test_duel_participant_with_zero_points_is_eligible():
     assert _get_duel_participant_ineligibility({
         "dick_stolen_today": False,
         "points": 0,
-    }) == "no_points"
+    }) is None
 
 
-def test_duel_participant_ineligibility_reports_no_points_below_zero():
+def test_duel_participant_with_legacy_negative_points_is_not_blocked_by_points():
     assert _get_duel_participant_ineligibility({
         "dick_stolen_today": False,
         "points": -1,
-    }) == "no_points"
+    }) is None
 
 
 def test_duel_participant_ineligibility_prioritizes_no_dick():
@@ -139,6 +139,23 @@ def test_build_duel_result_plan_with_steal():
         "dick_stolen_today": 1,
         "last_stolen_by": "Prepared Winner",
     }
+
+
+def test_build_duel_result_plan_never_writes_negative_points():
+    for loser_points in (0, 1, 4):
+        plan = _build_duel_result_plan(
+            {"user_id": 1, "points": 0},
+            {"user_id": 2, "points": loser_points},
+            loser_points == 0, "Winner", 100,
+        )
+        assert plan["winner"]["points"] == 10
+        assert plan["loser"]["points"] == 0
+    legacy = _build_duel_result_plan(
+        {"user_id": 1, "points": -20},
+        {"user_id": 2, "points": -1},
+        False, "Winner", 100,
+    )
+    assert legacy["winner"]["points"] == legacy["loser"]["points"] == 0
 
 
 def test_build_duel_result_plan_does_not_mutate_snapshots():

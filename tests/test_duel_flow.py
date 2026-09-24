@@ -579,9 +579,7 @@ async def test_attack_timeout_moves_to_block_and_stale_timer_is_ignored(
     ("blocked_user", "field", "value"),
     [
         ("initiator", "dick_stolen_today", 1),
-        ("initiator", "points", 0),
         ("opponent", "dick_stolen_today", 1),
-        ("opponent", "points", 0),
     ],
 )
 @pytest.mark.asyncio
@@ -1349,6 +1347,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     fake_context,
 ):
     from handlers import duel, duel_service
+    from text_resources import get_text
 
     initiator_tg = make_user(701, "initiator")
     update = SimpleNamespace(
@@ -1365,7 +1364,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     monkeypatch.setattr(
         duel,
         "get_or_create_duel_user",
-        Mock(return_value=admission_user(initiator_tg.id, initiator_tg.username)),
+        Mock(return_value=admission_user(initiator_tg.id, initiator_tg.username, points=0)),
     )
     monkeypatch.setattr(duel, "_extract_username", lambda *_args: None)
     monkeypatch.setattr(
@@ -1376,12 +1375,12 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     monkeypatch.setattr(
         duel_service,
         "get_duel_user_by_username",
-        lambda username, _chat_id: admission_user(702, username),
+        lambda username, _chat_id: admission_user(702, username, points=0),
     )
     monkeypatch.setattr(
         duel_service,
         "get_duel_user_by_id",
-        lambda _chat_id, _user_id: admission_user(initiator_tg.id, initiator_tg.username),
+        lambda _chat_id, _user_id: admission_user(initiator_tg.id, initiator_tg.username, points=0),
     )
 
     await duel.duel_command(update, fake_context)
@@ -1401,7 +1400,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
     sent.assert_awaited_once_with(
         update,
         fake_context,
-        "❌ В чате нет доступных соперников для дуэли (все без очков или без хуев).",
+        get_text("duel.selection.no_opponents"),
     )
 
 

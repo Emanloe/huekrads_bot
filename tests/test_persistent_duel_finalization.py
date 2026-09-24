@@ -229,6 +229,70 @@ def test_dick_and_exact_collectible_steal_with_one_monthly_increment(
     assert database.get_monthly_chat_stats(CHAT, database.moscow_month_key())["duels"] == 1
 
 
+def test_zero_point_snapshot_guarantees_steal_without_decision_rng(
+    temp_database, monkeypatch,
+):
+    from unittest.mock import Mock
+
+    register()
+    item = database.add_duel_inventory_item(CHAT, 2, "po_lochki")
+    session = terminal_session(winner_points=0, loser_points=0, loser_daily_wins=4)
+    with sqlite3.connect(temp_database) as conn:
+        conn.execute("UPDATE duel_users SET points = 35, daily_wins = 99 "
+                     "WHERE chat_id = ? AND user_id = 2", (CHAT,))
+    chance = Mock(side_effect=AssertionError("guaranteed steal computed chance"))
+    monkeypatch.setattr(duel_service, "get_dick_steal_chance", chance)
+    trace = rng(monkeypatch, [0.0, 0.0, 0.0])
+
+    finalized = duel_service.finalize_persistent_duel(CHAT, session["id"])
+
+    assert finalized.reason == "finalized"
+    result = finalized.result
+    assert result["is_dick_stolen"] is True
+    assert (result["winner_points"], result["loser_points"]) == (10, 0)
+    assert result["stolen_item"]["instance_id"] == item["id"]
+    assert result["dwarf_fact"] == duel_service.DWARFS_FACTS[0]
+    assert result["berserk"] is not None
+    assert result["berserk"]["applied"] is False
+    assert result["post_message"] is not None
+    assert [call[0] for call in trace.trace] == [
+        "random", "choice", "choice", "choice", "random",
+        "choice", "choice", "choice", "random", "choice",
+    ]
+    assert trace.trace[1][1][0] == "inventory"
+    assert trace.trace[3][1] == ("catalog", tuple(duel_service.DWARFS_FACTS))
+    assert trace.trace[5][1][0] == "participants"
+    assert trace.trace[-1][1] == ("catalog", tuple(duel_service.DUEL_POST_MESSAGES))
+    chance.assert_not_called()
+    assert row(temp_database, CHAT, 1)[:4] == (10, 1, 0, 1)
+    assert row(temp_database, CHAT, 2) == (0, 0, 1, 0, 1, 1, "g1")
+    assert inventory(temp_database) == [(item["id"] + 1, 1, "po_lochki")]
+    month = database.moscow_month_key()
+    assert database.get_monthly_chat_stats(CHAT, month) == {
+        "dicks_stolen": 1, "duels": 1, "bosses_killed": 0,
+    }
+    before = list(trace.trace)
+    replay = duel_service.finalize_persistent_duel(CHAT, session["id"])
+    assert replay.reason == "already_finished" and replay.result == result
+    assert trace.trace == before
+    chance.assert_not_called()
+    assert database.get_monthly_chat_stats(CHAT, month)["dicks_stolen"] == 1
+
+
+def test_persistent_result_floor_covers_one_point_loser_and_legacy_negative_winner(
+    temp_database, monkeypatch,
+):
+    register()
+    session = terminal_session(winner_points=-20, loser_points=1)
+    trace = rng(monkeypatch, [0.99, 0.99, 0.99])
+    result = duel_service.finalize_persistent_duel(CHAT, session["id"])
+    assert result.reason == "finalized"
+    assert result.result["is_dick_stolen"] is False
+    assert (result.result["winner_points"], result.result["loser_points"]) == (0, 0)
+    assert row(temp_database, CHAT, 1)[0] == row(temp_database, CHAT, 2)[0] == 0
+    assert len([call for call in trace.trace if call[0] == "random"]) == 3
+
+
 @pytest.mark.parametrize("already_dickless,applied", [(False, True), (True, False)])
 def test_berserk_applies_once_with_current_fallback(
     temp_database, monkeypatch, already_dickless, applied,
@@ -404,13 +468,14 @@ def test_concurrent_finalize_performs_one_rng_and_one_commit(temp_database, monk
     assert database.get_monthly_chat_stats(CHAT, database.moscow_month_key())["duels"] == 1
 
 
+@pytest.mark.parametrize("loser_points", (20, 0))
 def test_concurrent_finalize_with_optional_effects_still_applies_once(
-    temp_database, monkeypatch,
+    temp_database, monkeypatch, loser_points,
 ):
     register()
     item = database.add_duel_inventory_item(CHAT, 2, "po_lochki")
-    session = terminal_session()
-    trace = rng(monkeypatch, [0.0, 0.0, 0.0, 0.99])
+    session = terminal_session(loser_points=loser_points)
+    trace = rng(monkeypatch, [0.0, 0.0, 0.0, 0.99] if loser_points else [0.0, 0.0, 0.99])
     barrier = Barrier(2)
 
     def finish():
@@ -421,7 +486,7 @@ def test_concurrent_finalize_with_optional_effects_still_applies_once(
         results = list(pool.map(lambda _: finish(), range(2)))
     assert {result.reason for result in results} == {"finalized", "already_finished"}
     assert results[0].result == results[1].result
-    assert len([call for call in trace.trace if call[0] == "random"]) == 4
+    assert len([call for call in trace.trace if call[0] == "random"]) == (4 if loser_points else 3)
     assert len([call for call in trace.trace if call[0] == "choice" and
                 call[1][0] == "inventory"]) == 1
     assert len(inventory(temp_database)) == 1
@@ -432,6 +497,9 @@ def test_concurrent_finalize_with_optional_effects_still_applies_once(
     assert database.get_monthly_chat_stats(CHAT, database.moscow_month_key()) == {
         "dicks_stolen": 1, "duels": 1, "bosses_killed": 0,
     }
+    before = list(trace.trace)
+    assert duel_service.finalize_persistent_duel(CHAT, session["id"]).reason == "already_finished"
+    assert trace.trace == before
 
 
 def test_corrupt_checkpoint_rejected_before_rng(temp_database, monkeypatch):
@@ -461,22 +529,28 @@ def test_same_user_ids_in_other_chat_untouched(temp_database, monkeypatch):
     assert database.get_monthly_chat_stats(OTHER_CHAT, database.moscow_month_key())["duels"] == 0
 
 
+@pytest.mark.parametrize("loser_points", (20, 0))
 @pytest.mark.asyncio
 async def test_persistent_finish_rng_trace_matches_telegram_prefix(
-    temp_database, monkeypatch, fake_context,
+    temp_database, monkeypatch, fake_context, loser_points,
 ):
     register()
-    session = terminal_session()
-    persistent_rng = rng(monkeypatch, [0.0, 0.99, 0.99, 0.0])
+    session = terminal_session(loser_points=loser_points)
+    persistent_rng = rng(monkeypatch, [0.0, 0.99, 0.99, 0.0]
+                         if loser_points else [0.99, 0.99, 0.0])
     persistent = duel_service.finalize_persistent_duel(CHAT, session["id"])
     persistent_trace = list(persistent_rng.trace)
 
     other = OTHER_CHAT
     register(other)
+    with sqlite3.connect(temp_database) as conn:
+        conn.execute("UPDATE duel_users SET points = ? WHERE chat_id = ? AND user_id = 2",
+                     (loser_points, other))
     winner = database.get_duel_user_by_id(other, 1)
     loser = database.get_duel_user_by_id(other, 2)
     duel.ACTIVE_DUELS[other] = {"round": 2}
-    telegram_rng = TraceRng([0.0, 0.99, 0.99, 0.0, 0.99])
+    telegram_rng = TraceRng([0.0, 0.99, 0.99, 0.0, 0.99]
+                            if loser_points else [0.99, 0.99, 0.0, 0.99])
     monkeypatch.setattr(duel, "random", telegram_rng)
     # duel_text helpers use their module-level RNG in the unchanged Telegram path.
     from handlers import duel_text
