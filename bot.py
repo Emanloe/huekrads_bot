@@ -95,6 +95,12 @@ from handlers.duel_name import name_command
 from handlers.monthly_summary import monthly_summary_job, summary_command
 from handlers.elite_ball import ball_command, elite_ball_callback, elite_ball_question, ELITE_BALL_CALLBACK_DATA
 from handlers.dig import dig_command
+from handlers.huecrab import (
+    HUECRAB_CHECK_MINUTES,
+    huecrab_autoloot_job,
+    huecrab_event_job,
+    huecrab_tame_callback,
+)
 
 
 logging.basicConfig(
@@ -241,6 +247,19 @@ async def main():
                 first=120,
                 name="duel_item_event_job",
             )
+
+        application.job_queue.run_repeating(
+            huecrab_event_job,
+            interval=HUECRAB_CHECK_MINUTES * 60,
+            first=180,
+            name="huecrab_event_job",
+        )
+        application.job_queue.run_repeating(
+            huecrab_autoloot_job,
+            interval=5,
+            first=5,
+            name="huecrab_autoloot_job",
+        )
 
         # Старое событие «прошлая пизда»
         schedule_past_pizda_job(
@@ -389,6 +408,13 @@ async def main():
         CallbackQueryHandler(
             duel_item_event_callback,
             pattern=r"^duel_item_claim_\d+$",
+        )
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(
+            huecrab_tame_callback,
+            pattern=r"^huecrab_tame_\d+$",
         )
     )
 

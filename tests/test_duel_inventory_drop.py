@@ -231,7 +231,7 @@ async def test_finish_duel_sends_pickup_after_result_without_extra_rng(
     assert pickup["text"] == "<b>Карман порвался, выпало:</b> Крыло Вевангела"
     assert pickup["reply_markup"].inline_keyboard[0][0].text == "Подобрать"
     assert pickup["reply_markup"].inline_keyboard[0][0].callback_data == "duel_item_claim_17"
-    bind_message.assert_called_once_with(17, 808)
+    bind_message.assert_called_once_with(17, 808, pickup["text"])
 
 
 def test_active_event_keeps_selected_item_and_existing_event(temp_database):
@@ -354,8 +354,8 @@ async def test_message_binding_exception_after_commit_still_restores_item(
     instance = db.add_duel_inventory_item(CHAT_ID, 2, "vevangel_wing")
     drop = db.create_duel_item_event_from_inventory(CHAT_ID, 2, instance["id"])
 
-    def bind_then_fail(event_id, message_id):
-        assert db.set_duel_item_event_message(event_id, message_id)
+    def bind_then_fail(event_id, message_id, text):
+        assert db.set_duel_item_event_message(event_id, message_id, text)
         raise RuntimeError("late acknowledgement failure")
 
     monkeypatch.setattr(duel, "set_duel_item_event_message", bind_then_fail)

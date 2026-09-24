@@ -1218,6 +1218,7 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     monkeypatch.setattr(duel, "get_loss_title", lambda _count: "💀 Лузер")
     monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: "🔪 Вор")
     monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: [])
+    monkeypatch.setattr(duel, "has_huecrab", lambda *_args: False)
 
     await duel.duel_stats_command(update, fake_context)
 

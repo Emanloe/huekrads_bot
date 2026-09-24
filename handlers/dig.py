@@ -74,19 +74,20 @@ async def _publish_dig_find(context: ContextTypes.DEFAULT_TYPE, dig: dict) -> No
     )]])
     message = None
     try:
+        text = get_text(
+            "dig.found",
+            user=format_user_title(dig["user"]),
+            item=escape(get_duel_item_name(dig["item_id"])),
+            remaining=dig["remaining"],
+            points=dig["points"],
+        )
         message = await context.bot.send_message(
             chat_id=dig["chat_id"],
-            text=get_text(
-                "dig.found",
-                user=format_user_title(dig["user"]),
-                item=escape(get_duel_item_name(dig["item_id"])),
-                remaining=dig["remaining"],
-                points=dig["points"],
-            ),
+            text=text,
             parse_mode="HTML",
             reply_markup=keyboard,
         )
-        if not set_duel_item_event_message(dig["event_id"], message.message_id):
+        if not set_duel_item_event_message(dig["event_id"], message.message_id, text):
             raise RuntimeError("Could not bind dig item to pickup message")
     except Exception:
         logging.exception("Не удалось опубликовать находку /dig в чате %s", dig["chat_id"])
