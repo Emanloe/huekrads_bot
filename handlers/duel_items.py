@@ -11,7 +11,7 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config import DUEL_ITEM_EVENT_CHANCE
+from config import DUEL_ITEM_EVENT_CHANCE, HUEGRYZ_CHANCE
 from database import (
     claim_duel_item_event,
     create_duel_item_event,
@@ -201,6 +201,7 @@ async def duel_item_event_callback(
         chat_id,
         query.from_user.id,
         lambda: random.choice(DUEL_ITEMS)["id"],
+        lambda: random.random() < HUEGRYZ_CHANCE,
     )
     if status == "not_registered":
         await query.answer(get_text("duel.item_event.not_registered"), show_alert=True)
@@ -223,6 +224,10 @@ async def duel_item_event_callback(
         user=title,
         item=item_name,
     )
+    if instance["huegryz_outcome"] is not None:
+        text += "\n\n" + get_text(
+            f"duel.item_event.huegryz.{instance['huegryz_outcome']}"
+        )
 
     try:
         await context.bot.edit_message_text(

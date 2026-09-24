@@ -29,6 +29,7 @@ def test_duel_item_catalog_has_valid_extensible_contract():
         DUEL_ITEM_EVENT_CHANCE,
         DUEL_ITEM_EVENT_CHECK_MINUTES,
         DUEL_ITEM_STEAL_CHANCE,
+        HUEGRYZ_CHANCE,
     )
     from handlers.duel_items import (
         BASE_DUEL_ITEM_IDS,
@@ -85,6 +86,7 @@ def test_duel_item_catalog_has_valid_extensible_contract():
     assert DUEL_ITEM_STEAL_CHANCE == 0.05
     assert BOSS_ITEM_DROP_CHANCE == 0.50
     assert DUEL_ITEM_EVENT_CHANCE == 0.10
+    assert HUEGRYZ_CHANCE == 0.03
     assert DUEL_ITEM_EVENT_CHECK_MINUTES == 60
 
 
@@ -428,6 +430,7 @@ async def test_item_event_callback_rejects_invalid_then_claims_once_and_edits_sa
     db.set_duel_item_event_message(event_id, 777)
     choice = Mock(return_value=duel_items.DUEL_ITEMS[0])
     monkeypatch.setattr(duel_items.random, "choice", choice)
+    monkeypatch.setattr(duel_items.random, "random", Mock(return_value=1.0))
 
     outsider = make_user(10, "outsider")
     update, query = item_event_update(chat_id, outsider, event_id)
