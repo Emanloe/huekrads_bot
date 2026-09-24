@@ -10,7 +10,8 @@ import pytest
 
 import database
 from duel_outbox_repository import (
-    claim_duel_publication, create_duel_publication_in_transaction, get_duel_publication,
+    claim_duel_publication, create_duel_publication_in_transaction,
+    get_delivered_pocket_drop_for_event, get_duel_publication,
     list_retryable_duel_publications, list_retryable_duel_publication_chat_ids,
     release_duel_publication,
 )
@@ -19,7 +20,7 @@ from duel_session_repository import (
     list_ready_pocket_duel_sessions, list_terminal_pending_duel_sessions,
 )
 from handlers import duel_items, duel_service
-from handlers.persistent_duel_publisher import publish_persistent_duel_outbox
+from handlers.persistent_duel_publisher import publish_persistent_duel_outbox, recover_persistent_duel_chat
 
 
 CHAT = -9501
@@ -429,6 +430,7 @@ def test_pocket_miss_spends_one_roll_and_checkpoints(temp_database, monkeypatch)
     assert trace.trace == [("random", 0.99)]
     assert inventory(temp_database) == [(item["id"], 2, item["item_id"])]
     assert event(temp_database) == []
+    assert all(kind != "pocket_drop" for _, kind, _, _ in outbox(temp_database))
     assert duel_service.process_persistent_duel_pocket_drop(CHAT, finished.session["id"]).reason == "already_done"
     assert trace.trace == [("random", 0.99)]
 
@@ -547,6 +549,12 @@ async def test_drop_outbox_recovers_after_reopen_and_uses_shared_pickup_callback
     assert sent.reason == "delivered"
     huegryz_roll.assert_not_called()
     assert event(temp_database)[0][2] == 101
+    assert get_delivered_pocket_drop_for_event(CHAT, dropped.drop["event_id"])["id"] == publication_id
+    assert get_delivered_pocket_drop_for_event(OTHER_CHAT, dropped.drop["event_id"]) is None
+    sent_text = fake_context.bot.send_message.call_args.kwargs["text"]
+    assert "Карман порвался" in sent_text
+    assert "player2" in sent_text
+    assert duel_items.get_duel_item_name(item["item_id"]) in sent_text
     markup = fake_context.bot.send_message.call_args.kwargs["reply_markup"]
     assert markup.inline_keyboard[0][0].callback_data == f"duel_item_claim_{dropped.drop['event_id']}"
     assert markup.inline_keyboard[0][0].text == "Подобрать"
@@ -558,10 +566,22 @@ async def test_drop_outbox_recovers_after_reopen_and_uses_shared_pickup_callback
         fake_context,
     )
     huegryz_roll.assert_called_once_with()
+    claimed_text = fake_context.bot.edit_message_text.call_args.kwargs["text"]
+    assert "Карман порвался" in claimed_text
+    assert "player2" in claimed_text
+    assert "player3" in claimed_text
+    assert duel_items.get_duel_item_name(item["item_id"]) in claimed_text
     assert pocket_rng.trace == [("random", 0.0), ("choice", (item["item_id"],))]
     assert event(temp_database)[0][3] == 1
     assert inventory(temp_database)[0][1] == 3
     assert inventory(temp_database)[0][2] == item["item_id"]
+    await duel_items.duel_item_event_callback(
+        item_event_update(CHAT, make_user(3, "player3"), dropped.drop["event_id"])[0],
+        fake_context,
+    )
+    assert fake_context.bot.send_message.await_count == 1
+    assert fake_context.bot.edit_message_text.await_count == 1
+    huegryz_roll.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -594,6 +614,42 @@ async def test_drop_send_failure_preserves_event_and_retry_intent(
     )
     assert retried.reason == "delivered"
     huegryz_roll.assert_not_called()
+    assert "Карман порвался" in fake_context.bot.send_message.call_args.kwargs["text"]
+    assert "player2" in fake_context.bot.send_message.call_args.kwargs["text"]
+    assert (await publish_persistent_duel_outbox(
+        CHAT, dropped.publication["id"], fake_context.bot,
+    )).reason == "not_retryable"
+    assert fake_context.bot.send_message.await_count == 2  # failed send, then one success
+
+
+@pytest.mark.asyncio
+async def test_recovery_publishes_one_pocket_announcement_and_keeps_rng_trace(
+    temp_database, monkeypatch, fake_context,
+):
+    finished, final_pub, _ = finish_and_get_final(temp_database, monkeypatch)
+    item = database.add_duel_inventory_item(CHAT, 2, "po_lochki")
+    mark_final_published(CHAT, final_pub)
+    pocket_rng = install_rng(monkeypatch, [0.0])
+    huegryz_roll = Mock(side_effect=AssertionError("recovery rolled Huegryz"))
+    monkeypatch.setattr(duel_items.random, "random", huegryz_roll)
+
+    await recover_persistent_duel_chat(CHAT, fake_context.bot, now_ms=NOW + 10)
+
+    assert pocket_rng.trace == [("random", 0.0), ("choice", (item["item_id"],))]
+    huegryz_roll.assert_not_called()
+    assert fake_context.bot.send_message.await_count == 1
+    announcement = fake_context.bot.send_message.call_args.kwargs["text"]
+    assert "Карман порвался" in announcement
+    assert "player2" in announcement
+    assert duel_items.get_duel_item_name(item["item_id"]) in announcement
+    assert fake_context.bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == (
+        f"duel_item_claim_{event(temp_database)[0][0]}"
+    )
+    assert get_duel_session(CHAT, finished.session["id"])["pocket_done_at"] is not None
+
+    await recover_persistent_duel_chat(CHAT, fake_context.bot, now_ms=NOW + 20)
+    assert fake_context.bot.send_message.await_count == 1
+    assert pocket_rng.trace == [("random", 0.0), ("choice", (item["item_id"],))]
 
 
 def test_explicit_compensation_returns_same_instance_without_rng(temp_database, monkeypatch):
@@ -610,9 +666,46 @@ def test_explicit_compensation_returns_same_instance_without_rng(temp_database, 
     assert inventory(temp_database) == [(item["id"], 2, item["item_id"])]
     assert event(temp_database) == []
     assert get_duel_publication(CHAT, dropped.publication["id"])["status"] == "cancelled"
+    assert get_delivered_pocket_drop_for_event(CHAT, dropped.drop["event_id"]) is None
     assert duel_service.compensate_persistent_duel_drop(CHAT, finished.session["id"]).reason == "already_compensated"
     assert trace.trace == before
     huegryz_roll.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pocket_send_ack_failure_reuses_checkpointed_message(
+    temp_database, monkeypatch, fake_context,
+):
+    from handlers import persistent_duel_publisher as publisher
+
+    finished, final_pub, _ = finish_and_get_final(temp_database, monkeypatch)
+    database.add_duel_inventory_item(CHAT, 2, "po_lochki")
+    mark_final_published(CHAT, final_pub)
+    pocket_rng = install_rng(monkeypatch, [0.0])
+    dropped = duel_service.process_persistent_duel_pocket_drop(CHAT, finished.session["id"])
+    before = list(pocket_rng.trace)
+    original_ack = publisher.acknowledge_persistent_duel_publication
+    monkeypatch.setattr(publisher, "acknowledge_persistent_duel_publication",
+                        Mock(side_effect=RuntimeError("temporary SQLite outage")))
+
+    first = await publish_persistent_duel_outbox(
+        CHAT, dropped.publication["id"], fake_context.bot, claim_time_ms=NOW + 5,
+    )
+    assert first.reason == "ack_failed"
+    assert fake_context.bot.send_message.await_count == 1
+    assert "Карман порвался" in fake_context.bot.send_message.call_args.kwargs["text"]
+    assert get_duel_publication(CHAT, dropped.publication["id"])["message_id"] == 101
+    assert event(temp_database)[0][2] is None
+    monkeypatch.setattr(publisher, "acknowledge_persistent_duel_publication", original_ack)
+
+    retried = await publish_persistent_duel_outbox(
+        CHAT, dropped.publication["id"], fake_context.bot,
+        claim_time_ms=NOW + 60_006, published_at_ms=NOW + 60_007,
+    )
+    assert retried.reason == "delivered"
+    assert fake_context.bot.send_message.await_count == 1
+    assert event(temp_database)[0][2] == 101
+    assert pocket_rng.trace == before
 
 
 def test_compensation_rejects_in_flight_or_claimed_event(temp_database, monkeypatch):

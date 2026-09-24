@@ -12,6 +12,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import DUEL_ITEM_EVENT_CHANCE, HUEGRYZ_CHANCE
+from duel_outbox_repository import get_delivered_pocket_drop_for_event
+from duel_session_repository import get_duel_session
 from database import (
     claim_duel_item_event,
     create_duel_item_event,
@@ -126,6 +128,18 @@ def get_droppable_duel_inventory(instances: list[dict]) -> list[dict]:
 format_duel_inventory = format_duel_display_inventory
 
 
+def format_pocket_drop_announcement(publication: dict, session: dict) -> str:
+    """Keep the stored drop wording and name its snapshot owner."""
+    owner_id = publication["payload"]["drop"]["user_id"]
+    if owner_id == session["player1_user_id"]:
+        owner = session["player1_snapshot"]
+    elif owner_id == session["player2_user_id"]:
+        owner = session["player2_snapshot"]
+    else:
+        raise ValueError("Pocket drop owner is not a duel participant")
+    return f"<b>{format_user_title(owner)}</b>\n{publication['payload']['text']}"
+
+
 async def _spawn_duel_item_event(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -228,6 +242,13 @@ async def duel_item_event_callback(
         text += "\n\n" + get_text(
             f"duel.item_event.huegryz.{instance['huegryz_outcome']}"
         )
+    pocket_publication = get_delivered_pocket_drop_for_event(chat_id, event_id)
+    if pocket_publication is not None:
+        pocket_session = get_duel_session(chat_id, pocket_publication["duel_id"])
+        if pocket_session is not None:
+            text = format_pocket_drop_announcement(
+                pocket_publication, pocket_session,
+            ) + "\n\n" + text
 
     try:
         await context.bot.edit_message_text(

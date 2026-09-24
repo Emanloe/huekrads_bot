@@ -6,14 +6,17 @@ from dataclasses import dataclass
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import MAX_DAILY_POINTS, WINNER_100_PTS_GIF
-from duel_outbox_repository import claim_duel_publication, release_duel_publication
+from duel_outbox_repository import (
+    checkpoint_duel_publication_message, claim_duel_publication,
+    release_duel_publication,
+)
 from duel_outbox_repository import list_retryable_duel_publications, list_retryable_duel_publication_chat_ids
 from duel_session_repository import (
     get_duel_session, list_due_duel_sessions, list_ready_pocket_duel_sessions,
     list_recoverable_duel_chat_ids, list_terminal_pending_duel_sessions,
     utc_unix_milliseconds,
 )
-from handlers.duel_items import DUEL_ITEM_EVENT_CALLBACK_PREFIX
+from handlers.duel_items import DUEL_ITEM_EVENT_CALLBACK_PREFIX, format_pocket_drop_announcement
 from handlers.duel_messaging import AUTO_DELETE_DELAY, delete_messages_job
 from handlers.duel_service import (
     acknowledge_persistent_duel_publication, finalize_persistent_duel,
@@ -88,21 +91,35 @@ async def publish_persistent_duel_outbox(
             )
             message_id = message.message_id
         elif kind == "pocket_drop":
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(
-                get_text("duel.item_event.button"),
-                callback_data=f"{DUEL_ITEM_EVENT_CALLBACK_PREFIX}{payload['drop']['event_id']}",
-            )]])
-            message = await bot.send_message(
-                chat_id=chat_id, text=payload["text"],
-                parse_mode="HTML", reply_markup=keyboard,
-            )
-            message_id = message.message_id
+            if publication["message_id"] is not None:
+                message_id = publication["message_id"]
+            else:
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(
+                    get_text("duel.item_event.button"),
+                    callback_data=f"{DUEL_ITEM_EVENT_CALLBACK_PREFIX}{payload['drop']['event_id']}",
+                )]])
+                message = await bot.send_message(
+                    chat_id=chat_id, text=format_pocket_drop_announcement(publication, session),
+                    parse_mode="HTML", reply_markup=keyboard,
+                )
+                message_id = message.message_id
         else:
             raise RuntimeError("Unsupported persistent duel publication kind")
     except Exception:
         logging.exception("Persistent duel publication send failed in chat %s", chat_id)
         release_duel_publication(chat_id, publication_id, publication["attempt_count"])
         return PersistentDuelSendResult("send_failed", publication)
+
+    if kind == "pocket_drop" and publication["message_id"] is None:
+        try:
+            if not checkpoint_duel_publication_message(
+                chat_id, publication_id, publication["attempt_count"], message_id,
+            ):
+                raise RuntimeError("Pocket message checkpoint was not accepted")
+        except Exception:
+            # Telegram may already have accepted the message; keep the lease.
+            logging.exception("Could not checkpoint pocket drop message in chat %s", chat_id)
+            return PersistentDuelSendResult("checkpoint_failed", publication)
 
     timestamp = utc_unix_milliseconds() if published_at_ms is None else published_at_ms
     try:

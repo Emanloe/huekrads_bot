@@ -53,6 +53,22 @@ def get_duel_publication(chat_id: int, publication_id: int) -> dict | None:
         return get_duel_publication_in_transaction(conn.cursor(), chat_id, publication_id)
 
 
+def get_delivered_pocket_drop_for_event(chat_id: int, event_id: int) -> dict | None:
+    """Find the durable announcement tied to one published pickup button."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM duel_outbox
+            WHERE chat_id = ? AND kind = 'pocket_drop' AND status = 'delivered'
+              AND json_extract(payload_json, '$.drop.event_id') = ?
+            LIMIT 1
+            """,
+            (chat_id, event_id),
+        )
+        return _publication_from_row(cursor.fetchone(), cursor.description)
+
+
 def get_duel_publication_by_kind_in_transaction(
     cursor: sqlite3.Cursor, chat_id: int, duel_id: int, kind: str,
 ) -> dict | None:
@@ -121,6 +137,24 @@ def claim_duel_publication(
         if cursor.rowcount != 1:
             return None
         return get_duel_publication_in_transaction(cursor, chat_id, publication_id)
+
+
+def checkpoint_duel_publication_message(
+    chat_id: int, publication_id: int, attempt_count: int, message_id: int,
+) -> bool:
+    """Remember an accepted Telegram send before the publication acknowledgement."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            UPDATE duel_outbox SET message_id = ?
+            WHERE chat_id = ? AND id = ? AND kind = 'pocket_drop'
+              AND status = 'leased' AND attempt_count = ? AND message_id IS NULL
+            """,
+            (message_id, chat_id, publication_id, attempt_count),
+        )
+        return cursor.rowcount == 1
 
 
 def release_duel_publication(
