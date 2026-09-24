@@ -1,5 +1,6 @@
-"""Read-only game API behind a chat-scoped Mini App bearer session."""
+"""Chat-scoped Mini App API for reads and persistent duel challenges."""
 
+import logging
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -8,12 +9,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PositiveInt
+from starlette.concurrency import run_in_threadpool
 
 from config import BOT_TOKEN
 from database import format_user_title_plain
 from duel_session_repository import get_current_duel_session, utc_unix_milliseconds
-from handlers.duel_service import get_duel_profile, list_duel_opponents
+from handlers.duel_service import get_duel_profile, list_duel_opponents, start_persistent_duel
+from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
 
@@ -28,8 +31,25 @@ class SessionRequest(BaseModel):
     launch_token: str
 
 
+class StartDuelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opponent_user_id: PositiveInt
+
+
+_START_FAILURES = {
+    "active_duel": (409, "В этом чате уже идёт дуэль."),
+    "self_target": (409, "Нельзя вызвать себя на дуэль."),
+    "initiator_not_registered": (403, "Вы не зарегистрированы в этом чате."),
+    "opponent_not_registered": (404, "Соперник недоступен в этом чате."),
+    "initiator_no_dick": (403, "Сегодня ваш гном не может участвовать в дуэли."),
+    "opponent_no_dick": (403, "Сегодня соперник не может участвовать в дуэли."),
+}
+
+
 def create_miniapp_api(*, bot_token: str | None = None,
-                       allowed_origin: str | None = None) -> FastAPI:
+                       allowed_origin: str | None = None,
+                       telegram_bot=None, job_queue=None) -> FastAPI:
     """Create an API without owning a second bot or a second game engine."""
     token = BOT_TOKEN if bot_token is None else bot_token
     if not token:
@@ -103,6 +123,39 @@ def create_miniapp_api(*, bot_token: str | None = None,
             "opponents": [{"user_id": item.user_id, "username": item.username,
                            "title": item.title} for item in found.opponents],
         }
+
+    @app.post("/api/v1/duel/start", status_code=201)
+    async def start_duel(request: StartDuelRequest,
+                         session: MiniAppSession = Depends(require_session)):
+        # The transactional service owns admission, RNG, the chat slot and initial outbox.
+        try:
+            started = await run_in_threadpool(
+                start_persistent_duel, session.chat_id, session.user_id,
+                request.opponent_user_id,
+            )
+        except Exception:
+            logging.exception("Mini App persistent duel start failed in chat %s", session.chat_id)
+            raise HTTPException(status_code=500, detail={
+                "code": "start_failed", "message": "Не удалось начать дуэль. Обновите данные.",
+            }) from None
+        if not started.success:
+            status, message = _START_FAILURES.get(
+                started.reason, (409, "Соперник сейчас недоступен."),
+            )
+            raise HTTPException(status_code=status, detail={
+                "code": started.reason if started.reason in _START_FAILURES else "opponent_unavailable",
+                "message": message,
+            })
+        # State is committed before Telegram I/O. The ordinary outbox worker also retries
+        # this publication if the immediate wakeup fails.
+        if telegram_bot is not None:
+            try:
+                await recover_persistent_duel_chat(
+                    session.chat_id, telegram_bot, job_queue=job_queue,
+                )
+            except Exception:
+                logging.exception("Mini App duel publication failed in chat %s", session.chat_id)
+        return {"duel_id": started.session["id"]}
 
     @app.get("/api/v1/duel/active")
     def active(session: MiniAppSession = Depends(require_session)):

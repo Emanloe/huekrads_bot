@@ -4,6 +4,7 @@
   const ACTIVE_POLL_MS = 8000;
   const COUNTDOWN_TICK_MS = 1000;
   const REQUEST_TIMEOUT_MS = 12000;
+  const START_DUEL_PATH = "/api/v1/duel/start";
   const API_PATHS = {
     home: "/api/v1/me",
     opponents: "/api/v1/duel/opponents",
@@ -18,6 +19,7 @@
   let activeDuel = null;
   let countdownNode = null;
   let expiredDeadlineRefresh = null;
+  let challengeInFlight = false;
   const loading = { home: false, opponents: false, duel: false };
 
   const statusNode = document.getElementById("app-status");
@@ -80,6 +82,8 @@
         cache: "no-store",
         credentials: "same-origin",
       });
+    } catch {
+      throw new Error("Нет связи с сервером. Обновите данные перед повторной попыткой.");
     } finally {
       window.clearTimeout(timer);
     }
@@ -91,12 +95,15 @@
       throw new Error("Сервер вернул неожиданный ответ. Попробуйте обновить данные.");
     }
     if (!response.ok) {
+      const detail = data && typeof data.detail === "object" ? data.detail : null;
       const error = new Error(
         response.status === 401 ? "Сессия или ссылка истекла. Откройте /duel_app в чате ещё раз." :
+        typeof detail?.message === "string" ? detail.message :
         response.status === 404 ? "Гном не найден в этом чате." :
         "Не удалось получить данные. Попробуйте обновить экран."
       );
       error.status = response.status;
+      error.code = detail?.code;
       throw error;
     }
     return data;
@@ -142,7 +149,7 @@
     } else if (!Array.isArray(data.opponents) || data.opponents.length === 0) {
       content.append(notice("В этом чате сейчас нет доступных соперников."));
     } else {
-      content.append(element("p", "hint", "Список текущего чата. Вызов через Mini App появится позже."));
+      content.append(element("p", "hint", "Соперники из текущего чата. Ходы пока выполняются в Telegram."));
       const head = element("div", "opponent-head");
       head.append(element("span", null, "Гном"), element("span", null, "Действие"));
       const list = element("div", "opponent-list");
@@ -150,15 +157,41 @@
         const row = element("div", "opponent-row");
         const identity = element("div", "opponent-name", opponent.title || opponent.username || "Соперник");
         if (opponent.username) identity.append(element("span", "opponent-handle", `@${opponent.username}`));
-        const action = element("button", "readonly-button", "Вызвать · скоро");
+        const action = element("button", "small-button", "Вызвать");
         action.type = "button";
-        action.disabled = true;
+        action.disabled = challengeInFlight;
+        action.addEventListener("click", () => challengeOpponent(opponent.user_id));
         row.append(identity, action);
         list.append(row);
       }
       content.append(head, list);
     }
     body.replaceChildren(content);
+  }
+
+  async function challengeOpponent(opponentUserId) {
+    if (!sessionToken || challengeInFlight) return;
+    challengeInFlight = true;
+    for (const button of document.querySelectorAll(".opponent-list button")) button.disabled = true;
+    setStatus("Начинаем дуэль…");
+    try {
+      await apiRequest(START_DUEL_PATH, {
+        method: "POST", body: { opponent_user_id: opponentUserId },
+      });
+      if (await navigate("duel")) {
+        setStatus("Дуэль начата. Ходы выполняются в Telegram.");
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        showUnavailable(error.message);
+      } else {
+        await Promise.all([loadView("opponents", true), loadView("duel", true)]);
+        setStatus(error.message || "Не удалось начать дуэль. Обновите данные.", true);
+      }
+    } finally {
+      challengeInFlight = false;
+      for (const button of document.querySelectorAll(".opponent-list button")) button.disabled = false;
+    }
   }
 
   function renderDuel(data) {
@@ -243,9 +276,11 @@
       else if (view === "opponents") renderOpponents(data);
       else renderDuel(data);
       if (!silent) setStatus("Данные обновлены");
+      return true;
     } catch (error) {
       if (error.status === 401) showUnavailable(error.message);
       else setStatus(error.message || "Не удалось загрузить данные.", true);
+      return false;
     } finally {
       loading[view] = false;
     }
@@ -262,7 +297,7 @@
     for (const section of document.querySelectorAll(".screen")) {
       section.hidden = section.id !== `screen-${view}`;
     }
-    loadView(view);
+    return loadView(view);
   }
 
   for (const tab of document.querySelectorAll(".tab")) {

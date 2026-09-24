@@ -1,4 +1,4 @@
-"""Static Mini App delivery and read-only frontend boundaries."""
+"""Static Mini App delivery and limited challenge-write boundaries."""
 
 from pathlib import Path
 
@@ -64,7 +64,7 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
         assert (await client.post("/healthz")).status_code == 405
 
 
-def test_frontend_has_only_session_post_and_read_only_game_api():
+def test_frontend_has_only_session_and_challenge_posts():
     app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
     routes = {route.path: route.methods for route in app.routes if isinstance(route, APIRoute)}
     assert routes == {
@@ -72,6 +72,7 @@ def test_frontend_has_only_session_post_and_read_only_game_api():
         "/api/v1/me": {"GET"},
         "/api/v1/duel/opponents": {"GET"},
         "/api/v1/duel/active": {"GET"},
+        "/api/v1/duel/start": {"POST"},
         "/": {"GET"},
         "/app": {"GET"},
         "/healthz": {"GET"},
@@ -89,8 +90,12 @@ def test_frontend_has_only_session_post_and_read_only_game_api():
     assert "chat_id" not in js
     assert "innerHTML" not in js
     assert "eval(" not in js
+    assert 'action.addEventListener("click", () => challengeOpponent(opponent.user_id))' in js
+    assert 'body: { opponent_user_id: opponentUserId }' in js
+    assert 'await navigate("duel")' in js
+    assert 'challengeInFlight' in js
+    assert "action.disabled = challengeInFlight" in js
     assert "button.disabled = true" in js
-    assert "action.disabled = true" in js
-    for path in ("/api/v1/duel/start", "/api/v1/duel/attack", "/api/v1/duel/block",
+    for path in ("/api/v1/duel/attack", "/api/v1/duel/block",
                  "/api/v1/dig", "/api/v1/boss"):
         assert path not in js

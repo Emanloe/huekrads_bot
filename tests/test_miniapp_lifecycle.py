@@ -1,6 +1,8 @@
 """PTB polling and HTTP share one managed event loop and shut down cleanly."""
 
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import bot
 
@@ -52,3 +54,28 @@ async def test_managed_ptb_http_lifecycle_order(fail_http):
         "initialize", "recovery", "polling_start", "jobs_start", "http_serve",
         "polling_stop", "jobs_stop", "shutdown",
     ]
+
+
+@pytest.mark.asyncio
+async def test_http_wiring_passes_existing_ptb_bot_and_job_queue(monkeypatch):
+    telegram_bot = object()
+    job_queue = object()
+    application = SimpleNamespace(
+        bot=telegram_bot, job_queue=job_queue, post_init=None,
+        initialize=AsyncMock(), start=AsyncMock(), stop=AsyncMock(), shutdown=AsyncMock(),
+        updater=SimpleNamespace(start_polling=AsyncMock(), stop=AsyncMock()),
+    )
+    api = object()
+    create = Mock(return_value=api)
+    config = Mock(return_value=object())
+    server = Mock(return_value=SimpleNamespace(serve=AsyncMock()))
+    monkeypatch.setattr(bot, "create_miniapp_api", create)
+    monkeypatch.setattr(bot.uvicorn, "Config", config)
+    monkeypatch.setattr(bot.uvicorn, "Server", server)
+
+    await bot.run_ptb_and_http(application)
+
+    create.assert_called_once_with(telegram_bot=telegram_bot, job_queue=job_queue)
+    assert config.call_args.args[0] is api
+    assert config.call_args.kwargs["workers"] == 1
+    server.return_value.serve.assert_awaited_once()

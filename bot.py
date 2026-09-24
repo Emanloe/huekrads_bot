@@ -526,7 +526,8 @@ async def run_ptb_and_http(application: Application, http_server=None) -> None:
     """Keep PTB polling, its jobs, and the one ASGI server on one event loop."""
     if http_server is None:
         http_server = uvicorn.Server(uvicorn.Config(
-            create_miniapp_api(), host=os.getenv("MINIAPP_HTTP_HOST", "127.0.0.1"),
+            create_miniapp_api(telegram_bot=application.bot, job_queue=application.job_queue),
+            host=os.getenv("MINIAPP_HTTP_HOST", "127.0.0.1"),
             port=int(os.getenv("MINIAPP_HTTP_PORT", "8000")),
             workers=1, lifespan="off", access_log=False,
         ))
