@@ -181,6 +181,7 @@ function findClass(node, className) {
 }
 const ownProfile = {
   display_name: "<script>alert(1)</script>", dwarf_name: "<img src=x>",
+  gnome_variant: "gnome_07", gnome_image_url: "/media/gnome/gnome_07?v=test-version",
   points: 30, max_points: 100, wins: 140, losses: 123, daily_wins: 2,
   ineligibility: "no_dick", boss_wins: 3, dick_status: { text: "Без хуя" },
   titles: {}, inventory: [], pet: null,
@@ -190,7 +191,7 @@ const homeContent = nodes.get("home-content").children[0];
 const homeProfile = findClass(homeContent, "home-profile");
 assert.ok(homeProfile);
 assert.equal(homeProfile.children[0].tag, "img");
-assert.equal(homeProfile.children[0].src, "/media/gnome?v=test-version");
+assert.equal(homeProfile.children[0].src, ownProfile.gnome_image_url);
 assert.equal(homeProfile.children[0].width, 200);
 assert.equal(homeProfile.children[0].height, 200);
 assert.equal(homeProfile.children[1].children.length, 6);

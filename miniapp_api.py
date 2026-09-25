@@ -21,6 +21,10 @@ from config import BOT_TOKEN
 from database import (
     format_user_title, format_user_title_plain,
 )
+from gnome_avatars import (
+    DEFAULT_GNOME_VARIANT, GNOME_FILE_IDS, GNOME_VARIANTS,
+    get_or_assign_gnome_variant, gnome_image_url, gnome_image_version,
+)
 from duel_outbox_repository import (
     get_duel_prompt_for_turn, list_persisted_duel_round_resolutions,
 )
@@ -43,10 +47,8 @@ from text_resources import get_text
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "miniapp_static"
-_GNOME_FILE_ID = (
-    "AgACAgIAAxkBAAPaarZGZ0LcyUlK8_7as-niVWw-EbIAApYbaxt2IbBJ2k2XK8ElkUMBAAMCAAN5AAM9BA"
-)
-_GNOME_IMAGE_VERSION = hashlib.sha256(_GNOME_FILE_ID.encode()).hexdigest()
+_GNOME_FILE_ID = GNOME_FILE_IDS[DEFAULT_GNOME_VARIANT]
+_GNOME_IMAGE_VERSION = gnome_image_version(DEFAULT_GNOME_VARIANT)
 _GNOME_IMAGE_URL = f"/media/gnome?v={_GNOME_IMAGE_VERSION}"
 
 
@@ -246,8 +248,8 @@ def create_miniapp_api(*, bot_token: str | None = None,
         raise RuntimeError("BOT_TOKEN is required for Mini App initData validation")
     origin = os.getenv("MINIAPP_ORIGIN", "").strip() if allowed_origin is None else allowed_origin
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    gnome_image_bytes = None
-    gnome_image_lock = asyncio.Lock()
+    gnome_image_bytes: dict[str, bytes] = {}
+    gnome_image_locks = {variant: asyncio.Lock() for variant in GNOME_VARIANTS}
 
     @app.middleware("http")
     async def frontend_security_headers(request: Request, call_next):
@@ -293,7 +295,19 @@ def create_miniapp_api(*, bot_token: str | None = None,
         model = player_stats_read_model(session.chat_id, session.user_id)
         if model is None:
             raise HTTPException(status_code=404, detail="Player not found")
-        return public_player_stats(model)
+        variant = get_or_assign_gnome_variant(session.chat_id, session.user_id)
+        if variant is None:
+            raise HTTPException(status_code=404, detail="Player not found")
+        display_variant = variant
+        if display_variant not in GNOME_FILE_IDS:
+            logging.warning("Unknown persisted gnome variant for chat %s user %s",
+                            session.chat_id, session.user_id)
+            display_variant = DEFAULT_GNOME_VARIANT
+        return {
+            **public_player_stats(model),
+            "gnome_variant": variant,
+            "gnome_image_url": gnome_image_url(display_variant),
+        }
 
     @app.get("/api/v1/players/{target_user_id}")
     def inspect_player(target_user_id: int,
@@ -460,34 +474,44 @@ def create_miniapp_api(*, bot_token: str | None = None,
         )
         return HTMLResponse(html)
 
-    @app.get("/media/gnome", include_in_schema=False)
-    async def gnome_image(request: Request):
-        nonlocal gnome_image_bytes
-        params = request.query_params
-        if any(key != "v" for key in params) or params.get("v") not in (None, _GNOME_IMAGE_VERSION):
+    async def serve_gnome_image(variant: str, request: Request):
+        if variant not in GNOME_FILE_IDS:
             raise HTTPException(status_code=404, detail="Not found")
-        if gnome_image_bytes is None:
-            async with gnome_image_lock:
-                if gnome_image_bytes is None:
+        params = request.query_params
+        if any(key != "v" for key in params) or params.get("v") not in (
+            None, gnome_image_version(variant),
+        ):
+            raise HTTPException(status_code=404, detail="Not found")
+        if variant not in gnome_image_bytes:
+            async with gnome_image_locks[variant]:
+                if variant not in gnome_image_bytes:
                     try:
                         if telegram_bot is not None:
-                            image_file = await telegram_bot.get_file(_GNOME_FILE_ID)
+                            image_file = await telegram_bot.get_file(GNOME_FILE_IDS[variant])
                             image_bytes = bytes(await image_file.download_as_bytearray())
                         else:
                             async with Bot(token) as image_bot:
-                                image_file = await image_bot.get_file(_GNOME_FILE_ID)
+                                image_file = await image_bot.get_file(GNOME_FILE_IDS[variant])
                                 image_bytes = bytes(await image_file.download_as_bytearray())
                         if not image_bytes.startswith(b"\xff\xd8\xff"):
                             raise ValueError("The gnome image is not a JPEG")
-                        gnome_image_bytes = image_bytes
+                        gnome_image_bytes[variant] = image_bytes
                     except Exception:
                         logging.warning("Could not load the Mini App gnome image")
                         raise HTTPException(status_code=503, detail="Image temporarily unavailable") from None
         return Response(
-            content=gnome_image_bytes,
+            content=gnome_image_bytes[variant],
             media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
+
+    @app.get("/media/gnome", include_in_schema=False)
+    async def legacy_gnome_image(request: Request):
+        return await serve_gnome_image(DEFAULT_GNOME_VARIANT, request)
+
+    @app.get("/media/gnome/{variant}", include_in_schema=False)
+    async def gnome_image(variant: str, request: Request):
+        return await serve_gnome_image(variant, request)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():

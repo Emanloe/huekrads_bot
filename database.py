@@ -225,6 +225,9 @@ def init_db():
         if "dwarf_name" not in cols:
             cursor.execute("ALTER TABLE duel_users ADD COLUMN dwarf_name TEXT")
 
+        if "gnome_variant" not in cols:
+            cursor.execute("ALTER TABLE duel_users ADD COLUMN gnome_variant TEXT")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS duel_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

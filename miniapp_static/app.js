@@ -192,7 +192,7 @@
     } else {
       const profile = element("div", "home-profile");
       const image = element("img", "gnome-image");
-      image.src = document.getElementById("screen-home").dataset.gnomeSrc;
+      image.src = data.gnome_image_url || document.getElementById("screen-home").dataset.gnomeSrc;
       image.alt = "Гном";
       image.width = 200;
       image.height = 200;

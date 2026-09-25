@@ -86,7 +86,7 @@ async def test_inspect_delete_failure_does_not_interrupt_response(
 
 
 @pytest.mark.asyncio
-async def test_inspect_matches_me_and_telegram_stats_without_rng_or_writes(
+async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
     temp_database, fake_context, monkeypatch,
 ):
     register(CHAT_A, 101, "viewer")
@@ -137,10 +137,20 @@ async def test_inspect_matches_me_and_telegram_stats_without_rng_or_writes(
         assert listing["opponents"][0]["duel_ineligibility"] == "no_dick"
         inspect = (await client.get("/api/v1/players/202", headers=viewer)).json()
         assert (await client.get("/api/v1/players/202", headers=viewer)).json() == inspect
-        assert inspect == (await client.get("/api/v1/me", headers=own)).json()
+        assert "gnome_variant" not in inspect and "gnome_image_url" not in inspect
+        with database.get_db() as conn:
+            assert conn.execute(
+                "SELECT gnome_variant FROM duel_users WHERE chat_id = ? AND user_id = ?",
+                (CHAT_A, 202),
+            ).fetchone() == (None,)
+        own_me = (await client.get("/api/v1/me", headers=own)).json()
+        assert inspect == {key: value for key, value in own_me.items()
+                           if key not in ("gnome_variant", "gnome_image_url")}
         assert inspect == public_player_stats(model)
-        assert (await client.get("/api/v1/players/101", headers=viewer)).json() == (
-            await client.get("/api/v1/me", headers=viewer)).json()
+        viewer_inspect = (await client.get("/api/v1/players/101", headers=viewer)).json()
+        viewer_me = (await client.get("/api/v1/me", headers=viewer)).json()
+        assert viewer_inspect == {key: value for key, value in viewer_me.items()
+                                  if key not in ("gnome_variant", "gnome_image_url")}
     with database.get_db() as conn:
         after = list(conn.execute(
             "SELECT points, wins, losses, dick_stolen_today, last_activity_date "

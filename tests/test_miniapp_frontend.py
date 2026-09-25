@@ -58,7 +58,7 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert 'data-gnome-src="/media/gnome"' in home
     assert 'if (inspected) addHeading(content, "Гном")' in js
     assert 'const image = element("img", "gnome-image")' in js
-    assert 'image.src = document.getElementById("screen-home").dataset.gnomeSrc' in js
+    assert 'image.src = data.gnome_image_url || document.getElementById("screen-home").dataset.gnomeSrc' in js
     assert 'profile.append(image, grid)' in js
     assert 'content.append(renderTitles(data.titles))' in js
     for title in ("Хуяние", "Статус", "Инвентарь"):
@@ -254,6 +254,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
         "/": {"GET"},
         "/app": {"GET"},
         "/media/gnome": {"GET"},
+        "/media/gnome/{variant}": {"GET"},
         "/healthz": {"GET"},
     }
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
