@@ -1686,26 +1686,32 @@ async def inspect_command(update, context):
     if not update.message or not update.message.from_user or not update.message.chat:
         return
     message = update.message
-    chat_id = message.chat_id
-    reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
-    target = None
-    if reply_user is not None:
-        target = get_duel_user_by_id(chat_id, reply_user.id, read_only=True)
-    else:
-        username = _extract_username(update, context)
-        if username:
-            target = get_duel_user_by_username(username, chat_id, read_only=True)
+    try:
+        chat_id = message.chat_id
+        reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
+        target = None
+        if reply_user is not None:
+            target = get_duel_user_by_id(chat_id, reply_user.id, read_only=True)
         else:
-            await send_and_schedule(update, context, get_text("duel.inspect.usage"))
+            username = _extract_username(update, context)
+            if username:
+                target = get_duel_user_by_username(username, chat_id, read_only=True)
+            else:
+                await send_and_schedule(update, context, get_text("duel.inspect.usage"))
+                return
+        if target is None:
+            await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
             return
-    if target is None:
-        await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
-        return
-    model = player_stats_read_model(chat_id, target["user_id"])
-    if model is None:
-        await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
-        return
-    await send_and_schedule(update, context, format_player_stats_telegram(model, inspected=True))
+        model = player_stats_read_model(chat_id, target["user_id"])
+        if model is None:
+            await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
+            return
+        await send_and_schedule(update, context, format_player_stats_telegram(model, inspected=True))
+    finally:
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
 
 async def _process_persistent_duel_fight(

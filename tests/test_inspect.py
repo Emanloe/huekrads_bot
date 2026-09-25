@@ -13,15 +13,76 @@ from handlers.player_stats import player_stats_read_model, public_player_stats
 from miniapp_api import create_miniapp_api
 from tests.test_miniapp_api import CHAT_A, CHAT_B, register, session_for, snapshot
 from tests.test_miniapp_auth import TEST_BOT_TOKEN
+from text_resources import get_text
 
 
 def update_for(chat_id, sender_id, *, reply_id=None, text="/inspect"):
-    reply = (SimpleNamespace(from_user=SimpleNamespace(id=reply_id))
+    reply = (SimpleNamespace(from_user=SimpleNamespace(id=reply_id), delete=AsyncMock())
              if reply_id is not None else None)
     return SimpleNamespace(message=SimpleNamespace(
         from_user=SimpleNamespace(id=sender_id), chat=SimpleNamespace(id=chat_id),
-        chat_id=chat_id, text=text, reply_to_message=reply,
+        chat_id=chat_id, text=text, reply_to_message=reply, delete=AsyncMock(),
     ))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply_id", "args", "missing_model", "expected_key"),
+    [
+        (202, [], False, None),
+        (None, ["@target"], False, None),
+        (None, ["@viewer"], False, None),
+        (303, [], False, "duel.inspect.inaccessible"),
+        (None, ["@missing"], False, "duel.inspect.inaccessible"),
+        (None, ["@@"], False, "duel.inspect.usage"),
+        (None, [], False, "duel.inspect.usage"),
+        (202, [], True, "duel.inspect.inaccessible"),
+    ],
+)
+async def test_inspect_deletes_only_invoking_command_on_all_response_paths(
+    temp_database, fake_context, monkeypatch, reply_id, args, missing_model, expected_key,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "target")
+    fake_context.args = args
+    if missing_model:
+        monkeypatch.setattr(duel, "player_stats_read_model", lambda *_: None)
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    update = update_for(CHAT_A, 101, reply_id=reply_id)
+
+    await duel.inspect_command(update, fake_context)
+
+    sent.assert_awaited_once()
+    if expected_key:
+        assert sent.await_args.args[2] == get_text(expected_key)
+    update.message.delete.assert_awaited_once_with()
+    if update.message.reply_to_message:
+        update.message.reply_to_message.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inspect_delete_failure_does_not_interrupt_response(
+    temp_database, fake_context, monkeypatch,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "target")
+    events = []
+    sent = AsyncMock(side_effect=lambda *_: events.append("response"))
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+    update = update_for(CHAT_A, 101, reply_id=202)
+
+    async def denied():
+        events.append("delete_attempt")
+        raise RuntimeError("Telegram denied deletion")
+
+    update.message.delete.side_effect = denied
+    await duel.inspect_command(update, fake_context)
+
+    assert events == ["response", "delete_attempt"]
+    sent.assert_awaited_once()
+    update.message.delete.assert_awaited_once_with()
+    update.message.reply_to_message.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -52,13 +113,18 @@ async def test_inspect_matches_me_and_telegram_stats_without_rng_or_writes(
     assert [item["item_id"] for item in model["inventory"]][:2] == ["oiled_vest", "knife"]
     assert model["inventory"][-1]["name"] == "unknown_legacy"
 
-    await duel.inspect_command(update_for(CHAT_A, 101, reply_id=202), fake_context)
+    reply_update = update_for(CHAT_A, 101, reply_id=202)
+    await duel.inspect_command(reply_update, fake_context)
+    reply_update.message.delete.assert_awaited_once_with()
+    reply_update.message.reply_to_message.delete.assert_not_awaited()
     telegram = sent.await_args.args[2]
     for value in ("0 / 100", "100", "200", "Без хуя", "Парадный болт ×2"):
         assert value in telegram
     sent.reset_mock()
     fake_context.args = ["@other"]
-    await duel.inspect_command(update_for(CHAT_A, 101), fake_context)
+    username_update = update_for(CHAT_A, 101)
+    await duel.inspect_command(username_update, fake_context)
+    username_update.message.delete.assert_awaited_once_with()
     assert sent.await_args.args[2] == telegram
 
     api = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
