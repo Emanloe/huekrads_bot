@@ -5,6 +5,8 @@ import hashlib
 import re
 import shutil
 import subprocess
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -43,6 +45,31 @@ def test_global_refresh_toolbar_is_absent_but_automatic_sync_remains():
     assert 'const ACTIVE_POLL_MS = 1000' in js
     assert 'const IDLE_POLL_MS = 8000' in js
     assert 'window.setInterval(updateCountdown, COUNTDOWN_TICK_MS)' in js
+
+
+def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_titles():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    home = re.search(r'<section id="screen-home".*?</section>', html, re.S).group(0)
+    assert "Личное дело" not in home
+    assert "panel-title" not in home
+    assert 'data-gnome-src="/media/gnome"' in home
+    assert 'if (inspected) addHeading(content, "Гном")' in js
+    assert 'const image = element("img", "gnome-image")' in js
+    assert 'image.src = document.getElementById("screen-home").dataset.gnomeSrc' in js
+    assert 'profile.append(image, grid)' in js
+    assert 'content.append(renderTitles(data.titles))' in js
+    for title in ("Хуяние", "Статус", "Инвентарь"):
+        assert f'addHeading(content, "{title}")' in js
+    assert re.search(r'\.home-profile\s*\{[^}]*grid-template-columns:\s*200px minmax\(0,\s*1fr\)', css)
+    assert re.search(r'\.gnome-image\s*\{[^}]*width:\s*200px;\s*height:\s*200px;', css)
+    assert "object-fit: contain" in css
+    assert "image-rendering: pixelated" in css
+    assert re.search(r'@media \(max-width: 560px\)\s*\{\s*\.home-profile\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)', css)
+    assert re.search(r'@media \(max-width: 240px\)\s*\{\s*\.gnome-image\s*\{[^}]*aspect-ratio:\s*1 / 1', css)
+    assert "html { min-width: 0; }" in css
 
 
 @pytest.mark.asyncio
@@ -114,6 +141,65 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
 
 
 @pytest.mark.asyncio
+async def test_gnome_media_uses_one_fixed_telegram_file_and_same_origin_cached_url():
+    assert miniapp_api._GNOME_FILE_ID == (
+        "AgACAgIAAxkBAAPaarZGZ0LcyUlK8_7as-niVWw-EbIAApYbaxt2IbBJ2k2XK8ElkUMBAAMCAAN5AAM9BA"
+    )
+    assert miniapp_api._GNOME_IMAGE_VERSION == hashlib.sha256(
+        miniapp_api._GNOME_FILE_ID.encode(),
+    ).hexdigest()
+    image_bytes = b"\xff\xd8\xffmock-jpeg"
+    image_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=bytearray(image_bytes)))
+    telegram_bot = SimpleNamespace(get_file=AsyncMock(return_value=image_file))
+    app = create_miniapp_api(
+        bot_token=TEST_BOT_TOKEN, allowed_origin="", telegram_bot=telegram_bot,
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        index = await client.get("/app")
+        media_url = re.search(r'data-gnome-src="([^"]+)"', index.text).group(1)
+        assert media_url == miniapp_api._GNOME_IMAGE_URL
+        assert media_url.startswith("/media/gnome?v=")
+        assert TEST_BOT_TOKEN not in index.text + media_url
+        assert miniapp_api._GNOME_FILE_ID not in index.text + media_url
+        css_url = re.search(r'href="(/static/app\.css\?v=[0-9a-f]{64})"', index.text).group(1)
+        js_url = re.search(r'src="(/static/app\.js\?v=[0-9a-f]{64})"', index.text).group(1)
+        css_response = await client.get(css_url)
+        js_response = await client.get(js_url)
+        assert TEST_BOT_TOKEN not in css_response.text + js_response.text
+        assert miniapp_api._GNOME_FILE_ID not in css_response.text + js_response.text
+        assert (await client.get("/media/gnome?file_id=other")).status_code == 404
+        assert (await client.get("/media/gnome?v=wrong")).status_code == 404
+        telegram_bot.get_file.assert_not_awaited()
+
+        first = await client.get(media_url)
+        second = await client.get(media_url)
+        assert first.status_code == second.status_code == 200
+        assert first.content == second.content == image_bytes
+        assert first.headers["content-type"] == "image/jpeg"
+        assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert TEST_BOT_TOKEN.encode() not in first.content
+        telegram_bot.get_file.assert_awaited_once_with(miniapp_api._GNOME_FILE_ID)
+        image_file.download_as_bytearray.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_gnome_media_failure_never_exposes_bot_token():
+    telegram_bot = SimpleNamespace(get_file=AsyncMock(
+        side_effect=RuntimeError(f"failed with {TEST_BOT_TOKEN}"),
+    ))
+    app = create_miniapp_api(
+        bot_token=TEST_BOT_TOKEN, allowed_origin="", telegram_bot=telegram_bot,
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        response = await client.get(miniapp_api._GNOME_IMAGE_URL)
+    assert response.status_code == 503
+    assert TEST_BOT_TOKEN not in response.text
+    assert miniapp_api._GNOME_FILE_ID not in response.text
+
+
+@pytest.mark.asyncio
 async def test_asset_content_change_rotates_app_urls_without_release_constant(tmp_path, monkeypatch):
     for name in ("index.html", "app.css", "app.js"):
         (tmp_path / name).write_bytes((STATIC_DIR / name).read_bytes())
@@ -158,6 +244,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
         "/api/v1/duel/move": {"POST"},
         "/": {"GET"},
         "/app": {"GET"},
+        "/media/gnome": {"GET"},
         "/healthz": {"GET"},
     }
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")

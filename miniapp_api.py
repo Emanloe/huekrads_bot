@@ -1,5 +1,6 @@
 """Chat-scoped Mini App API for reads and persistent duel challenges."""
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -14,6 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictInt
 from starlette.concurrency import run_in_threadpool
+from telegram import Bot
 
 from config import BOT_TOKEN
 from database import (
@@ -41,6 +43,11 @@ from text_resources import get_text
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "miniapp_static"
+_GNOME_FILE_ID = (
+    "AgACAgIAAxkBAAPaarZGZ0LcyUlK8_7as-niVWw-EbIAApYbaxt2IbBJ2k2XK8ElkUMBAAMCAAN5AAM9BA"
+)
+_GNOME_IMAGE_VERSION = hashlib.sha256(_GNOME_FILE_ID.encode()).hexdigest()
+_GNOME_IMAGE_URL = f"/media/gnome?v={_GNOME_IMAGE_VERSION}"
 
 
 def _versioned_static_url(filename: str) -> str:
@@ -239,6 +246,8 @@ def create_miniapp_api(*, bot_token: str | None = None,
         raise RuntimeError("BOT_TOKEN is required for Mini App initData validation")
     origin = os.getenv("MINIAPP_ORIGIN", "").strip() if allowed_origin is None else allowed_origin
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    gnome_image_bytes = None
+    gnome_image_lock = asyncio.Lock()
 
     @app.middleware("http")
     async def frontend_security_headers(request: Request, call_next):
@@ -446,7 +455,39 @@ def create_miniapp_api(*, bot_token: str | None = None,
         html = html.replace(
             'src="/static/app.js"', f'src="{_versioned_static_url("app.js")}"',
         )
+        html = html.replace(
+            'data-gnome-src="/media/gnome"', f'data-gnome-src="{_GNOME_IMAGE_URL}"',
+        )
         return HTMLResponse(html)
+
+    @app.get("/media/gnome", include_in_schema=False)
+    async def gnome_image(request: Request):
+        nonlocal gnome_image_bytes
+        params = request.query_params
+        if any(key != "v" for key in params) or params.get("v") not in (None, _GNOME_IMAGE_VERSION):
+            raise HTTPException(status_code=404, detail="Not found")
+        if gnome_image_bytes is None:
+            async with gnome_image_lock:
+                if gnome_image_bytes is None:
+                    try:
+                        if telegram_bot is not None:
+                            image_file = await telegram_bot.get_file(_GNOME_FILE_ID)
+                            image_bytes = bytes(await image_file.download_as_bytearray())
+                        else:
+                            async with Bot(token) as image_bot:
+                                image_file = await image_bot.get_file(_GNOME_FILE_ID)
+                                image_bytes = bytes(await image_file.download_as_bytearray())
+                        if not image_bytes.startswith(b"\xff\xd8\xff"):
+                            raise ValueError("The gnome image is not a JPEG")
+                        gnome_image_bytes = image_bytes
+                    except Exception:
+                        logging.warning("Could not load the Mini App gnome image")
+                        raise HTTPException(status_code=503, detail="Image temporarily unavailable") from None
+        return Response(
+            content=gnome_image_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():

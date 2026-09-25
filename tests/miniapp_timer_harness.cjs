@@ -14,7 +14,10 @@ class Node {
     this.disabled = false;
     this.listeners = {};
     this.parent = null;
-    this.classList = { toggle() {} };
+    this.classList = {
+      toggle() {},
+      add: name => { this.className += ` ${name}`; },
+    };
   }
   append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
   replaceChildren(...nodes) {
@@ -65,6 +68,7 @@ for (const view of ["home", "opponents", "duel"]) {
   const content = new Node();
   content.className = "panel-body";
   screen.append(content);
+  if (view === "home") screen.dataset = { gnomeSrc: "/media/gnome?v=test-version" };
   nodes.set(`screen-${view}`, screen);
   nodes.set(`${view}-content`, content);
 }
@@ -140,7 +144,7 @@ const boot = /\s+bootstrap\(\);\s*\}\)\(\);\s*$/;
 assert.ok(boot.test(source));
 const instrumented = source.replace(boot, `
   globalThis.appTest = {
-    renderDuel, renderOpponents, updateCountdown, loadView, submitMove,
+    renderHome, renderProfile, renderDuel, renderOpponents, updateCountdown, loadView, submitMove,
     setContext(token, view) { sessionToken = token; currentView = view; },
     get countdownTurn() { return countdownTurn; },
   };
@@ -175,6 +179,28 @@ function render(value, clock = { serverNow: epoch + now, observedAt: now }) {
 function findClass(node, className) {
   return node.children.find(child => child.className.split(" ").includes(className));
 }
+const ownProfile = {
+  display_name: "<script>alert(1)</script>", dwarf_name: "<img src=x>",
+  points: 30, max_points: 100, wins: 140, losses: 123, daily_wins: 2,
+  ineligibility: "no_dick", boss_wins: 3, dick_status: { text: "Без хуя" },
+  titles: {}, inventory: [], pet: null,
+};
+app.renderHome(ownProfile);
+const homeContent = nodes.get("home-content").children[0];
+const homeProfile = findClass(homeContent, "home-profile");
+assert.ok(homeProfile);
+assert.equal(homeProfile.children[0].tag, "img");
+assert.equal(homeProfile.children[0].src, "/media/gnome?v=test-version");
+assert.equal(homeProfile.children[0].width, 200);
+assert.equal(homeProfile.children[0].height, 200);
+assert.equal(homeProfile.children[1].children.length, 6);
+assert.equal(homeProfile.children[1].children[0].children[1].textContent, "<script>alert(1)</script>");
+assert.deepEqual(homeContent.children.filter(child => child.tag === "h3").map(child => child.textContent),
+  ["Хуяние", "Статус", "Инвентарь"]);
+app.renderProfile(ownProfile, nodes.get("opponents-content"), true);
+const inspectedProfile = nodes.get("opponents-content").children[0];
+assert.equal(findClass(inspectedProfile, "home-profile"), undefined);
+assert.equal(inspectedProfile.children.find(child => child.tag === "h3").textContent, "Гном");
 function countdownText() { return app.countdownTurn?.node.textContent; }
 function actionPanel() {
   return findClass(nodes.get("duel-content").children[0], "action-box");

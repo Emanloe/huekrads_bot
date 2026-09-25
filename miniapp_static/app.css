@@ -24,7 +24,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
-html { min-width: 320px; }
+html { min-width: 0; }
 body {
   margin: 0;
   padding: 8px 8px calc(12px + env(safe-area-inset-bottom));
@@ -116,6 +116,7 @@ main { padding: 7px; min-height: 300px; }
   padding: 8px;
   min-width: 0;
 }
+#screen-home > .panel-body { border-top: 1px solid var(--border); }
 .empty-content { color: var(--text-muted); }
 .subheading {
   margin: 12px 0 5px;
@@ -129,6 +130,11 @@ main { padding: 7px; min-height: 300px; }
 .data-cell { background: var(--surface-raised); padding: 5px 7px; min-width: 0; overflow-wrap: anywhere; }
 .data-cell .label { display: block; color: var(--text-muted); font-size: 10px; margin-bottom: 1px; }
 .data-cell .value { display: block; font-weight: bold; }
+.home-profile { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px; align-items: start; min-width: 0; }
+.gnome-image { display: block; width: 200px; height: 200px; max-width: 100%; border: 1px solid var(--border-strong); background: var(--surface-alt); object-fit: contain; image-rendering: pixelated; }
+.home-profile-info { grid-template-columns: minmax(0, 1fr); }
+.home-profile-info .data-cell { display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.home-profile-info .label { margin: 0; }
 .notice { margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--border); background: var(--button-bg); }
 .notice.bad { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
 .inventory-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); }
@@ -179,6 +185,14 @@ main { padding: 7px; min-height: 300px; }
 .previous-duel { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 7px; }
 .previous-duel summary { cursor: pointer; font-weight: bold; }
 .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; border-top: 1px solid var(--border); padding: 6px 9px; background: var(--surface-alt); color: var(--text-muted); font-size: 10px; }
+
+@media (max-width: 560px) {
+  .home-profile { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 240px) {
+  .gnome-image { width: 100%; height: auto; aspect-ratio: 1 / 1; }
+}
 
 @media (max-width: 420px) {
   body { padding: 4px 4px calc(8px + env(safe-area-inset-bottom)); }
