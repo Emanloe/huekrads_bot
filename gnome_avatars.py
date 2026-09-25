@@ -1,6 +1,7 @@
 """Persistent chat-scoped cosmetic gnome assignment and fixed media catalog."""
 
 import hashlib
+import logging
 import secrets
 
 from database import get_db
@@ -28,6 +29,26 @@ def gnome_image_version(variant: str) -> str:
 
 def gnome_image_url(variant: str) -> str:
     return f"/media/gnome/{variant}?v={gnome_image_version(variant)}"
+
+
+def existing_gnome_variant(chat_id: int, user_id: int) -> str | None:
+    """Read an assignment without creating one or consuming cosmetic RNG."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT gnome_variant FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        ).fetchone()
+        return row[0] if row is not None else None
+
+
+def presented_gnome_image_url(variant: str | None, chat_id: int, user_id: int) -> str:
+    """Use blue for missing or corrupt assignments without changing storage."""
+    if variant not in GNOME_FILE_IDS:
+        if variant is not None:
+            logging.warning("Unknown persisted gnome variant for chat %s user %s",
+                            chat_id, user_id)
+        variant = DEFAULT_GNOME_VARIANT
+    return gnome_image_url(variant)
 
 
 def get_or_assign_gnome_variant(chat_id: int, user_id: int) -> str | None:

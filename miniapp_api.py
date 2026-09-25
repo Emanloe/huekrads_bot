@@ -23,7 +23,8 @@ from database import (
 )
 from gnome_avatars import (
     DEFAULT_GNOME_VARIANT, GNOME_FILE_IDS, GNOME_VARIANTS,
-    get_or_assign_gnome_variant, gnome_image_url, gnome_image_version,
+    existing_gnome_variant, get_or_assign_gnome_variant, gnome_image_url,
+    gnome_image_version, presented_gnome_image_url,
 )
 from duel_outbox_repository import (
     get_duel_prompt_for_turn, list_persisted_duel_round_resolutions,
@@ -317,7 +318,13 @@ def create_miniapp_api(*, bot_token: str | None = None,
         model = player_stats_read_model(session.chat_id, target_user_id)
         if model is None:
             raise HTTPException(status_code=404, detail={"code": "inaccessible_player"})
-        return public_player_stats(model)
+        variant = existing_gnome_variant(session.chat_id, target_user_id)
+        return {
+            **public_player_stats(model),
+            "gnome_image_url": presented_gnome_image_url(
+                variant, session.chat_id, target_user_id,
+            ),
+        }
 
     @app.get("/api/v1/duel/opponents")
     def opponents(session: MiniAppSession = Depends(require_session)):

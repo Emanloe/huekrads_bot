@@ -105,7 +105,8 @@ const fetch = async (url, options) => {
       ok: true,
       headers: { get: name => name === "content-type" ? "application/json" : null },
       json: async () => ({
-        display_name: "<script>alert(1)</script>", dwarf_name: "<img src=x>",
+        display_name: "<script>alert(1)</script>", dwarf_name: "<img src=x>", username: "target",
+        gnome_image_url: "/media/gnome/gnome_02?v=target-version",
         points: 0, max_points: 100, wins: 100, losses: 2, daily_wins: 0,
         ineligibility: "no_dick", boss_wins: 3, dick_status: { text: "Без хуя" },
         titles: { wins: { text: "<b>title</b>", count: 100 },
@@ -200,8 +201,13 @@ assert.deepEqual(homeContent.children.filter(child => child.tag === "h3").map(ch
   ["Хуяние", "Статус", "Инвентарь"]);
 app.renderProfile(ownProfile, nodes.get("opponents-content"), true);
 const inspectedProfile = nodes.get("opponents-content").children[0];
-assert.equal(findClass(inspectedProfile, "home-profile"), undefined);
-assert.equal(inspectedProfile.children.find(child => child.tag === "h3").textContent, "Гном");
+const inspectedHero = findClass(inspectedProfile, "home-profile");
+assert.equal(inspectedHero.children[0].src, ownProfile.gnome_image_url);
+assert.equal(inspectedHero.children[1].children.length, 7);
+assert.equal(findClass(inspectedProfile, "inspect-back").textContent, "← К соперникам");
+assert.equal(findClass(inspectedProfile, "hint").textContent, "Профиль игрока · только просмотр");
+assert.deepEqual(inspectedProfile.children.filter(child => child.tag === "h3").map(child => child.textContent),
+  ["Хуяние", "Статус", "Инвентарь"]);
 function countdownText() { return app.countdownTurn?.node.textContent; }
 function actionPanel() {
   return findClass(nodes.get("duel-content").children[0], "action-box");
@@ -424,8 +430,11 @@ async function testPolling() {
   assert.equal(profileFetchCount, 1);
   const profile = opponentBody.children[0];
   assert.equal(findClass(profile, "inspect-back").textContent, "← К соперникам");
-  assert.equal(findClass(profile, "data-grid").children[0].children[1].textContent,
+  const targetHero = findClass(profile, "home-profile");
+  assert.equal(targetHero.children[0].src, "/media/gnome/gnome_02?v=target-version");
+  assert.equal(targetHero.children[1].children[0].children[1].textContent,
     "<script>alert(1)</script>");
+  assert.equal(targetHero.children[1].children[6].children[1].textContent, "@target");
   findClass(profile, "inspect-back").listeners.click();
   assert.equal(findClass(opponentBody.children[0], "opponent-list").children.length, 1);
 }

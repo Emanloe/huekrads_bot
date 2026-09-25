@@ -8,6 +8,7 @@ import pytest
 
 import database
 from duel_session_repository import create_duel_session, utc_unix_milliseconds
+from gnome_avatars import gnome_image_url
 from handlers import duel, duel_service
 from handlers.player_stats import player_stats_read_model, public_player_stats
 from miniapp_api import create_miniapp_api
@@ -137,20 +138,26 @@ async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
         assert listing["opponents"][0]["duel_ineligibility"] == "no_dick"
         inspect = (await client.get("/api/v1/players/202", headers=viewer)).json()
         assert (await client.get("/api/v1/players/202", headers=viewer)).json() == inspect
-        assert "gnome_variant" not in inspect and "gnome_image_url" not in inspect
+        assert "gnome_variant" not in inspect
+        assert inspect["gnome_image_url"] == gnome_image_url("gnome_00")
         with database.get_db() as conn:
             assert conn.execute(
                 "SELECT gnome_variant FROM duel_users WHERE chat_id = ? AND user_id = ?",
                 (CHAT_A, 202),
             ).fetchone() == (None,)
         own_me = (await client.get("/api/v1/me", headers=own)).json()
-        assert inspect == {key: value for key, value in own_me.items()
-                           if key not in ("gnome_variant", "gnome_image_url")}
-        assert inspect == public_player_stats(model)
+        inspect_stats = {key: value for key, value in inspect.items()
+                         if key != "gnome_image_url"}
+        assert inspect_stats == {key: value for key, value in own_me.items()
+                                 if key not in ("gnome_variant", "gnome_image_url")}
+        assert inspect_stats == public_player_stats(model)
         viewer_inspect = (await client.get("/api/v1/players/101", headers=viewer)).json()
         viewer_me = (await client.get("/api/v1/me", headers=viewer)).json()
-        assert viewer_inspect == {key: value for key, value in viewer_me.items()
-                                  if key not in ("gnome_variant", "gnome_image_url")}
+        assert {key: value for key, value in viewer_inspect.items()
+                if key != "gnome_image_url"} == {
+                    key: value for key, value in viewer_me.items()
+                    if key not in ("gnome_variant", "gnome_image_url")
+                }
     with database.get_db() as conn:
         after = list(conn.execute(
             "SELECT points, wins, losses, dick_stolen_today, last_activity_date "

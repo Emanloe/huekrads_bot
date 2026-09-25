@@ -12,6 +12,7 @@ import pytest
 
 import database
 import gnome_avatars as avatars
+import miniapp_api
 from handlers import duel
 from miniapp_api import create_miniapp_api
 from tests.test_inspect import update_for
@@ -146,6 +147,131 @@ async def test_inspect_opponents_and_duel_stats_do_not_assign_cosmetic_avatar(
             "SELECT user_id, gnome_variant FROM duel_users WHERE chat_id = ? ORDER BY user_id",
             (CHAT_A,),
         ).fetchall() == [(101, None), (202, None)]
+
+
+@pytest.mark.asyncio
+async def test_repeated_inspect_of_unassigned_target_is_blue_and_never_writes_or_uses_rng(
+    temp_database, monkeypatch,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "target")
+    choice = Mock(side_effect=AssertionError("inspect used cosmetic RNG"))
+    ensure = Mock(side_effect=AssertionError("inspect called assignment path"))
+    monkeypatch.setattr(avatars.secrets, "choice", choice)
+    monkeypatch.setattr(miniapp_api, "get_or_assign_gnome_variant", ensure)
+    app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        with database.get_db() as conn:
+            before = conn.execute(
+                "SELECT * FROM duel_users WHERE chat_id = ? AND user_id = ?",
+                (CHAT_A, 202),
+            ).fetchone()
+        for _ in range(10):
+            response = await client.get("/api/v1/players/202", headers=headers)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["gnome_image_url"] == avatars.gnome_image_url("gnome_00")
+            assert "gnome_variant" not in data
+            assert TEST_BOT_TOKEN not in response.text
+            assert avatars.GNOME_FILE_IDS["gnome_00"] not in response.text
+        with database.get_db() as conn:
+            after = conn.execute(
+                "SELECT * FROM duel_users WHERE chat_id = ? AND user_id = ?",
+                (CHAT_A, 202),
+            ).fetchone()
+    assert before == after
+    choice.assert_not_called()
+    ensure.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inspect_uses_target_persisted_variant_without_touching_viewer(
+    temp_database, monkeypatch,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "target")
+    with database.get_db() as conn:
+        conn.execute("UPDATE duel_users SET gnome_variant = 'gnome_03' WHERE chat_id = ? AND user_id = ?",
+                     (CHAT_A, 101))
+        conn.execute("UPDATE duel_users SET gnome_variant = 'gnome_07' WHERE chat_id = ? AND user_id = ?",
+                     (CHAT_A, 202))
+    choice = Mock(side_effect=AssertionError("inspect used cosmetic RNG"))
+    monkeypatch.setattr(avatars.secrets, "choice", choice)
+    app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        response = await client.get("/api/v1/players/202", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["gnome_image_url"] == avatars.gnome_image_url("gnome_07")
+    assert response.json()["gnome_image_url"] != avatars.gnome_image_url("gnome_03")
+    choice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inspect_corrupt_variant_falls_back_without_reroll_or_rewrite(
+    temp_database, monkeypatch, caplog,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "target")
+    with database.get_db() as conn:
+        conn.execute("UPDATE duel_users SET gnome_variant = 'legacy_unknown' "
+                     "WHERE chat_id = ? AND user_id = ?", (CHAT_A, 202))
+    choice = Mock(side_effect=AssertionError("inspect used cosmetic RNG"))
+    monkeypatch.setattr(avatars.secrets, "choice", choice)
+    app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        response = await client.get("/api/v1/players/202", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["gnome_image_url"] == avatars.gnome_image_url("gnome_00")
+    assert "Unknown persisted gnome variant" in caplog.text
+    choice.assert_not_called()
+    with database.get_db() as conn:
+        assert conn.execute(
+            "SELECT gnome_variant FROM duel_users WHERE chat_id = ? AND user_id = ?",
+            (CHAT_A, 202),
+        ).fetchone() == ("legacy_unknown",)
+
+
+@pytest.mark.asyncio
+async def test_inspect_avatar_uses_session_chat_and_cannot_reach_other_chat(
+    temp_database, monkeypatch,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "same")
+    register(CHAT_B, 101, "viewer_b")
+    register(CHAT_B, 202, "same")
+    register(CHAT_B, 303, "only_b")
+    with database.get_db() as conn:
+        conn.execute("UPDATE duel_users SET gnome_variant = 'gnome_02' WHERE chat_id = ? AND user_id = ?",
+                     (CHAT_A, 202))
+        conn.execute("UPDATE duel_users SET gnome_variant = 'gnome_08' WHERE chat_id = ? AND user_id = ?",
+                     (CHAT_B, 202))
+    choice = Mock(side_effect=AssertionError("inspect used cosmetic RNG"))
+    monkeypatch.setattr(avatars.secrets, "choice", choice)
+    app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        headers = await session_for(client, CHAT_A, 101)
+        forged = {**headers, "X-Chat-Id": str(CHAT_B), "X-User-Id": "202"}
+        response = await client.request(
+            "GET", f"/api/v1/players/202?chat_id={CHAT_B}&target_user_id=303",
+            headers=forged, json={"chat_id": CHAT_B, "target_user_id": 303},
+        )
+        headers_b = await session_for(client, CHAT_B, 101)
+        response_b = await client.get("/api/v1/players/202", headers=headers_b)
+        hidden = await client.get("/api/v1/players/303", headers=forged)
+    assert response.status_code == 200
+    assert response.json()["gnome_image_url"] == avatars.gnome_image_url("gnome_02")
+    assert response.json()["gnome_image_url"] != avatars.gnome_image_url("gnome_08")
+    assert response_b.json()["gnome_image_url"] == avatars.gnome_image_url("gnome_08")
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"]["code"] == "inaccessible_player"
+    choice.assert_not_called()
 
 
 def test_concurrent_first_access_persists_one_choice_for_one_chat_player(

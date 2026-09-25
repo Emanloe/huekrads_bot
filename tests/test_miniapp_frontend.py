@@ -56,7 +56,7 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert "Личное дело" not in home
     assert "panel-title" not in home
     assert 'data-gnome-src="/media/gnome"' in home
-    assert 'if (inspected) addHeading(content, "Гном")' in js
+    assert 'addHeading(content, "Гном")' not in js
     assert 'const image = element("img", "gnome-image")' in js
     assert 'image.src = data.gnome_image_url || document.getElementById("screen-home").dataset.gnomeSrc' in js
     assert 'profile.append(image, grid)' in js

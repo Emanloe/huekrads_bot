@@ -176,7 +176,6 @@
       });
       content.append(back, element("p", "hint", "Профиль игрока · только просмотр"));
     }
-    if (inspected) addHeading(content, "Гном");
     const grid = element("div", "data-grid");
     grid.append(
       dataCell("Имя", data.display_name || data.username || "Без имени"),
@@ -187,20 +186,16 @@
       dataCell("Участие в дуэли", data.ineligibility === "no_dick" ? "Недоступно до завтра" : "Доступно")
     );
     if (inspected) grid.append(dataCell("Telegram", data.username ? `@${data.username}` : "Не указан"));
-    if (inspected) {
-      content.append(grid);
-    } else {
-      const profile = element("div", "home-profile");
-      const image = element("img", "gnome-image");
-      image.src = data.gnome_image_url || document.getElementById("screen-home").dataset.gnomeSrc;
-      image.alt = "Гном";
-      image.width = 200;
-      image.height = 200;
-      image.decoding = "async";
-      grid.classList.add("home-profile-info");
-      profile.append(image, grid);
-      content.append(profile);
-    }
+    const profile = element("div", "home-profile");
+    const image = element("img", "gnome-image");
+    image.src = data.gnome_image_url || document.getElementById("screen-home").dataset.gnomeSrc;
+    image.alt = "Гном";
+    image.width = 200;
+    image.height = 200;
+    image.decoding = "async";
+    grid.classList.add("home-profile-info");
+    profile.append(image, grid);
+    content.append(profile);
     addHeading(content, "Хуяние");
     content.append(renderTitles(data.titles));
     addHeading(content, "Статус");
