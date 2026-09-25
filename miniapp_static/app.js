@@ -11,6 +11,7 @@
     home: "/api/v1/me",
     opponents: "/api/v1/duel/opponents",
     duel: "/api/v1/duel/active",
+    hall: "/api/v1/duel/hall-of-fame",
   };
   const ZONE_NAMES = { head: "Голова", body: "Торс", dick: "Хуй" };
   const PHASE_NAMES = { attack: "Атака", block: "Блок" };
@@ -26,11 +27,13 @@
   let expiredDeadlineRefresh = null;
   let challengeInFlight = false;
   let inspectedPlayerId = null;
+  let inspectedPlayerSource = null;
   let opponentsSnapshot = null;
+  let hallSnapshot = null;
   let moveInFlight = false;
-  const loading = { home: null, opponents: null, duel: null };
+  const loading = { home: null, opponents: null, duel: null, hall: null };
 
-  const viewStatuses = { home: null, opponents: null, duel: null };
+  const viewStatuses = { home: null, opponents: null, duel: null, hall: null };
 
   function element(tag, className, value) {
     const node = document.createElement(tag);
@@ -69,6 +72,7 @@
     countdownNode = null;
     countdownTurn = null;
     inspectedPlayerId = null;
+    inspectedPlayerSource = null;
     for (const view of Object.keys(API_PATHS)) {
       clearViewStatus(view);
       document.getElementById(`screen-${view}`).querySelector(".panel-body").replaceChildren(
@@ -164,15 +168,20 @@
     return data;
   }
 
-  function renderProfile(data, body, inspected = false) {
+  function renderProfile(data, body, inspected = false, returnView = "opponents") {
     const content = element("div");
     if (inspected) {
-      const back = element("button", "small-button inspect-back", "← К соперникам");
+      const back = element("button", "small-button inspect-back",
+        returnView === "hall" ? "← К залу славы" : "← К соперникам");
       back.type = "button";
       back.addEventListener("click", () => {
         inspectedPlayerId = null;
-        if (opponentsSnapshot) renderOpponents(opponentsSnapshot);
-        else loadView("opponents");
+        inspectedPlayerSource = null;
+        const snapshot = returnView === "hall" ? hallSnapshot : opponentsSnapshot;
+        if (snapshot) {
+          if (returnView === "hall") renderHall(snapshot);
+          else renderOpponents(snapshot);
+        } else loadView(returnView);
       });
       content.append(back, element("p", "hint", "Профиль игрока · только просмотр"));
     }
@@ -225,27 +234,61 @@
     renderProfile(data, document.getElementById("home-content"));
   }
 
-  async function inspectOpponent(userId) {
+  async function inspectOpponent(userId, sourceView = "opponents") {
     if (!sessionToken || challengeInFlight) return;
     inspectedPlayerId = userId;
-    setViewStatus("opponents", "Загрузка профиля…");
+    inspectedPlayerSource = sourceView;
+    setViewStatus(sourceView, "Загрузка профиля…");
     try {
       const data = await apiRequest(`/api/v1/players/${encodeURIComponent(userId)}`);
-      if (!sessionToken || inspectedPlayerId !== userId) return;
-      renderProfile(data, document.getElementById("opponents-content"), true);
-      clearViewStatus("opponents", "read");
+      if (!sessionToken || inspectedPlayerId !== userId || inspectedPlayerSource !== sourceView) return;
+      renderProfile(data, document.getElementById(`${sourceView}-content`), true, sourceView);
+      clearViewStatus(sourceView, "read");
     } catch (error) {
       if (error.status === 401) showUnavailable(error.message);
-      else if (sessionToken) {
+      else if (sessionToken && inspectedPlayerId === userId && inspectedPlayerSource === sourceView) {
         inspectedPlayerId = null;
-        setViewStatus("opponents", error.message || "Не удалось загрузить профиль.", true);
+        inspectedPlayerSource = null;
+        setViewStatus(sourceView, error.message || "Не удалось загрузить профиль.", true);
       }
     }
   }
 
+  function renderHall(data) {
+    hallSnapshot = data;
+    if (inspectedPlayerId !== null && inspectedPlayerSource === "hall") return;
+    const body = document.getElementById("hall-content");
+    const content = element("div");
+    if (!Array.isArray(data.players) || data.players.length === 0) {
+      content.append(notice("Таблица лидеров чата пока пуста."));
+    } else {
+      content.append(element("p", "hint", "Топ-10 гномьих дуэлянтов чата · по победам"));
+      const list = element("div", "hall-list");
+      for (const player of data.players) {
+        const row = element("div", "hall-row");
+        const image = element("img", "hall-avatar");
+        image.src = player.gnome_image_url;
+        image.alt = "";
+        image.width = 36;
+        image.height = 36;
+        image.decoding = "async";
+        const identity = element("div", "hall-player");
+        identity.append(element("strong", null, player.title),
+          element("small", null, `${player.points} очков · ${player.wins}W / ${player.losses}L`));
+        const inspect = element("button", "small-button", "Осмотреть");
+        inspect.type = "button";
+        inspect.addEventListener("click", () => inspectOpponent(player.user_id, "hall"));
+        row.append(element("span", "hall-rank", `${player.rank}.`), image, identity, inspect);
+        list.append(row);
+      }
+      content.append(list);
+    }
+    body.replaceChildren(content);
+  }
+
   function renderOpponents(data) {
     opponentsSnapshot = data;
-    if (inspectedPlayerId !== null) return;
+    if (inspectedPlayerId !== null && inspectedPlayerSource === "opponents") return;
     const body = document.getElementById("opponents-content");
     const content = element("div");
     if (data.ineligibility === "no_dick") {
@@ -288,7 +331,8 @@
   }
 
   async function challengeOpponent(opponentUserId) {
-    if (!sessionToken || challengeInFlight || inspectedPlayerId !== null) return;
+    if (!sessionToken || challengeInFlight ||
+        (inspectedPlayerId !== null && inspectedPlayerSource === "opponents")) return;
     challengeInFlight = true;
     for (const button of document.querySelectorAll(".opponent-list button")) button.disabled = true;
     setViewStatus("opponents", "Начинаем дуэль…", false, "action");
@@ -544,6 +588,7 @@
         if (!sessionToken) return false;
         if (view === "home") renderHome(data);
         else if (view === "opponents") renderOpponents(data);
+        else if (view === "hall") renderHall(data);
         else renderDuel(data);
         clearViewStatus(view, "read");
         return true;

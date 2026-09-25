@@ -81,6 +81,27 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert "html { min-width: 0; }" in css
 
 
+def test_hall_navigation_and_compact_rows_fit_four_tabs_without_horizontal_overflow():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    tabs = re.findall(r'<button class="tab(?: is-active)?"[^>]+data-view="([^"]+)"', html)
+    assert tabs == ["home", "opponents", "duel", "hall"]
+    assert 'id="screen-hall"' in html and '<h2 id="hall-title">Зал славы</h2>' in html
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in css
+    assert ".tab { font-size: 11px; padding: 6px 1px; }" in css
+    assert ".hall-player { min-width: 0; overflow-wrap: anywhere; }" in css
+    assert ".hall-row { grid-template-columns: 20px 32px minmax(0, 1fr);" in css
+    assert ".hall-avatar { width: 32px; height: 32px; }" in css
+    assert "image-rendering: pixelated" in css
+    assert 'hall: "/api/v1/duel/hall-of-fame"' in js
+    assert 'inspectOpponent(player.user_id, "hall")' in js
+    assert 'element("strong", null, player.title)' in js
+    assert 'element("small", null, `${player.points} очков' in js
+    assert "innerHTML" not in js
+
+
 @pytest.mark.asyncio
 async def test_healthz_needs_no_session_or_game_reads(monkeypatch):
     def unexpected_call(*args, **kwargs):
@@ -247,6 +268,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
         "/api/v1/session": {"POST"},
         "/api/v1/me": {"GET"},
         "/api/v1/players/{target_user_id}": {"GET"},
+        "/api/v1/duel/hall-of-fame": {"GET"},
         "/api/v1/duel/opponents": {"GET"},
         "/api/v1/duel/active": {"GET"},
         "/api/v1/duel/start": {"POST"},

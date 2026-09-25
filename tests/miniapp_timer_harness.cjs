@@ -63,7 +63,7 @@ class Node {
 }
 
 const nodes = new Map();
-for (const view of ["home", "opponents", "duel"]) {
+for (const view of ["home", "opponents", "duel", "hall"]) {
   const screen = new Node("section");
   const content = new Node();
   content.className = "panel-body";
@@ -82,6 +82,7 @@ let moveMode = "accepted";
 let getMode = "ok";
 let serverDuel = null;
 let profileFetchCount = 0;
+let hallFetchCount = 0;
 const document = {
   hidden: false,
   listeners: {},
@@ -98,6 +99,19 @@ const window = {
 };
 const epoch = 1_700_000_000_000;
 const fetch = async (url, options) => {
+  if (url === "/api/v1/duel/hall-of-fame") {
+    assert.equal(options.method, "GET");
+    hallFetchCount++;
+    return {
+      ok: true,
+      headers: { get: name => name === "content-type" ? "application/json" : null },
+      json: async () => ({ sort_by: "wins", players: [{
+        rank: 1, user_id: 202, title: "<script>alert(1)</script>",
+        points: 30, wins: 10, losses: 2,
+        gnome_image_url: "/media/gnome/gnome_07?v=hall-version",
+      }] }),
+    };
+  }
   if (url === "/api/v1/players/202") {
     assert.equal(options.method, "GET");
     profileFetchCount++;
@@ -145,7 +159,8 @@ const boot = /\s+bootstrap\(\);\s*\}\)\(\);\s*$/;
 assert.ok(boot.test(source));
 const instrumented = source.replace(boot, `
   globalThis.appTest = {
-    renderHome, renderProfile, renderDuel, renderOpponents, updateCountdown, loadView, submitMove,
+    renderHome, renderProfile, renderDuel, renderOpponents, renderHall,
+    updateCountdown, loadView, submitMove,
     setContext(token, view) { sessionToken = token; currentView = view; },
     get countdownTurn() { return countdownTurn; },
   };
@@ -437,6 +452,33 @@ async function testPolling() {
   assert.equal(targetHero.children[1].children[6].children[1].textContent, "@target");
   findClass(profile, "inspect-back").listeners.click();
   assert.equal(findClass(opponentBody.children[0], "opponent-list").children.length, 1);
+
+  // The hall uses the target avatar and the same read-only inspect screen.
+  app.setContext("test-session", "hall");
+  assert.equal(await app.loadView("hall"), true);
+  assert.equal(hallFetchCount, 1);
+  const hallBody = nodes.get("hall-content");
+  const hallList = findClass(hallBody.children[0], "hall-list");
+  const hallRow = hallList.children[0];
+  assert.equal(hallRow.children[0].textContent, "1.");
+  assert.equal(hallRow.children[1].src, "/media/gnome/gnome_07?v=hall-version");
+  assert.equal(hallRow.children[1].width, 36);
+  assert.equal(hallRow.children[1].height, 36);
+  assert.equal(hallRow.children[2].children[0].textContent, "<script>alert(1)</script>");
+  assert.equal(hallRow.children[3].textContent, "Осмотреть");
+  await hallRow.children[3].listeners.click();
+  assert.equal(profileFetchCount, 2);
+  const hallProfile = hallBody.children[0];
+  assert.equal(findClass(hallProfile, "inspect-back").textContent, "← К залу славы");
+  assert.equal(findClass(hallProfile, "home-profile").children[0].src,
+    "/media/gnome/gnome_02?v=target-version");
+  app.renderOpponents({ ineligibility: null, opponents: [] });
+  assert.ok(nodes.get("opponents-content").children[0].children[0].textContent.includes("нет доступных"));
+  findClass(hallProfile, "inspect-back").listeners.click();
+  assert.equal(findClass(hallBody.children[0], "hall-list").children.length, 1);
+
+  app.renderHall({ sort_by: "wins", players: [] });
+  assert.ok(hallBody.children[0].children[0].textContent.includes("пока пуста"));
 }
 
 testPolling().catch(error => { console.error(error); process.exitCode = 1; });

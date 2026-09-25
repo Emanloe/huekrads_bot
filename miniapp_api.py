@@ -19,7 +19,7 @@ from telegram import Bot
 
 from config import BOT_TOKEN
 from database import (
-    format_user_title, format_user_title_plain,
+    format_user_title, format_user_title_plain, get_duel_top_read_model,
 )
 from gnome_avatars import (
     DEFAULT_GNOME_VARIANT, GNOME_FILE_IDS, GNOME_VARIANTS,
@@ -325,6 +325,28 @@ def create_miniapp_api(*, bot_token: str | None = None,
                 variant, session.chat_id, target_user_id,
             ),
         }
+
+    @app.get("/api/v1/duel/hall-of-fame")
+    def hall_of_fame(session: MiniAppSession = Depends(require_session)):
+        rows = get_duel_top_read_model(session.chat_id, limit=10)
+        return {"sort_by": "wins", "players": [
+            {
+                "rank": rank,
+                "user_id": row["user_id"],
+                "title": format_user_title_plain({
+                    "display_name": (row["display_name"] or row["username"]).lstrip("@")
+                    if (row["display_name"] or row["username"]) else None,
+                    "dwarf_name": row["dwarf_name"],
+                }),
+                "points": row["points"],
+                "wins": row["wins"],
+                "losses": row["losses"],
+                "gnome_image_url": presented_gnome_image_url(
+                    row["gnome_variant"], session.chat_id, row["user_id"],
+                ),
+            }
+            for rank, row in enumerate(rows, 1)
+        ]}
 
     @app.get("/api/v1/duel/opponents")
     def opponents(session: MiniAppSession = Depends(require_session)):

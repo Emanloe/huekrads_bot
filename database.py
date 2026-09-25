@@ -1646,28 +1646,47 @@ def get_duel_top(
     chat_id: int, sort_by: str = "wins", limit: int = 10,
     include_dwarf_name: bool = False,
 ) -> list:
+    rows = get_duel_top_read_model(chat_id, sort_by=sort_by, limit=limit)
+    return [
+        (row["username"], row["display_name"], row["wins"], row["losses"],
+         row["points"], row["dwarf_name"])
+        if include_dwarf_name else
+        (row["username"], row["display_name"], row["wins"], row["losses"],
+         row["points"])
+        for row in rows
+    ]
+
+
+def get_duel_top_read_model(
+    chat_id: int, sort_by: str = "wins", limit: int = 10,
+) -> list[dict]:
+    """Canonical chat leaderboard rows for Telegram and Mini App presentation."""
     valid_cols = {"wins": "wins", "points": "points"}
     sort_column = valid_cols.get(sort_by, "wins")
 
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(f"""
-            SELECT username, display_name, wins, losses, points, dwarf_name
+            SELECT user_id, username, display_name, wins, losses, points,
+                   dwarf_name, gnome_variant
             FROM duel_users
             WHERE chat_id = ?
             ORDER BY {sort_column} DESC, wins DESC
             LIMIT ?
         """, (chat_id, limit))
         rows = cursor.fetchall()
-        
-        cleaned_rows = []
-        for u, d, w, l, p, dwarf_name in rows:
-            clean_u = _clean_username(u)
-            clean_d = _clean_username(d) or d
-            row = (clean_u, clean_d, w, l, p)
-            cleaned_rows.append(row + (dwarf_name,) if include_dwarf_name else row)
-            
-        return cleaned_rows
+
+        return [
+            {
+                "user_id": user_id,
+                "username": _clean_username(username),
+                "display_name": _clean_username(display_name) or display_name,
+                "wins": wins, "losses": losses, "points": points,
+                "dwarf_name": dwarf_name, "gnome_variant": gnome_variant,
+            }
+            for user_id, username, display_name, wins, losses, points,
+                dwarf_name, gnome_variant in rows
+        ]
 
 
 # ==========================================
