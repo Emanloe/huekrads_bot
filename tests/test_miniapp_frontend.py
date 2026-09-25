@@ -63,12 +63,21 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert 'content.append(renderTitles(data.titles))' in js
     for title in ("Хуяние", "Статус", "Инвентарь"):
         assert f'addHeading(content, "{title}")' in js
-    assert re.search(r'\.home-profile\s*\{[^}]*grid-template-columns:\s*200px minmax\(0,\s*1fr\)', css)
-    assert re.search(r'\.gnome-image\s*\{[^}]*width:\s*200px;\s*height:\s*200px;', css)
+    assert re.search(r'\.home-profile\s*\{[^}]*--gnome-size:\s*clamp\(125px, 27vw, 200px\)', css)
+    assert re.search(r'\.home-profile\s*\{[^}]*grid-template-columns:\s*var\(--gnome-size\) minmax\(0, 1fr\)', css)
+    assert re.search(r'\.gnome-image\s*\{[^}]*width:\s*var\(--gnome-size\);\s*height:\s*var\(--gnome-size\)', css)
+    assert "aspect-ratio: 1 / 1" in css
     assert "object-fit: contain" in css
     assert "image-rendering: pixelated" in css
-    assert re.search(r'@media \(max-width: 560px\)\s*\{\s*\.home-profile\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)', css)
-    assert re.search(r'@media \(max-width: 240px\)\s*\{\s*\.gnome-image\s*\{[^}]*aspect-ratio:\s*1 / 1', css)
+    assert re.search(r'@media \(max-width: 480px\)\s*\{\s*\.home-profile-info \.data-cell\s*\{\s*display:\s*block', css)
+    assert re.search(r'@media \(max-width: 299px\)\s*\{\s*\.home-profile\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)', css)
+    assert "@media (max-width: 560px)" not in css
+    assert ".home-profile-info .value { min-width: 0; overflow-wrap: anywhere; }" in css
+    for viewport, expected_min, expected_max in ((360, 120, 150), (420, 120, 150), (550, 120, 150), (920, 200, 200)):
+        image_size = min(200, max(125, viewport * .27))
+        assert expected_min <= image_size <= expected_max
+        if viewport >= 300:
+            assert viewport - image_size - 8 - 40 >= 130
     assert "html { min-width: 0; }" in css
 
 
