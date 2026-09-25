@@ -209,7 +209,7 @@ async def test_phase_visibility_and_finished_battle_limit(boss_world):
     duel.ACTIVE_BOSS_BATTLES.pop(CHAT_A)
     finished = await get_boss_battle_read_model(CHAT_A, 101)
     assert finished["battle"] is None
-    assert "recent_result" not in finished
+    assert finished["recent_result"] is None
 
 
 @pytest.mark.asyncio

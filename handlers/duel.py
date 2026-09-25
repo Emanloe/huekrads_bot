@@ -95,6 +95,10 @@ from handlers.duel_service import (
     submit_persistent_duel_block,
 )
 from handlers.boss_service import apply_boss_action
+from handlers.boss_result_repository import (
+    build_boss_result, save_boss_result, update_boss_result_loot,
+    update_boss_result_rewards,
+)
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_state import (
     _advance_duel_round,
@@ -260,6 +264,12 @@ def _maybe_award_boss_item(chat_id: int, battle: dict) -> str | None:
     survivor = random.choice(survivors)
     item = random.choice(DUEL_ITEMS)
     add_duel_inventory_item(chat_id, survivor["tg_user"].id, item["id"])
+    battle["_final_item_loot"] = {
+        "recipient_user_id": survivor["tg_user"].id,
+        "recipient_title": format_user_title_plain(survivor["data"]),
+        "item_id": item["id"],
+        "item_name": item["name"],
+    }
     return get_text(
         "boss.report.item_loot",
         item_name=escape(item["name"]),
@@ -333,6 +343,14 @@ BOSSES = [
     }
     for boss_id in BOSS_CATALOG_IDS
 ]
+
+
+def _boss_catalog_id(boss: dict) -> str | None:
+    return next(
+        (boss_id for boss_id, known in zip(BOSS_CATALOG_IDS, BOSSES)
+         if boss is known or boss == known),
+        None,
+    )
 
 
 # ============================================================
@@ -2559,6 +2577,16 @@ async def _boss_send_final_report(
     else:
         if item_loot_text is not None:
             text += f"\n\n{item_loot_text}"
+            if battle.get("battle_id") and battle.get("_final_item_loot"):
+                try:
+                    update_boss_result_loot(
+                        chat_id, battle["battle_id"], battle["_final_item_loot"],
+                    )
+                except Exception:
+                    logging.exception(
+                        "Не удалось сохранить предмет после боя с боссом в чате %s",
+                        chat_id,
+                    )
 
     chunks = []
     current = ""
@@ -2639,18 +2667,32 @@ async def _boss_send_final_report(
 # ПОБЕДА
 # ------------------------------------------------------------
 
+def _persist_boss_finish_snapshot(chat_id: int, battle: dict, *, victory: bool) -> None:
+    """Store the resolved outcome before the live battle leaves memory."""
+    if not battle.get("battle_id"):
+        return
+    boss_id = _boss_catalog_id(battle["boss"])
+    if boss_id is None:
+        logging.warning("Unknown boss catalog entry in finished battle %s", battle["battle_id"])
+        return
+    try:
+        save_boss_result(build_boss_result(
+            chat_id, battle, boss_id, BOSS_REQUIRED_HITS, victory=victory,
+        ))
+    except Exception:
+        logging.exception("Не удалось сохранить итог боя с боссом в чате %s", chat_id)
+
 async def _boss_finish_victory(
     context,
     chat_id,
 ):
-    battle = ACTIVE_BOSS_BATTLES.pop(
-        chat_id,
-        None,
-    )
+    battle = ACTIVE_BOSS_BATTLES.get(chat_id)
 
     if not battle:
         return
 
+    _persist_boss_finish_snapshot(chat_id, battle, victory=True)
+    ACTIVE_BOSS_BATTLES.pop(chat_id, None)
     _boss_cancel_timer(battle)
 
     try:
@@ -2658,6 +2700,7 @@ async def _boss_finish_victory(
     except Exception:
         logging.exception("Не удалось записать месячную победу над боссом в чате %s", chat_id)
 
+    rewarded_user_ids = []
     for participant in battle["participants"].values():
         if not participant["alive"]:
             continue
@@ -2665,14 +2708,22 @@ async def _boss_finish_victory(
         user_id = participant["tg_user"].id
 
         try:
-            reward_boss_victory(
+            rewarded = reward_boss_victory(
                 user_id=user_id,
                 chat_id=chat_id,
             )
+            if rewarded:
+                rewarded_user_ids.append(user_id)
         except Exception:
             logging.exception(
                 "Ошибка награды за победу над боссом"
             )
+
+    if battle.get("battle_id"):
+        try:
+            update_boss_result_rewards(chat_id, battle["battle_id"], rewarded_user_ids)
+        except Exception:
+            logging.exception("Не удалось сохранить награды боя с боссом в чате %s", chat_id)
 
     try:
         await _boss_send_final_report(
@@ -2697,14 +2748,13 @@ async def _boss_finish_defeat(
     context,
     chat_id,
 ):
-    battle = ACTIVE_BOSS_BATTLES.pop(
-        chat_id,
-        None,
-    )
+    battle = ACTIVE_BOSS_BATTLES.get(chat_id)
 
     if not battle:
         return
 
+    _persist_boss_finish_snapshot(chat_id, battle, victory=False)
+    ACTIVE_BOSS_BATTLES.pop(chat_id, None)
     _boss_cancel_timer(battle)
 
     try:

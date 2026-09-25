@@ -458,6 +458,28 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_miniapp_session_expiry
             ON miniapp_sessions (expires_at)
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS boss_battle_results (
+                chat_id INTEGER NOT NULL,
+                battle_id TEXT NOT NULL,
+                boss_id TEXT NOT NULL,
+                boss_name TEXT NOT NULL,
+                finished_at INTEGER NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('victory', 'defeat')),
+                hits INTEGER NOT NULL,
+                required_hits INTEGER NOT NULL,
+                rounds INTEGER NOT NULL,
+                participants_json TEXT NOT NULL,
+                hero_user_id INTEGER,
+                rewarded_user_ids_json TEXT NOT NULL DEFAULT '[]',
+                item_loot_json TEXT,
+                PRIMARY KEY (chat_id, battle_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_boss_battle_results_recent
+            ON boss_battle_results (chat_id, finished_at DESC)
+        """)
 
         # Fix broken initial data where points=0 and losses=20 from prior seed bug
         cursor.execute("""

@@ -3,6 +3,7 @@
 from database import format_user_title_plain
 from handlers import boss_registration, duel
 from handlers.boss_presentation import BOSS_REQUIRED_HITS
+from handlers.boss_result_repository import get_latest_boss_result
 from text_resources import get_text
 
 
@@ -19,13 +20,8 @@ def _available_actions(battle: dict, viewer: dict | None) -> list[dict]:
 
 
 def _public_boss(boss: dict) -> dict:
-    boss_id = next(
-        (boss_id for boss_id, known in zip(duel.BOSS_CATALOG_IDS, duel.BOSSES)
-         if boss is known or boss == known),
-        None,
-    )
     return {
-        "id": boss_id,
+        "id": duel._boss_catalog_id(boss),
         "name": boss["name"],
         "emoji": boss["emoji"],
         "description": boss["description"],
@@ -73,6 +69,7 @@ def _battle_snapshot(battle: dict, viewer_user_id: int) -> dict:
             "participants": rows,
         },
         "registration": None,
+        "recent_result": None,
         "available_actions": _available_actions(battle, viewer),
         "viewer": {
             "in_battle": viewer is not None,
@@ -88,6 +85,43 @@ def _battle_snapshot(battle: dict, viewer_user_id: int) -> dict:
     }
 
 
+def _public_recent_result(result: dict, viewer_user_id: int) -> dict:
+    participants = result["participants"]
+    viewer = next((row for row in participants if row["user_id"] == viewer_user_id), None)
+    hero = next(
+        (row for row in participants if row["user_id"] == result["hero_user_id"]),
+        None,
+    )
+    loot = result["item_loot"]
+    return {
+        "battle_id": result["battle_id"],
+        "boss": {"id": result["boss_id"], "name": result["boss_name"]},
+        "finished_at": result["finished_at"],
+        "outcome": result["outcome"],
+        "hits": result["hits"],
+        "required_hits": result["required_hits"],
+        "rounds": result["rounds"],
+        "participants": participants,
+        "participants_count": len(participants),
+        "alive_count": sum(row["alive"] for row in participants),
+        "hero": {
+            "user_id": hero["user_id"], "title": hero["title"],
+            "hits": hero["hits"], "blocks": hero["blocks"],
+            "rounds_survived": hero["rounds_survived"],
+        } if hero else None,
+        "item_loot": loot,
+        "viewer": {
+            "participated": viewer is not None,
+            "alive": viewer["alive"] if viewer else None,
+            "hits": viewer["hits"] if viewer else None,
+            "blocks": viewer["blocks"] if viewer else None,
+            "rounds_survived": viewer["rounds_survived"] if viewer else None,
+            "rewarded": viewer_user_id in result["rewarded_user_ids"],
+            "received_item": bool(loot and loot["recipient_user_id"] == viewer_user_id),
+        },
+    }
+
+
 async def get_boss_battle_read_model(chat_id: int, viewer_user_id: int) -> dict:
     """Read the live shared battle without advancing timers or resolving rounds."""
     battle = duel.ACTIVE_BOSS_BATTLES.get(chat_id)
@@ -97,8 +131,10 @@ async def get_boss_battle_read_model(chat_id: int, viewer_user_id: int) -> dict:
                 return _battle_snapshot(battle, viewer_user_id)
 
     count, registered = boss_registration._boss_registration_snapshot(chat_id, viewer_user_id)
+    result = get_latest_boss_result(chat_id)
     return {
         "battle": None,
+        "recent_result": _public_recent_result(result, viewer_user_id) if result else None,
         "available_actions": [],
         "registration": {
             "open": boss_registration._boss_registration_is_open(),

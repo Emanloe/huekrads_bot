@@ -535,6 +535,42 @@ async function testPolling() {
   const bossBody = nodes.get("boss-content");
   assert.ok(bossBody.children[0].children[0].textContent.includes("Сейчас битвы"));
   assert.ok(bossBody.children[0].children[2].textContent.includes("/boss_reg"));
+  const recentResult = {
+    battle_id: "finished-1", boss: { id: "deep_snouted_baron", name: "<boss>" },
+    outcome: "victory", hits: 5, required_hits: 5, rounds: 3,
+    participants_count: 2, alive_count: 1,
+    participants: [
+      { user_id: 101, title: "<winner>", alive: true, hits: 4 },
+      { user_id: 202, title: "<fallen>", alive: false, hits: 1 },
+    ],
+    hero: { user_id: 101, title: "<winner>", hits: 4, blocks: 2,
+      rounds_survived: 3 },
+    viewer: { participated: true, alive: true, hits: 4, blocks: 2,
+      rounds_survived: 3, rewarded: true,
+      received_item: true },
+    item_loot: { item_name: "<sword>", recipient_title: "<winner>" },
+  };
+  app.renderBoss({ battle: null, recent_result: recentResult,
+    registration: { open: true, participants_count: 2, viewer_registered: true } });
+  const victoryResult = bossBody.querySelector(".boss-result");
+  assert.ok(victoryResult);
+  assert.equal(findClass(victoryResult, "boss-result-outcome").textContent, "ПОБЕДА");
+  assert.equal(victoryResult.querySelector(".boss-identity").textContent, "<boss>");
+  assert.equal(victoryResult.querySelector(".boss-team-name").textContent, "<winner>");
+  assert.ok(victoryResult.children.some(node => node.textContent.includes("<sword>")));
+  assert.ok(bossBody.children[0].children.some(node =>
+    node.textContent.includes("Запись на бой")));
+  assert.ok(!bossBody.children[0].children.some(node =>
+    node.textContent.includes("Сейчас битвы с боссом нет")));
+  app.renderBoss({ battle: null, recent_result: {
+    ...recentResult, outcome: "defeat", hits: 4,
+    viewer: { participated: true, alive: false, hits: 1, blocks: 0,
+      rounds_survived: 2, rewarded: false,
+      received_item: false }, item_loot: null,
+  }, registration: { open: false, participants_count: 0, viewer_registered: false } });
+  assert.equal(bossBody.querySelector(".boss-result-outcome").textContent, "ПОРАЖЕНИЕ");
+  assert.ok(bossBody.querySelector(".boss-result"));
+  app.renderBoss(bossModel);
   intervals[2].callback();
   assert.equal(bossFetchCount, 1);
   now += 8000;

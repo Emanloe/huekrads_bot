@@ -190,6 +190,9 @@ main { padding: 7px; min-height: 300px; }
 .boss-action { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
 .boss-action .small-button { min-width: 0; flex: 1 1 90px; overflow-wrap: anywhere; }
 .boss-action .small-button.is-selected { background: var(--accent); color: var(--text-on-dark); }
+.boss-result-outcome { display: block; margin: 7px 0; padding: 5px 8px; border: 1px solid var(--border-strong); font: bold 16px/1.1 Georgia, "Times New Roman", serif; }
+.boss-result-outcome.victory { background: #dcebd8; color: #153f24; }
+.boss-result-outcome.defeat { background: #eadada; color: #5a2020; }
 
 .duel-heading { margin: 0 0 8px; font-weight: bold; }
 .duel-versus { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 9px; }

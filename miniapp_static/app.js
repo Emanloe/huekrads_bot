@@ -299,6 +299,64 @@
     body.replaceChildren(content);
   }
 
+  function renderBossResult(result) {
+    const section = element("section", "boss-result");
+    addHeading(section, "Итоги последней битвы");
+    const banner = element("div", "boss-banner");
+    banner.append(element("span", "boss-emoji", "⚔"),
+      element("strong", "boss-identity", result.boss.name));
+    section.append(banner);
+    const victory = result.outcome === "victory";
+    section.append(element("strong", victory ?
+      "boss-result-outcome victory" : "boss-result-outcome defeat",
+      victory ? "ПОБЕДА" : "ПОРАЖЕНИЕ"));
+    const grid = element("div", "data-grid");
+    grid.append(
+      dataCell("Попадания", `${result.hits} / ${result.required_hits}`),
+      dataCell("Раундов", result.rounds),
+      dataCell("Участников", result.participants_count),
+      dataCell("Выжили", result.alive_count),
+      dataCell("Выбыли", result.participants_count - result.alive_count)
+    );
+    if (result.hero) {
+      grid.append(dataCell("Герой битвы", result.hero.title));
+      grid.append(dataCell("Попадания героя", result.hero.hits));
+      grid.append(dataCell("Блоки героя", result.hero.blocks));
+      if (victory) grid.append(dataCell("Раундов героя", result.hero.rounds_survived));
+    }
+    section.append(grid);
+    addHeading(section, "Ваш результат");
+    const viewer = result.viewer || {};
+    let own = "Вы не участвовали в этой битве.";
+    if (viewer.participated) {
+      own = viewer.alive ? "Вы выжили." : "Вы выбыли.";
+      own += ` Попаданий: ${viewer.hits ?? 0}.`;
+      own += ` Блоков: ${viewer.blocks ?? 0}. Раундов: ${viewer.rounds_survived ?? 0}.`;
+      if (viewer.rewarded) own += " Награда получена: 100 очков и восстановление.";
+      if (viewer.received_item) own += " Вы получили предмет.";
+    }
+    section.append(notice(own));
+    if (result.item_loot) {
+      section.append(notice(
+        `Предмет: ${result.item_loot.item_name} — ${result.item_loot.recipient_title}.`
+      ));
+    }
+    if (Array.isArray(result.participants) && result.participants.length) {
+      addHeading(section, "Участники");
+      const team = element("ul", "boss-team");
+      for (const participant of result.participants) {
+        const row = element("li");
+        row.append(element("span", "boss-team-name", participant.title),
+          element("span", "boss-team-state", participant.alive ?
+            `Выжил · попаданий: ${participant.hits}` :
+            `Выбыл · попаданий: ${participant.hits}`));
+        team.append(row);
+      }
+      section.append(team);
+    }
+    return section;
+  }
+
   function renderBoss(data) {
     const body = document.getElementById("boss-content");
     const content = element("div");
@@ -306,7 +364,9 @@
     bossSnapshot = data;
     bossCountdown = null;
     if (!battle) {
-      content.append(notice("Сейчас битвы с боссом нет."));
+      content.append(data.recent_result ?
+        renderBossResult(data.recent_result) :
+        notice("Сейчас битвы с боссом нет."));
       addHeading(content, "Запись на бой");
       const registration = data.registration || {};
       content.append(notice(registration.open ?
