@@ -196,6 +196,19 @@ stats:
     <b>{huyanie_text}</b>
     👹 Побеждено боссов: <b>{bosses_defeated}</b>
     Статус на сегодня: <b>{status}</b>
+inspect:
+  usage: "Ответьте командой /inspect на сообщение игрока или укажите /inspect @username."
+  inaccessible: "Игрок не зарегистрирован в этом чате или недоступен."
+  summary: |-
+    🔎 <b>Осмотр игрока: {title}</b>
+
+    Очки: <b>{points} / {max_points}</b>
+    Побед: <b>{wins}</b>
+    Поражений: <b>{losses}</b>
+    Хуяние:
+    <b>{huyanie_text}</b>
+    👹 Побеждено боссов: <b>{bosses_defeated}</b>
+    Статус на сегодня: <b>{status}</b>
 inventory:
   line: "<b>Инвентарь:</b> {items}"
   empty: пусто

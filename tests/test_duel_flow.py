@@ -1206,13 +1206,17 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
         "get_or_create_duel_user",
         Mock(return_value=user_data),
     )
-    monkeypatch.setattr(duel, "format_user_title", lambda _user: "&lt;b&gt;Статист&lt;/b&gt;")
-    monkeypatch.setattr(duel, "get_bosses_defeated", lambda **_kwargs: 4)
-    monkeypatch.setattr(duel, "get_win_title", lambda _count: "🍆 Победитель")
-    monkeypatch.setattr(duel, "get_loss_title", lambda _count: "💀 Лузер")
-    monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: "🔪 Вор")
-    monkeypatch.setattr(duel, "get_duel_inventory", lambda *_args: [])
-    monkeypatch.setattr(duel, "has_huecrab", lambda *_args: False)
+    model = {
+        "telegram_title": "&lt;b&gt;Статист&lt;/b&gt;", "telegram_inventory": "Промасленная жилетка, Нож",
+        "points": 37, "max_points": 100, "wins": 12, "losses": 8,
+        "titles": {
+            "wins": {"text": "🍆 Победитель", "count": 12},
+            "losses": {"text": "💀 Лузер", "count": 8},
+            "stolen_dicks": {"text": "🔪 Вор", "count": 3},
+        },
+        "boss_wins": 4, "dick_status": {"text": "С хуем 🍆"}, "pet": None,
+    }
+    monkeypatch.setattr(duel, "player_stats_read_model", lambda *_args: model)
 
     await duel.duel_stats_command(update, fake_context)
 
@@ -1230,10 +1234,9 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     )
 
     sent.reset_mock()
-    user_data["dick_stolen_today"] = True
-    monkeypatch.setattr(duel, "get_win_title", lambda _count: None)
-    monkeypatch.setattr(duel, "get_loss_title", lambda _count: None)
-    monkeypatch.setattr(duel, "get_stolen_dicks_title", lambda _count: None)
+    model["dick_status"]["text"] = "Без хуя 💀"
+    for category in model["titles"].values():
+        category["text"] = None
 
     await duel.duel_stats_command(update, fake_context)
 

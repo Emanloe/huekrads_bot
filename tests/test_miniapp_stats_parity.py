@@ -168,8 +168,9 @@ async def test_me_and_opponent_titles_are_chat_scoped_with_zero_point_eligibilit
             f"/api/v1/duel/opponents?chat_id={CHAT_B}",
             headers={**a, "X-Chat-Id": str(CHAT_B)},
         )).json()
-        assert [item["user_id"] for item in opponents_a["opponents"]] == [202]
-        opponent_a = opponents_a["opponents"][0]
+        assert [item["user_id"] for item in opponents_a["opponents"]] == [303, 202]
+        assert opponents_a["opponents"][0]["duel_ineligibility"] == "no_dick"
+        opponent_a = opponents_a["opponents"][1]
         assert opponent_a["points"] == 0
         assert (opponent_a["wins"], opponent_a["losses"]) == (138, 119)
         assert opponent_a["titles"] == get_duel_title_read_model(
@@ -179,9 +180,10 @@ async def test_me_and_opponent_titles_are_chat_scoped_with_zero_point_eligibilit
             "wins", "losses", "stolen_dicks",
         ))
         assert "inventory" not in opponent_a and "boss_wins" not in opponent_a
-        # The blocked challenger still sees no eligible list in B.
+        # The blocked challenger can still inspect registered players in B.
         opponents_b = (await client.get("/api/v1/duel/opponents", headers=b)).json()
-        assert opponents_b == {"ineligibility": "no_dick", "opponents": []}
+        assert opponents_b["ineligibility"] == "no_dick"
+        assert [item["user_id"] for item in opponents_b["opponents"]] == [303, 202]
 
 
 @pytest.mark.asyncio

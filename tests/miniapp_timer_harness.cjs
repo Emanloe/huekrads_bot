@@ -13,10 +13,36 @@ class Node {
     this.children = [];
     this.disabled = false;
     this.listeners = {};
+    this.parent = null;
     this.classList = { toggle() {} };
   }
-  append(...nodes) { this.children.push(...nodes); }
-  replaceChildren(...nodes) { this.children = nodes; }
+  append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
+  replaceChildren(...nodes) {
+    for (const child of this.children) child.parent = null;
+    this.children = [];
+    this.append(...nodes);
+  }
+  insertBefore(node, reference) {
+    const index = this.children.indexOf(reference);
+    assert.notEqual(index, -1);
+    node.parent = this;
+    this.children.splice(index, 0, node);
+  }
+  remove() {
+    if (!this.parent) return;
+    const index = this.parent.children.indexOf(this);
+    if (index !== -1) this.parent.children.splice(index, 1);
+    this.parent = null;
+  }
+  querySelector(selector) {
+    const className = selector.startsWith(".") ? selector.slice(1) : null;
+    for (const child of this.children) {
+      if (className && child.className.split(" ").includes(className)) return child;
+      const descendant = child.querySelector(selector);
+      if (descendant) return descendant;
+    }
+    return null;
+  }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute() {}
   removeAttribute() {}
@@ -34,8 +60,13 @@ class Node {
 }
 
 const nodes = new Map();
-for (const id of ["duel-content", "app-status", "refresh-button"]) {
-  nodes.set(id, new Node());
+for (const view of ["home", "opponents", "duel"]) {
+  const screen = new Node("section");
+  const content = new Node();
+  content.className = "panel-body";
+  screen.append(content);
+  nodes.set(`screen-${view}`, screen);
+  nodes.set(`${view}-content`, content);
 }
 const intervals = [];
 const timeouts = [];
@@ -44,13 +75,14 @@ let wallOffset = 0;
 let fetchCount = 0;
 let moveCount = 0;
 let moveMode = "accepted";
+let getMode = "ok";
 let serverDuel = null;
+let profileFetchCount = 0;
 const document = {
   hidden: false,
   listeners: {},
   createElement: tag => new Node(tag),
   getElementById: id => nodes.get(id),
-  querySelector: () => new Node(),
   querySelectorAll: selector => selector === ".zone-row button" ?
     nodes.get("duel-content").querySelectorAll(selector) : [],
   addEventListener(name, callback) { this.listeners[name] = callback; },
@@ -62,6 +94,22 @@ const window = {
 };
 const epoch = 1_700_000_000_000;
 const fetch = async (url, options) => {
+  if (url === "/api/v1/players/202") {
+    assert.equal(options.method, "GET");
+    profileFetchCount++;
+    return {
+      ok: true,
+      headers: { get: name => name === "content-type" ? "application/json" : null },
+      json: async () => ({
+        display_name: "<script>alert(1)</script>", dwarf_name: "<img src=x>",
+        points: 0, max_points: 100, wins: 100, losses: 2, daily_wins: 0,
+        ineligibility: "no_dick", boss_wins: 3, dick_status: { text: "Без хуя" },
+        titles: { wins: { text: "<b>title</b>", count: 100 },
+          losses: { text: null, count: 2 }, stolen_dicks: { text: null, count: 0 } },
+        inventory: [{ name: "<unsafe item>", count: 1 }], pet: null,
+      }),
+    };
+  }
   if (url === "/api/v1/duel/move") {
     assert.equal(options.method, "POST");
     moveCount++;
@@ -74,6 +122,12 @@ const fetch = async (url, options) => {
   }
   assert.equal(url, "/api/v1/duel/active");
   fetchCount++;
+  if (getMode === "network") throw new Error("network unavailable");
+  if (getMode === "expired") return {
+    ok: false, status: 401,
+    headers: { get: name => name === "content-type" ? "application/json" : null },
+    json: async () => ({ detail: { code: "session_expired" } }),
+  };
   return {
     ok: true,
     headers: { get: name => name === "content-type" ? "application/json" :
@@ -86,7 +140,7 @@ const boot = /\s+bootstrap\(\);\s*\}\)\(\);\s*$/;
 assert.ok(boot.test(source));
 const instrumented = source.replace(boot, `
   globalThis.appTest = {
-    renderDuel, updateCountdown, loadView, submitMove,
+    renderDuel, renderOpponents, updateCountdown, loadView, submitMove,
     setContext(token, view) { sessionToken = token; currentView = view; },
     get countdownTurn() { return countdownTurn; },
   };
@@ -302,6 +356,51 @@ async function testPolling() {
   assert.equal(moveCount, 2);
   assert.equal(fetchCount, beforeUncertain + 1);
   assert.equal(app.countdownTurn.turnId, 23);
+
+  // Network errors stay in the relevant tab and clear after a successful poll.
+  getMode = "network";
+  assert.equal(await app.loadView("duel", true), false);
+  const duelScreen = nodes.get("screen-duel");
+  assert.ok(duelScreen.querySelector(".view-message").textContent.includes("Нет связи"));
+  getMode = "ok";
+  assert.equal(await app.loadView("duel", true), true);
+  assert.equal(duelScreen.querySelector(".view-message"), null);
+
+  // Session expiry remains visible on the active tab and asks for /duel_app.
+  getMode = "expired";
+  assert.equal(await app.loadView("duel", true), false);
+  assert.ok(nodes.get("duel-content").children[0].textContent.includes("/duel_app"));
+  assert.equal(duelScreen.querySelector(".view-message"), null);
+  const afterExpiry = fetchCount;
+  now += 1000;
+  intervals[0].callback();
+  assert.equal(fetchCount, afterExpiry);
+
+  // A dickless viewer still has a card and can inspect a dickless target.
+  app.setContext("test-session", "opponents");
+  app.renderOpponents({
+    ineligibility: "no_dick", opponents: [{
+      user_id: 202, username: "<unsafe>", title: "Other", points: 0,
+      wins: 100, losses: 2, duel_ineligibility: "no_dick",
+      titles: { wins: { text: "Winner", count: 100 } },
+    }],
+  });
+  const opponentBody = nodes.get("opponents-content");
+  const list = findClass(opponentBody.children[0], "opponent-list");
+  assert.equal(list.children.length, 1);
+  const actions = findClass(list.children[0], "opponent-actions");
+  assert.equal(actions.children[0].textContent, "Осмотреть");
+  assert.equal(actions.children[0].disabled, false);
+  assert.equal(actions.children[1].disabled, true);
+  assert.equal(actions.children[2].textContent, "Сегодня без хуя");
+  await actions.children[0].listeners.click();
+  assert.equal(profileFetchCount, 1);
+  const profile = opponentBody.children[0];
+  assert.equal(findClass(profile, "inspect-back").textContent, "← К соперникам");
+  assert.equal(findClass(profile, "data-grid").children[0].children[1].textContent,
+    "<script>alert(1)</script>");
+  findClass(profile, "inspect-back").listeners.click();
+  assert.equal(findClass(opponentBody.children[0], "opponent-list").children.length, 1);
 }
 
 testPolling().catch(error => { console.error(error); process.exitCode = 1; });

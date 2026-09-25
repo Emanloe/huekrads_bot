@@ -26,12 +26,31 @@ def test_duel_timer_and_action_layout_in_browser_runtime():
     subprocess.run([node, str(harness)], check=True, timeout=10)
 
 
+def test_global_refresh_toolbar_is_absent_but_automatic_sync_remains():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert re.search(r"</nav>\s*<main>\s*<section id=\"screen-home\"", html)
+    for removed in ("Данные обновлены", ">Обновить<", "app-status", "refresh-button",
+                    'class="toolbar"'):
+        assert removed not in html + js
+    assert ".toolbar" not in css
+    assert ".view-message" in css
+    assert 'setViewStatus(view, error.message || "Не удалось загрузить данные.", true)' in js
+    assert 'notice(message, true)' in js
+    assert 'const refreshed = await loadView("duel", true)' in js
+    assert 'const ACTIVE_POLL_MS = 1000' in js
+    assert 'const IDLE_POLL_MS = 8000' in js
+    assert 'window.setInterval(updateCountdown, COUNTDOWN_TICK_MS)' in js
+
+
 @pytest.mark.asyncio
 async def test_healthz_needs_no_session_or_game_reads(monkeypatch):
     def unexpected_call(*args, **kwargs):
         raise AssertionError("health check accessed game state")
 
-    for name in ("get_miniapp_session", "get_duel_profile", "list_duel_opponents",
+    for name in ("get_miniapp_session", "player_stats_read_model", "list_inspectable_players",
                  "get_current_duel_session"):
         monkeypatch.setattr(miniapp_api, name, unexpected_call)
     app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
@@ -81,6 +100,7 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
         assert "Telegram" in js.text
         assert css.headers["x-content-type-options"] == "nosniff"
         assert (await client.get("/api/v1/me")).status_code == 401
+        assert (await client.get("/api/v1/players/202")).status_code == 401
         assert (await client.get("/api/v1/duel/opponents")).status_code == 401
         assert (await client.get("/api/v1/duel/active")).status_code == 401
         assert (await client.post("/api/v1/session", json={
@@ -131,6 +151,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert routes == {
         "/api/v1/session": {"POST"},
         "/api/v1/me": {"GET"},
+        "/api/v1/players/{target_user_id}": {"GET"},
         "/api/v1/duel/opponents": {"GET"},
         "/api/v1/duel/active": {"GET"},
         "/api/v1/duel/start": {"POST"},
@@ -144,7 +165,7 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'src="https://telegram.org/js/telegram-web-app.js"' in html
     for path in routes:
         if path.startswith("/api/"):
-            assert path in js
+            assert (path in js if "{" not in path else "/api/v1/players/${encodeURIComponent(userId)}" in js)
     assert 'method: "POST", body: { init_data: webApp.initData, launch_token: launchToken }' in js
     assert "new URLSearchParams(webApp.initData).get(\"start_param\")" in js
     assert "localStorage" not in js

@@ -78,6 +78,7 @@ from handlers.duel import (
     duel_select_callback,
     persistent_duel_action_callback as duel_action_callback,
     duel_stats_command,
+    inspect_command,
     duel_top_command,
     duel_delete_command,
     gnomed_command,
@@ -131,6 +132,7 @@ BOT_COMMANDS = [
     BotCommand("dig", get_text("menu.commands.dig")),
     BotCommand("ball", get_text("menu.commands.ball")),
     BotCommand("duel_stats", get_text("menu.commands.duel_stats")),
+    BotCommand("inspect", get_text("menu.commands.inspect")),
     BotCommand("duel_top", get_text("menu.commands.duel_top")),
     BotCommand("duel_delete", get_text("menu.commands.duel_delete")),
     BotCommand("boss", get_text("menu.commands.boss")),
@@ -429,6 +431,8 @@ async def main():
             duel_stats_command,
         )
     )
+
+    application.add_handler(CommandHandler("inspect", inspect_command))
 
     application.add_handler(
         CommandHandler(

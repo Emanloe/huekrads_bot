@@ -176,7 +176,8 @@ async def test_http_opponents_apply_zero_point_rule_with_chat_isolation(temp_dat
         b = (await client.get(f"/api/v1/duel/opponents?chat_id={CHAT_A}",
                               headers={**headers_b, "X-Chat-Id": str(CHAT_A)})).json()
         assert [opponent["user_id"] for opponent in a["opponents"]] == [202]
-        assert [opponent["user_id"] for opponent in b["opponents"]] == [303]
+        assert [opponent["user_id"] for opponent in b["opponents"]] == [202, 303]
+        assert b["opponents"][0]["duel_ineligibility"] == "no_dick"
 
 
 @pytest.mark.asyncio
@@ -214,6 +215,7 @@ async def test_auth_failures_extra_chat_id_and_gets_do_not_write_game_state(temp
         assert replay.status_code == 401
         headers = await session_for(client, CHAT_A, 101)
         assert (await client.get("/api/v1/me", headers=headers)).json()["points"] == 20
+        assert (await client.get("/api/v1/players/202", headers=headers)).status_code == 200
         assert (await client.get("/api/v1/duel/opponents", headers=headers)).status_code == 200
         assert (await client.get("/api/v1/duel/active", headers=headers)).json() == {
             "duel": None, "recent_finished": None,
@@ -227,6 +229,7 @@ async def test_auth_failures_extra_chat_id_and_gets_do_not_write_game_state(temp
             conn.execute("UPDATE miniapp_sessions SET created_at = created_at - 7200, "
                          "expires_at = expires_at - 7200 WHERE token_digest = ?", (digest,))
         assert (await client.get("/api/v1/me", headers=headers)).status_code == 401
+        assert (await client.get("/api/v1/players/202", headers=headers)).status_code == 401
 
 
 @pytest.mark.asyncio

@@ -946,3 +946,24 @@ def list_duel_opponents(chat_id: int, user_id: int, limit: int = 20, *,
         opponents.append(DuelOpponent(opponent["user_id"], username, title))
 
     return DuelOpponentList(None, opponents)
+
+
+def list_inspectable_players(chat_id: int, viewer_id: int) -> tuple[str | None, list[dict]]:
+    """List registered chat players independently of duel admission."""
+    viewer = get_duel_user_by_id(chat_id, viewer_id, read_only=True)
+    if viewer is None:
+        return "not_registered", []
+    viewer_blocker = _get_duel_participant_ineligibility(viewer)
+    with get_db() as conn:
+        ids = [row[0] for row in conn.execute(
+            "SELECT user_id FROM duel_users WHERE chat_id = ? AND user_id != ? "
+            "ORDER BY wins DESC, user_id", (chat_id, viewer_id),
+        )]
+    players = []
+    for target_id in ids:
+        target = get_duel_user_by_id(chat_id, target_id, read_only=True)
+        if target is None:
+            continue
+        players.append({"user": target,
+                        "duel_ineligibility": _get_duel_participant_ineligibility(target)})
+    return viewer_blocker, players

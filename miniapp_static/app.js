@@ -25,12 +25,12 @@
   let duelPollStartedAt = -Infinity;
   let expiredDeadlineRefresh = null;
   let challengeInFlight = false;
+  let inspectedPlayerId = null;
+  let opponentsSnapshot = null;
   let moveInFlight = false;
   const loading = { home: null, opponents: null, duel: null };
 
-  const statusNode = document.getElementById("app-status");
-  const toolbar = document.querySelector(".toolbar");
-  const refreshButton = document.getElementById("refresh-button");
+  const viewStatuses = { home: null, opponents: null, duel: null };
 
   function element(tag, className, value) {
     const node = document.createElement(tag);
@@ -39,9 +39,28 @@
     return node;
   }
 
-  function setStatus(message, error = false) {
-    statusNode.textContent = message;
-    toolbar.classList.toggle("is-error", error);
+  function setViewStatus(view, message, error = false, kind = "read") {
+    let state = viewStatuses[view];
+    if (!state) {
+      const node = notice(message, error);
+      node.className += " view-message";
+      const screen = document.getElementById(`screen-${view}`);
+      screen.insertBefore(node, screen.querySelector(".panel-body"));
+      state = { node, kind };
+      viewStatuses[view] = state;
+    } else {
+      state.node.className = error ? "notice bad view-message" : "notice view-message";
+      state.node.textContent = message;
+      state.kind = kind;
+    }
+  }
+
+  function clearViewStatus(view, kind = null) {
+    const state = viewStatuses[view];
+    if (state && (!kind || state.kind === kind)) {
+      state.node.remove();
+      viewStatuses[view] = null;
+    }
   }
 
   function showUnavailable(message) {
@@ -49,13 +68,13 @@
     activeDuel = null;
     countdownNode = null;
     countdownTurn = null;
-    refreshButton.disabled = true;
+    inspectedPlayerId = null;
     for (const view of Object.keys(API_PATHS)) {
+      clearViewStatus(view);
       document.getElementById(`screen-${view}`).querySelector(".panel-body").replaceChildren(
-        element("p", "empty-content", "Данные доступны после открытия из Telegram.")
+        notice(message, true)
       );
     }
-    setStatus(message, true);
   }
 
   function dataCell(label, value) {
@@ -145,9 +164,18 @@
     return data;
   }
 
-  function renderHome(data) {
-    const body = document.getElementById("home-content");
+  function renderProfile(data, body, inspected = false) {
     const content = element("div");
+    if (inspected) {
+      const back = element("button", "small-button inspect-back", "← К соперникам");
+      back.type = "button";
+      back.addEventListener("click", () => {
+        inspectedPlayerId = null;
+        if (opponentsSnapshot) renderOpponents(opponentsSnapshot);
+        else loadView("opponents");
+      });
+      content.append(back, element("p", "hint", "Профиль игрока · только просмотр"));
+    }
     addHeading(content, "Гном");
     const grid = element("div", "data-grid");
     grid.append(
@@ -158,6 +186,7 @@
       dataCell("Побед сегодня", data.daily_wins),
       dataCell("Участие в дуэли", data.ineligibility === "no_dick" ? "Недоступно до завтра" : "Доступно")
     );
+    if (inspected) grid.append(dataCell("Telegram", data.username ? `@${data.username}` : "Не указан"));
     content.append(grid);
     addHeading(content, "Хуяние");
     content.append(renderTitles(data.titles));
@@ -184,14 +213,39 @@
     body.replaceChildren(content);
   }
 
+  function renderHome(data) {
+    renderProfile(data, document.getElementById("home-content"));
+  }
+
+  async function inspectOpponent(userId) {
+    if (!sessionToken || challengeInFlight) return;
+    inspectedPlayerId = userId;
+    setViewStatus("opponents", "Загрузка профиля…");
+    try {
+      const data = await apiRequest(`/api/v1/players/${encodeURIComponent(userId)}`);
+      if (!sessionToken || inspectedPlayerId !== userId) return;
+      renderProfile(data, document.getElementById("opponents-content"), true);
+      clearViewStatus("opponents", "read");
+    } catch (error) {
+      if (error.status === 401) showUnavailable(error.message);
+      else if (sessionToken) {
+        inspectedPlayerId = null;
+        setViewStatus("opponents", error.message || "Не удалось загрузить профиль.", true);
+      }
+    }
+  }
+
   function renderOpponents(data) {
+    opponentsSnapshot = data;
+    if (inspectedPlayerId !== null) return;
     const body = document.getElementById("opponents-content");
     const content = element("div");
     if (data.ineligibility === "no_dick") {
       content.append(notice("Сегодня дуэли недоступны: у вашего гнома нет хуя.", true));
     } else if (data.ineligibility) {
-      content.append(notice("Список соперников сейчас недоступен.", true));
-    } else if (!Array.isArray(data.opponents) || data.opponents.length === 0) {
+      content.append(notice("Дуэль сейчас недоступна; осмотр игроков доступен.", true));
+    }
+    if (!Array.isArray(data.opponents) || data.opponents.length === 0) {
       content.append(notice("В этом чате сейчас нет доступных соперников."));
     } else {
       content.append(element("p", "hint", "Соперники из текущего чата. Ходить можно здесь или в Telegram."));
@@ -205,11 +259,19 @@
         identity.append(element("span", "opponent-stats",
           `Очки: ${opponent.points} · Победы: ${opponent.wins} · Поражения: ${opponent.losses}`));
         identity.append(renderTitles(opponent.titles, true));
+        const inspect = element("button", "small-button", "Осмотреть");
+        inspect.type = "button";
+        inspect.addEventListener("click", () => inspectOpponent(opponent.user_id));
         const action = element("button", "small-button", "Вызвать");
         action.type = "button";
-        action.disabled = challengeInFlight;
+        const blocker = data.ineligibility || opponent.duel_ineligibility;
+        action.disabled = challengeInFlight || Boolean(blocker);
+        if (blocker) action.title = blocker === "no_dick" ? "Сегодня без хуя" : "Дуэль сейчас недоступна";
         action.addEventListener("click", () => challengeOpponent(opponent.user_id));
-        row.append(identity, action);
+        const actions = element("div", "opponent-actions");
+        actions.append(inspect, action);
+        if (blocker) actions.append(element("small", "duel-blocker", action.title));
+        row.append(identity, actions);
         list.append(row);
       }
       content.append(head, list);
@@ -218,23 +280,22 @@
   }
 
   async function challengeOpponent(opponentUserId) {
-    if (!sessionToken || challengeInFlight) return;
+    if (!sessionToken || challengeInFlight || inspectedPlayerId !== null) return;
     challengeInFlight = true;
     for (const button of document.querySelectorAll(".opponent-list button")) button.disabled = true;
-    setStatus("Начинаем дуэль…");
+    setViewStatus("opponents", "Начинаем дуэль…", false, "action");
     try {
       await apiRequest(START_DUEL_PATH, {
         method: "POST", body: { opponent_user_id: opponentUserId },
       });
-      if (await navigate("duel")) {
-        setStatus("Дуэль начата. Ходите в Mini App или Telegram.");
-      }
+      clearViewStatus("opponents", "action");
+      await navigate("duel");
     } catch (error) {
       if (error.status === 401) {
         showUnavailable(error.message);
       } else {
         await Promise.all([loadView("opponents", true), loadView("duel", true)]);
-        setStatus(error.message || "Не удалось начать дуэль. Обновите данные.", true);
+        if (sessionToken) setViewStatus("opponents", error.message || "Не удалось начать дуэль. Обновите данные.", true, "action");
       }
     } finally {
       challengeInFlight = false;
@@ -403,7 +464,7 @@
         !Number.isFinite(duel.deadline_at) || remainingCountdownMs() <= 0) return;
     moveInFlight = true;
     for (const button of document.querySelectorAll(".zone-row button")) button.disabled = true;
-    setStatus("Передаём выбор…");
+    setViewStatus("duel", "Передаём выбор…", false, "action");
     let accepted = false;
     let failure = null;
     try {
@@ -425,12 +486,11 @@
     if (!sessionToken) return;
     const refreshed = await loadView("duel", true);
     if (!refreshed) {
-      setStatus("Не удалось проверить состояние дуэли. Обновите экран перед новым ходом.", true);
+      setViewStatus("duel", "Не удалось проверить состояние дуэли. Обновите экран перед новым ходом.", true, "action");
     } else if (accepted) {
-      setStatus(activeDuel ? "Выбор принят. Дальше ждём состояние сервера." :
-        "Результат дуэли обновлён.");
+      clearViewStatus("duel", "action");
     } else {
-      setStatus(failure || "Проверьте состояние дуэли перед повторным выбором.", true);
+      setViewStatus("duel", failure || "Проверьте состояние дуэли перед повторным выбором.", true, "action");
     }
   }
 
@@ -470,17 +530,18 @@
     if (loading[view]) return loading[view];
     if (view === "duel") duelPollStartedAt = performance.now();
     const request = (async () => {
-      if (!silent) setStatus("Загрузка данных…");
+      if (!silent) setViewStatus(view, "Загрузка данных…");
       try {
         const data = await apiRequest(API_PATHS[view]);
+        if (!sessionToken) return false;
         if (view === "home") renderHome(data);
         else if (view === "opponents") renderOpponents(data);
         else renderDuel(data);
-        if (!silent) setStatus("Данные обновлены");
+        clearViewStatus(view, "read");
         return true;
       } catch (error) {
         if (error.status === 401) showUnavailable(error.message);
-        else setStatus(error.message || "Не удалось загрузить данные.", true);
+        else if (sessionToken) setViewStatus(view, error.message || "Не удалось загрузить данные.", true);
         return false;
       }
     })();
@@ -510,7 +571,6 @@
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => navigate(tab.dataset.view));
   }
-  refreshButton.addEventListener("click", () => loadView(currentView));
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || currentView !== "duel") return;
     updateCountdown();
@@ -554,7 +614,6 @@
       });
       if (typeof created.session_token !== "string" || !created.session_token) throw new Error();
       sessionToken = created.session_token;
-      refreshButton.disabled = false;
       await loadView("home");
     } catch {
       showUnavailable("Ссылка уже использована или устарела. Вернитесь в чат и вызовите /duel_app ещё раз.");

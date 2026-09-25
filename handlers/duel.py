@@ -21,6 +21,7 @@ from config import (
 from database import (
     get_or_create_duel_user,
     get_duel_user_by_username,
+    get_duel_user_by_id,
     delete_duel_user_by_username,
     apply_duel_result_plan,
     apply_duel_berserk,
@@ -86,6 +87,7 @@ from handlers.boss_state import (
 )
 from handlers.duel_input import extract_username as _extract_username
 from handlers.duel_service import list_duel_opponents
+from handlers.player_stats import player_stats_read_model, format_player_stats_telegram
 from handlers.duel_service import (
     start_persistent_duel, submit_persistent_duel_attack,
     submit_persistent_duel_block,
@@ -1674,76 +1676,36 @@ async def duel_stats_command(update, context):
 
     chat_id = update.message.chat_id
 
-    user = get_or_create_duel_user(
-        update.message.from_user,
-        chat_id,
-    )
-
-    title = format_user_title(user)
-
-    status = (
-        get_text("duel.stats.status.no_dick")
-        if user["dick_stolen_today"]
-        else get_text("duel.stats.status.has_dick")
-    )
-
-    bosses_defeated = get_bosses_defeated(
-        user_id=update.message.from_user.id,
-        chat_id=chat_id,
-    )
-
-    win_title = get_win_title(user["wins"])
-    loss_title = get_loss_title(user["losses"])
-    stolen_title = get_stolen_dicks_title(
-        user["stolen_dicks_count"]
-    )
-
-    huyanie_titles = []
-
-    if win_title:
-        huyanie_titles.append(
-            get_text("duel.stats.title_item", title=win_title, count=user["wins"])
-        )
-
-    if loss_title:
-        huyanie_titles.append(
-            get_text("duel.stats.title_item", title=loss_title, count=user["losses"])
-        )
-
-    if stolen_title:
-        huyanie_titles.append(
-            get_text(
-                "duel.stats.title_item",
-                title=stolen_title,
-                count=user["stolen_dicks_count"],
-            )
-        )
-
-    huyanie_text = (
-        "\n".join(huyanie_titles)
-        if huyanie_titles
-        else get_text("duel.stats.no_titles")
-    )
+    get_or_create_duel_user(update.message.from_user, chat_id)
+    model = player_stats_read_model(chat_id, update.message.from_user.id)
+    if model is not None:
+        await send_and_schedule(update, context, format_player_stats_telegram(model))
 
 
-    text = get_text(
-        "duel.stats.summary",
-        title=title,
-        points=user["points"],
-        max_points=MAX_DAILY_POINTS,
-        wins=user["wins"],
-        losses=user["losses"],
-        huyanie_text=huyanie_text,
-        bosses_defeated=bosses_defeated,
-        status=status,
-    )
-    inventory = get_duel_inventory(chat_id, update.message.from_user.id)
-    text += "\n" + get_text(
-        "duel.inventory.line", items=format_duel_display_inventory(inventory),
-    )
-    if has_huecrab(chat_id, update.message.from_user.id):
-        text += "\n" + get_text("huecrab.inventory")
-    await send_and_schedule(update, context, text)
+async def inspect_command(update, context):
+    if not update.message or not update.message.from_user or not update.message.chat:
+        return
+    message = update.message
+    chat_id = message.chat_id
+    reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
+    target = None
+    if reply_user is not None:
+        target = get_duel_user_by_id(chat_id, reply_user.id, read_only=True)
+    else:
+        username = _extract_username(update, context)
+        if username:
+            target = get_duel_user_by_username(username, chat_id, read_only=True)
+        else:
+            await send_and_schedule(update, context, get_text("duel.inspect.usage"))
+            return
+    if target is None:
+        await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
+        return
+    model = player_stats_read_model(chat_id, target["user_id"])
+    if model is None:
+        await send_and_schedule(update, context, get_text("duel.inspect.inaccessible"))
+        return
+    await send_and_schedule(update, context, format_player_stats_telegram(model, inspected=True))
 
 
 async def _process_persistent_duel_fight(

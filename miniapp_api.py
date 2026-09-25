@@ -15,10 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictInt
 from starlette.concurrency import run_in_threadpool
 
-from config import BOT_TOKEN, MAX_DAILY_POINTS
+from config import BOT_TOKEN
 from database import (
-    format_user_title, format_user_title_plain, get_bosses_defeated,
-    get_duel_user_by_id, has_huecrab,
+    format_user_title, format_user_title_plain,
 )
 from duel_outbox_repository import (
     get_duel_prompt_for_turn, list_persisted_duel_round_resolutions,
@@ -27,15 +26,15 @@ from duel_session_repository import (
     get_current_duel_session, get_duel_session,
     get_latest_finished_participant_duel_session, utc_unix_milliseconds,
 )
-from handlers.duel_items import get_duel_display_inventory_rows
 from handlers.duel_service import (
-    get_duel_profile, list_duel_opponents, start_persistent_duel,
+    list_inspectable_players, start_persistent_duel,
     submit_persistent_duel_attack, submit_persistent_duel_block,
 )
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_text import (
     _plural_rounds, get_duel_round_presentation, get_duel_title_read_model,
 )
+from handlers.player_stats import player_stats_read_model, public_player_stats
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
 from text_resources import get_text
@@ -282,47 +281,37 @@ def create_miniapp_api(*, bot_token: str | None = None,
 
     @app.get("/api/v1/me")
     def me(session: MiniAppSession = Depends(require_session)):
-        profile = get_duel_profile(session.chat_id, session.user_id, read_only=True)
-        if profile is None:
+        model = player_stats_read_model(session.chat_id, session.user_id)
+        if model is None:
             raise HTTPException(status_code=404, detail="Player not found")
-        user = profile.user
-        has_dick = not user["dick_stolen_today"]
-        return {
-            "user_id": user["user_id"], "username": user["username"],
-            "display_name": user["display_name"], "dwarf_name": user["dwarf_name"],
-            "points": user["points"], "max_points": MAX_DAILY_POINTS,
-            "wins": user["wins"], "losses": user["losses"],
-            "daily_wins": user["daily_wins"],
-            "dick_stolen_today": user["dick_stolen_today"],
-            "dick_status": {
-                "has_dick": has_dick,
-                "text": get_text("duel.stats.status.has_dick" if has_dick
-                                 else "duel.stats.status.no_dick"),
-            },
-            "titles": get_duel_title_read_model(user),
-            "boss_wins": get_bosses_defeated(session.user_id, session.chat_id),
-            "ineligibility": profile.ineligibility,
-            "inventory": get_duel_display_inventory_rows(profile.inventory),
-            "pet": (get_text("huecrab.inventory") if has_huecrab(
-                session.chat_id, session.user_id) else None),
-        }
+        return public_player_stats(model)
+
+    @app.get("/api/v1/players/{target_user_id}")
+    def inspect_player(target_user_id: int,
+                       session: MiniAppSession = Depends(require_session)):
+        if target_user_id <= 0:
+            raise HTTPException(status_code=404, detail={"code": "inaccessible_player"})
+        model = player_stats_read_model(session.chat_id, target_user_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail={"code": "inaccessible_player"})
+        return public_player_stats(model)
 
     @app.get("/api/v1/duel/opponents")
     def opponents(session: MiniAppSession = Depends(require_session)):
-        found = list_duel_opponents(session.chat_id, session.user_id, read_only=True)
+        ineligibility, found = list_inspectable_players(session.chat_id, session.user_id)
         rows = []
-        for item in found.opponents:
-            user = get_duel_user_by_id(session.chat_id, item.user_id, read_only=True)
-            if user is None:
-                continue
+        for item in found:
+            user = item["user"]
             rows.append({
-                "user_id": item.user_id, "username": item.username,
-                "title": item.title, "points": user["points"],
+                "user_id": user["user_id"], "username": user["username"],
+                "title": format_user_title_plain(user), "points": user["points"],
                 "wins": user["wins"], "losses": user["losses"],
                 "titles": get_duel_title_read_model(user),
+                "duel_ineligibility": item["duel_ineligibility"],
             })
         return {
-            "ineligibility": found.ineligibility,
+            "ineligibility": ("active_duel" if get_current_duel_session(session.chat_id)
+                               else ineligibility),
             "opponents": rows,
         }
 
