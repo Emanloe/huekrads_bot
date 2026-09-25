@@ -281,14 +281,25 @@ def create_miniapp_api(*, bot_token: str | None = None,
         return session
 
     @app.post("/api/v1/session")
-    def create_session(request: SessionRequest):
+    async def create_session(request: SessionRequest):
         try:
             verified = verify_telegram_init_data(request.init_data, token)
         except InitDataError:
             raise HTTPException(status_code=401, detail="Unauthorized") from None
-        issued = exchange_launch_token(request.launch_token, verified.user_id)
+        issued = await run_in_threadpool(exchange_launch_token, request.launch_token, verified.user_id)
         if issued is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
+        if telegram_bot is not None and issued.launch_message_id is not None:
+            try:
+                await telegram_bot.delete_message(
+                    chat_id=issued.session.chat_id,
+                    message_id=issued.launch_message_id,
+                )
+            except Exception as exc:
+                logging.warning(
+                    "Could not delete Mini App launch message in chat %s message %s (%s)",
+                    issued.session.chat_id, issued.launch_message_id, type(exc).__name__,
+                )
         return {"session_token": issued.token, "expires_at": issued.session.expires_at}
 
     @app.get("/api/v1/me")

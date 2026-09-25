@@ -102,6 +102,19 @@ def test_hall_navigation_and_compact_rows_fit_four_tabs_without_horizontal_overf
     assert "innerHTML" not in js
 
 
+def test_main_inspect_and_hall_avatars_share_the_same_dark_box_background():
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert re.search(r"\.gnome-image,\s*\.hall-avatar\s*\{\s*background:\s*#121a29;\s*\}", css)
+    assert "background:" not in re.search(r"\.gnome-image\s*\{([^}]*)\}", css).group(1)
+    assert "background:" not in re.search(r"\.hall-avatar\s*\{([^}]*)\}", css).group(1)
+    assert 'const image = element("img", "gnome-image")' in js
+    assert 'renderProfile(data, document.getElementById("home-content"))' in js
+    assert 'renderProfile(data, document.getElementById(`${sourceView}-content`), true, sourceView)' in js
+    assert 'const image = element("img", "hall-avatar")' in js
+
+
 @pytest.mark.asyncio
 async def test_healthz_needs_no_session_or_game_reads(monkeypatch):
     def unexpected_call(*args, **kwargs):

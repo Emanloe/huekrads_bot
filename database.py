@@ -432,9 +432,14 @@ def init_db():
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 consumed_at INTEGER,
+                launch_message_id INTEGER,
                 CHECK (expires_at > created_at)
             )
         """)
+        cursor.execute("PRAGMA table_info(miniapp_launch_tokens)")
+        launch_cols = {row[1] for row in cursor.fetchall()}
+        if "launch_message_id" not in launch_cols:
+            cursor.execute("ALTER TABLE miniapp_launch_tokens ADD COLUMN launch_message_id INTEGER")
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_miniapp_launch_expiry
             ON miniapp_launch_tokens (expires_at)

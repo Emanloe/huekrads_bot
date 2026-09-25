@@ -7,18 +7,22 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from handlers.duel_service import get_duel_profile
-from miniapp_sessions import create_launch_token
+from miniapp_sessions import bind_launch_message_id, create_launch_token
 
 
 _BOT_USERNAME = re.compile(r"[A-Za-z0-9_]{5,32}\Z")
 
 
-async def _reply_and_delete_command(message, chat_id: int, text: str, **kwargs) -> None:
-    await message.reply_text(text, **kwargs)
+async def _delete_command(message, chat_id: int) -> None:
     try:
         await message.delete()
     except Exception as exc:
         logging.warning("Could not delete /duel_app command in chat %s: %s", chat_id, exc)
+
+
+async def _reply_and_delete_command(message, chat_id: int, text: str, **kwargs) -> None:
+    await message.reply_text(text, **kwargs)
+    await _delete_command(message, chat_id)
 
 
 async def duel_app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -48,6 +52,11 @@ async def duel_app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Открыть дуэли", url=f"https://t.me/{username}?startapp={token}"),
     ]])
-    await _reply_and_delete_command(
-        message, chat.id, "Мини-приложение для этого чата:", reply_markup=keyboard,
-    )
+    # The button becomes visible only after its message ID is committed.
+    launch_message = await message.reply_text("Мини-приложение для этого чата:")
+    try:
+        if not bind_launch_message_id(token, chat.id, user.id, launch_message.message_id):
+            raise RuntimeError("Could not bind Mini App launch message")
+        await launch_message.edit_reply_markup(reply_markup=keyboard)
+    finally:
+        await _delete_command(message, chat.id)

@@ -26,6 +26,7 @@ class MiniAppSession:
 class IssuedMiniAppSession:
     token: str
     session: MiniAppSession
+    launch_message_id: int | None
 
 
 def _digest(token: str) -> str | None:
@@ -50,6 +51,24 @@ def create_launch_token(chat_id: int, user_id: int, *, now: int | None = None) -
     return token
 
 
+def bind_launch_message_id(token: str, chat_id: int, user_id: int,
+                           message_id: int, *, now: int | None = None) -> bool:
+    """Persist the sent message before exposing its Mini App button."""
+    digest = _digest(token)
+    if (digest is None or type(chat_id) is not int or type(user_id) is not int or
+            type(message_id) is not int or message_id <= 0):
+        return False
+    timestamp = int(time.time()) if now is None else now
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE miniapp_launch_tokens SET launch_message_id = ?
+               WHERE token_digest = ? AND chat_id = ? AND user_id = ?
+                 AND launch_message_id IS NULL AND consumed_at IS NULL AND expires_at > ?""",
+            (message_id, digest, chat_id, user_id, timestamp),
+        )
+        return cursor.rowcount == 1
+
+
 def exchange_launch_token(token: str, verified_user_id: int, *,
                           now: int | None = None) -> IssuedMiniAppSession | None:
     """Consume once and insert the session in the same SQLite write transaction."""
@@ -62,7 +81,7 @@ def exchange_launch_token(token: str, verified_user_id: int, *,
         cursor = conn.cursor()
         cursor.execute("BEGIN IMMEDIATE")
         row = cursor.execute(
-            """SELECT chat_id, user_id FROM miniapp_launch_tokens
+            """SELECT chat_id, user_id, launch_message_id FROM miniapp_launch_tokens
                WHERE token_digest = ? AND consumed_at IS NULL AND expires_at > ?""",
             (digest, timestamp),
         ).fetchone()
@@ -83,7 +102,7 @@ def exchange_launch_token(token: str, verified_user_id: int, *,
             (_digest(session_token), session.chat_id, session.user_id,
              session.created_at, session.expires_at),
         )
-        return IssuedMiniAppSession(session_token, session)
+        return IssuedMiniAppSession(session_token, session, row[2])
 
 
 def get_miniapp_session(token: str, *, now: int | None = None) -> MiniAppSession | None:
