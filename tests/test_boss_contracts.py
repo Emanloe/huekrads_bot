@@ -60,6 +60,7 @@ def test_boss_catalog_has_stable_order_shape_and_yaml_backed_presentation():
     ]
 
     assert len(duel.BOSSES) == 6
+    assert duel.BOSS_CATALOG_IDS == tuple(catalog_keys)
     assert all(set(boss) == {"name", "emoji", "description"} for boss in duel.BOSSES)
     assert duel.BOSSES == [
         {

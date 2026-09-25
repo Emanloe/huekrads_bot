@@ -5,8 +5,11 @@ import hashlib
 import logging
 import os
 import re
+import time
 from html import unescape
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -15,11 +18,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictInt
 from starlette.concurrency import run_in_threadpool
-from telegram import Bot
+from telegram import Bot, User
 
 from config import BOT_TOKEN
 from database import (
     format_user_title, format_user_title_plain, get_duel_top_read_model,
+    get_duel_user_by_id,
 )
 from gnome_avatars import (
     DEFAULT_GNOME_VARIANT, GNOME_FILE_IDS, GNOME_VARIANTS,
@@ -37,6 +41,8 @@ from handlers.duel_service import (
     list_inspectable_players, start_persistent_duel,
     submit_persistent_duel_attack, submit_persistent_duel_block,
 )
+from handlers.boss_read_model import get_boss_battle_read_model
+from handlers.boss_service import apply_boss_action
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_text import (
     _plural_rounds, get_duel_round_presentation, get_duel_title_read_model,
@@ -77,6 +83,33 @@ class DuelMoveRequest(BaseModel):
     duel_id: StrictInt = Field(gt=0)
     turn_id: StrictInt = Field(gt=0)
     zone: str
+
+
+class BossJoinRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    battle_id: str = Field(min_length=10, max_length=64)
+    round: StrictInt = Field(ge=0)
+
+
+class BossActionRequest(BossJoinRequest):
+    phase: Literal["attack", "block"]
+    action_id: str
+
+
+_BOSS_FAILURES = {
+    "no_active_battle": (409, "Битва с боссом завершилась."),
+    "stale_battle": (409, "Открыта другая битва. Обновите экран."),
+    "stale_phase": (409, "Фаза боя изменилась. Обновите экран."),
+    "stale_round": (409, "Раунд боя изменился. Обновите экран."),
+    "recruitment_closed": (409, "Набор участников завершён."),
+    "already_joined": (409, "Вы уже участвуете в битве."),
+    "not_registered": (403, "Ваш профиль недоступен в этом чате."),
+    "not_participant": (403, "Вы не участвуете в этой битве."),
+    "eliminated": (403, "Вы выбыли из битвы."),
+    "already_acted": (409, "Этот выбор уже принят."),
+    "invalid_action": (422, "Недопустимое действие."),
+}
 
 
 _START_FAILURES = {
@@ -336,6 +369,53 @@ def create_miniapp_api(*, bot_token: str | None = None,
                 variant, session.chat_id, target_user_id,
             ),
         }
+
+    @app.get("/api/v1/boss")
+    async def boss(response: Response, session: MiniAppSession = Depends(require_session)):
+        state = await get_boss_battle_read_model(session.chat_id, session.user_id)
+        response.headers["X-Boss-Server-Time-Ms"] = str(int(time.time() * 1000))
+        return state
+
+    async def boss_action_response(session: MiniAppSession, intent: str,
+                                   request: BossJoinRequest, zone: str | None = None):
+        if telegram_bot is None:
+            raise HTTPException(status_code=503, detail={
+                "code": "boss_unavailable", "message": "Бой временно недоступен.",
+            })
+        tg_user = None
+        if intent == "join":
+            profile = get_duel_user_by_id(session.chat_id, session.user_id, read_only=True)
+            if profile is None:
+                raise HTTPException(status_code=403, detail={
+                    "code": "not_registered", "message": _BOSS_FAILURES["not_registered"][1],
+                })
+            tg_user = User(
+                id=session.user_id, first_name=profile["display_name"] or "Гном",
+                is_bot=False, username=profile["username"],
+            )
+        result = await apply_boss_action(
+            SimpleNamespace(bot=telegram_bot), session.chat_id, session.user_id,
+            intent, zone=zone, tg_user=tg_user,
+            expected_battle_id=request.battle_id, expected_round=request.round,
+            expected_phase=request.phase if isinstance(request, BossActionRequest) else None,
+            dedupe_same_choice=True,
+        )
+        if not result.accepted:
+            status, message = _BOSS_FAILURES[result.code]
+            raise HTTPException(status_code=status, detail={
+                "code": result.code, "message": message,
+            })
+        return {"accepted": True}
+
+    @app.post("/api/v1/boss/join")
+    async def join_boss(request: BossJoinRequest,
+                        session: MiniAppSession = Depends(require_session)):
+        return await boss_action_response(session, "join", request)
+
+    @app.post("/api/v1/boss/action")
+    async def move_boss(request: BossActionRequest,
+                        session: MiniAppSession = Depends(require_session)):
+        return await boss_action_response(session, request.phase, request, request.action_id)
 
     @app.get("/api/v1/duel/hall-of-fame")
     def hall_of_fame(session: MiniAppSession = Depends(require_session)):

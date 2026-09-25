@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import random
+import secrets
+import time
 from html import escape
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -92,6 +94,7 @@ from handlers.duel_service import (
     start_persistent_duel, submit_persistent_duel_attack,
     submit_persistent_duel_block,
 )
+from handlers.boss_service import apply_boss_action
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_state import (
     _advance_duel_round,
@@ -317,45 +320,18 @@ ACTIVE_DUELS = {}
 # }
 
 
+BOSS_CATALOG_IDS = (
+    "deep_snouted_baron", "dick_crusher_face_eater",
+    "prince_of_underground_chaos", "great_knife_beard",
+    "dick_devourer", "chizyanovsky_skier",
+)
 BOSSES = [
     {
-        "name": get_text("boss.catalog.deep_snouted_baron.name"),
-        "emoji": get_text("boss.catalog.deep_snouted_baron.emoji"),
-        "description": get_text(
-            "boss.catalog.deep_snouted_baron.description"
-        ),
-    },
-    {
-        "name": get_text("boss.catalog.dick_crusher_face_eater.name"),
-        "emoji": get_text("boss.catalog.dick_crusher_face_eater.emoji"),
-        "description": get_text(
-            "boss.catalog.dick_crusher_face_eater.description"
-        ),
-    },
-    {
-        "name": get_text("boss.catalog.prince_of_underground_chaos.name"),
-        "emoji": get_text("boss.catalog.prince_of_underground_chaos.emoji"),
-        "description": get_text(
-            "boss.catalog.prince_of_underground_chaos.description"
-        ),
-    },
-    {
-        "name": get_text("boss.catalog.great_knife_beard.name"),
-        "emoji": get_text("boss.catalog.great_knife_beard.emoji"),
-        "description": get_text(
-            "boss.catalog.great_knife_beard.description"
-        ),
-    },
-    {
-        "name": get_text("boss.catalog.dick_devourer.name"),
-        "emoji": get_text("boss.catalog.dick_devourer.emoji"),
-        "description": get_text("boss.catalog.dick_devourer.description"),
-    },
-    {
-        "name": get_text("boss.catalog.chizyanovsky_skier.name"),
-        "emoji": get_text("boss.catalog.chizyanovsky_skier.emoji"),
-        "description": get_text("boss.catalog.chizyanovsky_skier.description"),
-    },
+        "name": get_text(f"boss.catalog.{boss_id}.name"),
+        "emoji": get_text(f"boss.catalog.{boss_id}.emoji"),
+        "description": get_text(f"boss.catalog.{boss_id}.description"),
+    }
+    for boss_id in BOSS_CATALOG_IDS
 ]
 
 
@@ -2063,6 +2039,14 @@ def _boss_cancel_timer(battle):
     task.cancel()
 
 
+def _boss_schedule_phase_timer(context, chat_id, battle, phase):
+    """Keep the existing timeout task; record its deadline for presentation."""
+    battle["deadline_at"] = time.time() + BOSS_PHASE_TIMEOUT
+    battle["phase_task"] = asyncio.create_task(
+        _boss_phase_timer(context, chat_id, battle["round"], phase)
+    )
+
+
 def _boss_auto_zone():
     return random.choice(BOSS_ZONES)
 
@@ -2155,22 +2139,20 @@ async def _boss_start_round(
         boss_attack,
         boss_block,
     )
+    started_round = battle["round"]
 
     await _boss_render_phase(
         context,
         chat_id,
     )
 
+    # A Mini App move may finish this phase while the Telegram edit is in flight.
+    if (ACTIVE_BOSS_BATTLES.get(chat_id) is not battle
+            or battle["round"] != started_round or battle["phase"] != "attack"):
+        return
     _boss_cancel_timer(battle)
 
-    battle["phase_task"] = asyncio.create_task(
-        _boss_phase_timer(
-            context,
-            chat_id,
-            battle["round"],
-            "attack",
-        )
-    )
+    _boss_schedule_phase_timer(context, chat_id, battle, "attack")
 
 
 # ------------------------------------------------------------
@@ -2250,7 +2232,7 @@ async def _boss_phase_timer(
     if switch_to_block:
         current_battle = ACTIVE_BOSS_BATTLES.get(chat_id)
 
-        if not current_battle:
+        if current_battle is not battle:
             return
 
         await _boss_render_phase(
@@ -2260,24 +2242,18 @@ async def _boss_phase_timer(
 
         current_battle = ACTIVE_BOSS_BATTLES.get(chat_id)
 
-        if not current_battle:
+        if current_battle is not battle:
             return
 
         async with current_battle["lock"]:
             if (
-                current_battle["round"] != round_num
+                ACTIVE_BOSS_BATTLES.get(chat_id) is not battle
+                or current_battle["round"] != round_num
                 or current_battle["phase"] != "block"
             ):
                 return
 
-            current_battle["phase_task"] = asyncio.create_task(
-                _boss_phase_timer(
-                    context,
-                    chat_id,
-                    round_num,
-                    "block",
-                )
-            )
+            _boss_schedule_phase_timer(context, chat_id, current_battle, "block")
 
         return
 
@@ -2297,262 +2273,68 @@ async def boss_callback(
     context: ContextTypes.DEFAULT_TYPE,
 ):
     query = update.callback_query
-
     if not query or not query.data:
         return
 
-    chat_id = update.effective_chat.id
-
-    battle = ACTIVE_BOSS_BATTLES.get(chat_id)
-
-    if not battle:
-        await query.answer(
-            get_text("boss.callback.battle_finished"),
-            show_alert=True,
-        )
+    data = query.data
+    zone = None
+    round_num = None
+    malformed = False
+    if data == "boss_join":
+        intent = "join"
+    elif data.startswith("boss_attack_") or data.startswith("boss_block_"):
+        intent = "attack" if data.startswith("boss_attack_") else "block"
+        parts = data.split("_")
+        if len(parts) == 4:
+            zone = parts[2]
+            try:
+                round_num = int(parts[3])
+            except ValueError:
+                malformed = True
+        else:
+            malformed = True
+        if malformed:
+            zone = None
+    else:
         return
 
-    async with battle["lock"]:
-        callback_data = query.data
-        user_id = query.from_user.id
+    async def acknowledge():
+        if intent == "join":
+            key = "boss.callback.join.joined"
+        else:
+            key = f"boss.callback.{intent}_ack"
+        await query.answer(
+            get_text(key, zone=BOSS_ZONE_NAMES[zone]) if zone else get_text(key)
+        )
 
-        if callback_data == "boss_join":
-            if battle["phase"] != "join":
-                await query.answer(
-                    get_text("boss.callback.join.already_started"),
-                    show_alert=True,
-                )
-                return
+    result = await apply_boss_action(
+        context, update.effective_chat.id, query.from_user.id, intent,
+        zone=zone, tg_user=query.from_user, expected_round=round_num,
+        expected_phase=intent if intent != "join" else None,
+        on_accepted=acknowledge,
+    )
+    if result.accepted:
+        return
 
-            if user_id in battle["participants"]:
-                await query.answer(
-                    get_text("boss.callback.join.already_participating"),
-                    show_alert=True,
-                )
-                return
-
-            battle["participants"][user_id] = _boss_make_participant(
-                query.from_user,
-                chat_id,
-            )
-
-            await query.answer(
-                get_text("boss.callback.join.joined")
-            )
-
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=battle["message_id"],
-                    text=get_text(
-                        "boss.callback.join.progress",
-                        boss_name=battle["boss"]["name"],
-                        participants=len(battle["participants"]),
-                    ),
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton(
-                                get_text("boss.join.button"),
-                                callback_data="boss_join",
-                            )
-                        ]
-                    ]),
-                )
-            except Exception:
-                pass
-
-            return
-
-        if callback_data.startswith("boss_attack_"):
-            if battle["phase"] != "attack":
-                await query.answer(
-                    get_text("boss.callback.attack_phase_closed"),
-                    show_alert=True,
-                )
-                return
-
-            participant = battle["participants"].get(
-                user_id
-            )
-
-            if not participant:
-                await query.answer(
-                    get_text("boss.callback.not_participant"),
-                    show_alert=True,
-                )
-                return
-
-            if not participant["alive"]:
-                await query.answer(
-                    get_text("boss.callback.dead"),
-                    show_alert=True,
-                )
-                return
-
-            parts = callback_data.split("_")
-
-            if len(parts) != 4:
-                await query.answer(
-                    get_text("boss.callback.stale_button"),
-                    show_alert=True,
-                )
-                return
-
-            zone = parts[2]
-
-            try:
-                button_round = int(parts[3])
-            except ValueError:
-                await query.answer(
-                    get_text("boss.callback.stale_button"),
-                    show_alert=True,
-                )
-                return
-
-            if button_round != battle["round"]:
-                await query.answer(
-                    get_text("boss.callback.round_finished"),
-                    show_alert=True,
-                )
-                return
-
-            if zone not in BOSS_ZONES:
-                await query.answer(
-                    get_text("boss.callback.unknown_zone"),
-                    show_alert=True,
-                )
-                return
-
-            should_switch_to_block = _record_boss_attack_choice(
-                battle,
-                participant,
-                zone,
-            )
-
-            await query.answer(
-                get_text("boss.callback.attack_ack", zone=BOSS_ZONE_NAMES[zone])
-            )
-
-            await _boss_render_phase(
-                context,
-                chat_id,
-            )
-
-            if should_switch_to_block:
-                _boss_cancel_timer(battle)
-
-                _enter_boss_block_phase(battle)
-
-                await _boss_render_phase(
-                    context,
-                    chat_id,
-                )
-
-                battle["phase_task"] = asyncio.create_task(
-                    _boss_phase_timer(
-                        context,
-                        chat_id,
-                        battle["round"],
-                        "block",
-                    )
-                )
-
-            return
-
-        if callback_data.startswith("boss_block_"):
-            if battle["phase"] != "block":
-                await query.answer(
-                    get_text("boss.callback.block_phase_closed"),
-                    show_alert=True,
-                )
-                return
-
-            participant = battle["participants"].get(
-                user_id
-            )
-
-            if not participant:
-                await query.answer(
-                    get_text("boss.callback.not_participant"),
-                    show_alert=True,
-                )
-                return
-
-            if not participant["alive"]:
-                await query.answer(
-                    get_text("boss.callback.dead"),
-                    show_alert=True,
-                )
-                return
-
-            parts = callback_data.split("_")
-
-            if len(parts) != 4:
-                await query.answer(
-                    get_text("boss.callback.stale_button"),
-                    show_alert=True,
-                )
-                return
-
-            zone = parts[2]
-
-            try:
-                button_round = int(parts[3])
-            except ValueError:
-                await query.answer(
-                    get_text("boss.callback.stale_button"),
-                    show_alert=True,
-                )
-                return
-
-            if button_round != battle["round"]:
-                await query.answer(
-                    get_text("boss.callback.round_finished"),
-                    show_alert=True,
-                )
-                return
-
-            if zone not in BOSS_ZONES:
-                await query.answer(
-                    get_text("boss.callback.unknown_zone"),
-                    show_alert=True,
-                )
-                return
-
-            should_resolve = _record_boss_block_choice(
-                battle,
-                participant,
-                zone,
-            )
-
-            await query.answer(
-                get_text("boss.callback.block_ack", zone=BOSS_ZONE_NAMES[zone])
-            )
-
-            await _boss_render_phase(
-                context,
-                chat_id,
-            )
-
-            if should_resolve:
-                _boss_cancel_timer(battle)
-
-                # Нельзя await-ить _boss_resolve_round здесь:
-                # callback сам ещё держит battle["lock"], а
-                # _boss_resolve_round пытается взять тот же lock.
-                #
-                # Создаём задачу сейчас — она начнёт выполняться
-                # после выхода callback из async with.
-                asyncio.create_task(
-                    _boss_resolve_round(
-                        context,
-                        chat_id,
-                    )
-                )
-
-            return
-
+    if result.code in ("no_active_battle", "stale_battle"):
+        key = "boss.callback.battle_finished"
+    elif intent == "join":
+        key = ("boss.callback.join.already_participating"
+               if result.code == "already_joined"
+               else "boss.callback.join.already_started")
+    elif result.code == "stale_phase":
+        key = f"boss.callback.{intent}_phase_closed"
+    elif result.code == "not_participant":
+        key = "boss.callback.not_participant"
+    elif result.code == "eliminated":
+        key = "boss.callback.dead"
+    elif result.code == "stale_round":
+        key = "boss.callback.round_finished"
+    elif malformed:
+        key = "boss.callback.stale_button"
+    else:
+        key = "boss.callback.unknown_zone"
+    await query.answer(get_text(key), show_alert=True)
 
 # ------------------------------------------------------------
 # РЕЗУЛЬТАТ РАУНДА
@@ -2568,6 +2350,8 @@ async def _boss_resolve_round(
         return
 
     async with battle["lock"]:
+        if ACTIVE_BOSS_BATTLES.get(chat_id) is not battle:
+            return
         # Пока держим lock, только рассчитываем и сохраняем состояние.
         # Telegram API, sleep и финализацию выполняем после выхода из lock.
         if battle["phase"] != "block":
@@ -2688,6 +2472,8 @@ async def _boss_resolve_round(
 
     if outcome == "victory":
         await asyncio.sleep(2)
+        if ACTIVE_BOSS_BATTLES.get(chat_id) is not battle:
+            return
         await _boss_finish_victory(
             context,
             chat_id,
@@ -2696,6 +2482,8 @@ async def _boss_resolve_round(
 
     if outcome == "defeat":
         await asyncio.sleep(2)
+        if ACTIVE_BOSS_BATTLES.get(chat_id) is not battle:
+            return
         await _boss_finish_defeat(
             context,
             chat_id,
@@ -2704,15 +2492,17 @@ async def _boss_resolve_round(
 
     await asyncio.sleep(BOSS_ROUND_PAUSE)
 
-    current_battle = ACTIVE_BOSS_BATTLES.get(chat_id)
-
-    if not current_battle:
+    if ACTIVE_BOSS_BATTLES.get(chat_id) is not battle:
         return
 
-    await _boss_start_round(
-        context,
-        chat_id,
-    )
+    async with battle["lock"]:
+        if (ACTIVE_BOSS_BATTLES.get(chat_id) is not battle
+                or battle["phase"] != "resolving"):
+            return
+        await _boss_start_round(
+            context,
+            chat_id,
+        )
 
 
 # ------------------------------------------------------------
@@ -3024,6 +2814,7 @@ async def _start_boss_battle(
     )
 
     battle = {
+        "battle_id": secrets.token_urlsafe(16),
         "boss": boss,
         "participants": {},
         "hits": 0,
@@ -3080,6 +2871,7 @@ async def _start_boss_battle(
         except Exception:
             pass
 
+    battle["deadline_at"] = time.time() + BOSS_JOIN_TIMEOUT
     battle["phase_task"] = asyncio.create_task(
         _boss_join_timer(
             context,

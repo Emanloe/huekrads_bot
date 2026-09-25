@@ -44,7 +44,7 @@ def test_global_refresh_toolbar_is_absent_but_automatic_sync_remains():
     assert 'const refreshed = await loadView("duel", true)' in js
     assert 'const ACTIVE_POLL_MS = 1000' in js
     assert 'const IDLE_POLL_MS = 8000' in js
-    assert 'window.setInterval(updateCountdown, COUNTDOWN_TICK_MS)' in js
+    assert 'updateCountdown(); updateBossCountdown();' in js
 
 
 def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_titles():
@@ -71,7 +71,6 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert "image-rendering: pixelated" in css
     assert re.search(r'@media \(max-width: 480px\)\s*\{\s*\.home-profile-info \.data-cell\s*\{\s*display:\s*block', css)
     assert re.search(r'@media \(max-width: 299px\)\s*\{\s*\.home-profile\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)', css)
-    assert "@media (max-width: 560px)" not in css
     assert ".home-profile-info .value { min-width: 0; overflow-wrap: anywhere; }" in css
     for viewport, expected_min, expected_max in ((360, 120, 150), (420, 120, 150), (550, 120, 150), (920, 200, 200)):
         image_size = min(200, max(125, viewport * .27))
@@ -81,16 +80,19 @@ def test_main_profile_has_square_gnome_and_responsive_fields_without_extra_title
     assert "html { min-width: 0; }" in css
 
 
-def test_hall_navigation_and_compact_rows_fit_four_tabs_without_horizontal_overflow():
+def test_hall_navigation_and_compact_rows_fit_tabs_without_horizontal_overflow():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
     js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
     tabs = re.findall(r'<button class="tab(?: is-active)?"[^>]+data-view="([^"]+)"', html)
-    assert tabs == ["home", "opponents", "duel", "hall"]
+    assert tabs == ["home", "opponents", "duel", "hall", "boss"]
     assert 'id="screen-hall"' in html and '<h2 id="hall-title">Зал славы</h2>' in html
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in css
-    assert ".tab { font-size: 11px; padding: 6px 1px; }" in css
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in css
+    assert ".tab { font-size: 12px; padding: 6px 1px; }" in css
+    assert ".tab-bar { grid-template-columns: repeat(6, minmax(0, 1fr)); }" in css
+    assert ".tab { grid-column: span 2; }" in css
+    assert ".tab:nth-child(n + 4) { grid-column: span 3; }" in css
     assert ".hall-player { min-width: 0; overflow-wrap: anywhere; }" in css
     assert ".hall-row { grid-template-columns: 20px 32px minmax(0, 1fr);" in css
     assert ".hall-avatar { width: 32px; height: 32px; }" in css
@@ -274,7 +276,7 @@ async def test_asset_content_change_rotates_app_urls_without_release_constant(tm
             assert response.headers["cache-control"] == "no-store"
 
 
-def test_frontend_has_only_session_and_ordinary_duel_posts():
+def test_frontend_has_only_session_duel_and_boss_posts():
     app = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
     routes = {route.path: route.methods for route in app.routes if isinstance(route, APIRoute)}
     assert routes == {
@@ -282,6 +284,9 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
         "/api/v1/me": {"GET"},
         "/api/v1/players/{target_user_id}": {"GET"},
         "/api/v1/duel/hall-of-fame": {"GET"},
+        "/api/v1/boss": {"GET"},
+        "/api/v1/boss/join": {"POST"},
+        "/api/v1/boss/action": {"POST"},
         "/api/v1/duel/opponents": {"GET"},
         "/api/v1/duel/active": {"GET"},
         "/api/v1/duel/start": {"POST"},
@@ -351,8 +356,9 @@ def test_frontend_has_only_session_and_ordinary_duel_posts():
     assert 'performance.now() - duelPollStartedAt' in js
     assert "button.disabled = true" in js
     for path in ("/api/v1/duel/attack", "/api/v1/duel/block",
-                 "/api/v1/dig", "/api/v1/boss"):
+                 "/api/v1/dig"):
         assert path not in js
+    assert 'method: "POST", body: { boss' not in js
 
 
 def test_home_and_opponents_render_full_read_only_stats_safely():

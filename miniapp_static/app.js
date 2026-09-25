@@ -3,6 +3,9 @@
 (() => {
   const ACTIVE_POLL_MS = 1000;
   const IDLE_POLL_MS = 8000;
+  const BOSS_POLL_MS = 1000;
+  const BOSS_WAIT_POLL_MS = 1500;
+  const BOSS_IDLE_POLL_MS = 8000;
   const COUNTDOWN_TICK_MS = 250;
   const REQUEST_TIMEOUT_MS = 12000;
   const START_DUEL_PATH = "/api/v1/duel/start";
@@ -12,6 +15,7 @@
     opponents: "/api/v1/duel/opponents",
     duel: "/api/v1/duel/active",
     hall: "/api/v1/duel/hall-of-fame",
+    boss: "/api/v1/boss",
   };
   const ZONE_NAMES = { head: "Голова", body: "Торс", dick: "Хуй" };
   const PHASE_NAMES = { attack: "Атака", block: "Блок" };
@@ -21,6 +25,11 @@
   let sessionToken = null;
   let currentView = "home";
   let activeDuel = null;
+  let bossSnapshot = null;
+  let bossCountdown = null;
+  let bossPollStartedAt = -Infinity;
+  let bossExpiredKey = null;
+  let bossActionInFlight = false;
   let countdownNode = null;
   let countdownTurn = null;
   let duelPollStartedAt = -Infinity;
@@ -31,9 +40,9 @@
   let opponentsSnapshot = null;
   let hallSnapshot = null;
   let moveInFlight = false;
-  const loading = { home: null, opponents: null, duel: null, hall: null };
+  const loading = { home: null, opponents: null, duel: null, hall: null, boss: null };
 
-  const viewStatuses = { home: null, opponents: null, duel: null, hall: null };
+  const viewStatuses = { home: null, opponents: null, duel: null, hall: null, boss: null };
 
   function element(tag, className, value) {
     const node = document.createElement(tag);
@@ -69,6 +78,8 @@
   function showUnavailable(message) {
     sessionToken = null;
     activeDuel = null;
+    bossSnapshot = null;
+    bossCountdown = null;
     countdownNode = null;
     countdownTurn = null;
     inspectedPlayerId = null;
@@ -155,8 +166,10 @@
       error.code = detail?.code;
       throw error;
     }
-    if (path === API_PATHS.duel) {
-      const serverNow = Number(response.headers.get("X-Duel-Server-Time-Ms"));
+    if (path === API_PATHS.duel || path === API_PATHS.boss) {
+      const serverNow = Number(response.headers.get(
+        path === API_PATHS.boss ? "X-Boss-Server-Time-Ms" : "X-Duel-Server-Time-Ms"
+      ));
       if (Number.isFinite(serverNow) && serverNow > 0) {
         // Count the whole request as elapsed so latency never promises extra time.
         data._clock = {
@@ -284,6 +297,172 @@
       content.append(list);
     }
     body.replaceChildren(content);
+  }
+
+  function renderBoss(data) {
+    const body = document.getElementById("boss-content");
+    const content = element("div");
+    const battle = data.battle;
+    bossSnapshot = data;
+    bossCountdown = null;
+    if (!battle) {
+      content.append(notice("Сейчас битвы с боссом нет."));
+      addHeading(content, "Запись на бой");
+      const registration = data.registration || {};
+      content.append(notice(registration.open ?
+        "Запись до 13:37 по Москве открыта в Telegram через /boss_reg." :
+        "Запись на сегодняшний бой закрыта."));
+      const grid = element("div", "data-grid");
+      grid.append(
+        dataCell("Записано участников", registration.participants_count ?? 0),
+        dataCell("Моя запись", registration.viewer_registered ? "Вы записаны" : "Вы не записаны")
+      );
+      content.append(grid);
+      body.replaceChildren(content);
+      return;
+    }
+
+    const banner = element("div", "boss-banner");
+    const identity = element("div", "boss-identity");
+    identity.append(element("strong", null, battle.boss.name),
+      element("small", null, battle.boss.description));
+    banner.append(element("span", "boss-emoji", battle.boss.emoji), identity);
+    content.append(banner);
+    if (battle.phase !== "join") {
+      const progress = element("progress", "boss-progress");
+      progress.max = battle.required_hits;
+      progress.value = battle.hits;
+      content.append(progress);
+    }
+    const phaseNames = { join: "Набор участников", attack: "Атака", block: "Защита",
+      resolving: "Итоги раунда" };
+    const state = element("div", "data-grid");
+    state.append(
+      dataCell("Фаза", phaseNames[battle.phase] || battle.phase),
+      dataCell("Участников", battle.participants_count),
+      dataCell("В строю", battle.alive_count)
+    );
+    if (battle.round > 0) {
+      state.append(dataCell("Раунд", battle.round),
+        dataCell("Урон боссу", `${battle.hits} / ${battle.required_hits}`));
+    }
+    if (Number.isFinite(battle.deadline_at)) {
+      const clock = data._clock || { serverNow: Date.now(), observedAt: performance.now() };
+      const node = element("span", "value");
+      const cell = element("div", "data-cell");
+      cell.append(element("span", "label", "До конца фазы"), node);
+      state.append(cell);
+      bossCountdown = {
+        battleId: battle.battle_id, round: battle.round, phase: battle.phase,
+        deadlineAt: battle.deadline_at, node,
+        serverNow: clock.serverNow, observedAt: clock.observedAt,
+      };
+    }
+    content.append(state);
+    if (Array.isArray(data.available_actions) && data.available_actions.length) {
+      addHeading(content, battle.phase === "join" ? "Участие" :
+        battle.phase === "attack" ? "Выбрать атаку" : "Выбрать защиту");
+      const actions = element("div", "boss-action");
+      for (const action of data.available_actions) {
+        const button = element("button", "small-button", action.label);
+        button.type = "button";
+        button.disabled = bossActionInFlight;
+        if (data.viewer?.selected_action === action.id) {
+          button.classList.add("is-selected");
+          button.setAttribute("aria-pressed", "true");
+        }
+        button.addEventListener("click", () => submitBossAction(action.id));
+        actions.append(button);
+      }
+      content.append(actions);
+    }
+    addHeading(content, "Моё участие");
+    const viewer = data.viewer || {};
+    let viewerText;
+    if (!viewer.in_battle) {
+      viewerText = battle.phase === "join" ?
+        "Вы ещё не участвуете. Вступите через кнопку выше или в Telegram." :
+        "Вы не участвуете в этой битве.";
+    } else if (!viewer.alive) {
+      viewerText = "Вы выбыли из битвы.";
+    } else if (battle.phase === "join") {
+      viewerText = "Вы в числе участников. Ожидайте начала боя.";
+    } else if (battle.phase === "resolving") {
+      viewerText = "Раунд разрешается. Следите за битвой в Telegram.";
+    } else if (viewer.choice_submitted) {
+      viewerText = "Ваш выбор принят. До конца фазы его можно изменить здесь или в Telegram.";
+    } else {
+      viewerText = "Сделайте выбор выше или в Telegram.";
+    }
+    content.append(notice(viewerText));
+    if (Array.isArray(battle.participants) && battle.participants.length) {
+      addHeading(content, "Участники");
+      const team = element("ul", "boss-team");
+      for (const participant of battle.participants) {
+        const row = element("li");
+        const stateText = participant.alive ?
+          `В строю · попаданий: ${participant.hits}` : "Выбыл";
+        row.append(element("span", "boss-team-name", participant.title),
+          element("span", "boss-team-state", stateText));
+        team.append(row);
+      }
+      content.append(team);
+    }
+    body.replaceChildren(content);
+    updateBossCountdown();
+  }
+
+  async function submitBossAction(actionId) {
+    const battle = bossSnapshot?.battle;
+    if (!sessionToken || currentView !== "boss" || bossActionInFlight || !battle) return;
+    const permitted = bossSnapshot.available_actions?.some(action => action.id === actionId);
+    if (!permitted) return;
+    bossActionInFlight = true;
+    for (const button of document.querySelectorAll(".boss-action button")) button.disabled = true;
+    setViewStatus("boss", "Отправляем выбор…", false, "action");
+    const join = battle.phase === "join";
+    const body = { battle_id: battle.battle_id, round: battle.round };
+    if (!join) {
+      body.phase = battle.phase;
+      body.action_id = actionId;
+    }
+    try {
+      await apiRequest(join ? "/api/v1/boss/join" : "/api/v1/boss/action",
+        { method: "POST", body });
+      clearViewStatus("boss", "action");
+      await loadView("boss", true);
+    } catch (error) {
+      if (error.status === 401) showUnavailable(error.message);
+      else {
+        await loadView("boss", true);
+        if (sessionToken && !["stale_battle", "stale_phase", "stale_round",
+            "no_active_battle", "recruitment_closed", "already_acted"].includes(error.code)) {
+          setViewStatus("boss", error.message || "Не удалось выполнить действие.", true, "action");
+        } else clearViewStatus("boss", "action");
+      }
+    } finally {
+      bossActionInFlight = false;
+      if (sessionToken && currentView === "boss" && bossSnapshot) renderBoss(bossSnapshot);
+    }
+  }
+
+  function updateBossCountdown() {
+    const turn = bossCountdown;
+    if (!turn || currentView !== "boss") return;
+    const remaining = Math.max(0, turn.deadlineAt -
+      (turn.serverNow + performance.now() - turn.observedAt));
+    turn.node.textContent = `${Math.ceil(remaining / 1000)} с`;
+    if (remaining > 0) return;
+    for (const button of document.querySelectorAll(".boss-action button")) button.disabled = true;
+    const key = `${turn.battleId}:${turn.round}:${turn.phase}:${turn.deadlineAt}`;
+    if (bossExpiredKey !== key && sessionToken && !document.hidden) {
+      bossExpiredKey = key;
+      window.setTimeout(() => {
+        if (bossCountdown === turn && currentView === "boss" && !document.hidden) {
+          loadView("boss", true);
+        }
+      }, 0);
+    }
   }
 
   function renderOpponents(data) {
@@ -581,6 +760,7 @@
     if (!sessionToken) return false;
     if (loading[view]) return loading[view];
     if (view === "duel") duelPollStartedAt = performance.now();
+    if (view === "boss") bossPollStartedAt = performance.now();
     const request = (async () => {
       if (!silent) setViewStatus(view, "Загрузка данных…");
       try {
@@ -589,6 +769,7 @@
         if (view === "home") renderHome(data);
         else if (view === "opponents") renderOpponents(data);
         else if (view === "hall") renderHall(data);
+        else if (view === "boss") renderBoss(data);
         else renderDuel(data);
         clearViewStatus(view, "read");
         return true;
@@ -609,6 +790,7 @@
       countdownNode = null;
       countdownTurn = null;
     }
+    if (view !== "boss") bossCountdown = null;
     for (const tab of document.querySelectorAll(".tab")) {
       const active = tab.dataset.view === view;
       tab.classList.toggle("is-active", active);
@@ -625,7 +807,16 @@
     tab.addEventListener("click", () => navigate(tab.dataset.view));
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden || currentView !== "duel") return;
+    if (document.hidden) return;
+    if (currentView === "boss") {
+      if (loading.boss) {
+        loading.boss.then(() => {
+          if (!document.hidden && currentView === "boss") loadView("boss", true);
+        });
+      } else loadView("boss", true);
+      return;
+    }
+    if (currentView !== "duel") return;
     updateCountdown();
     // An older request may have started before the WebView was backgrounded.
     // Finish it first, then fetch a fresh authoritative state on return.
@@ -645,7 +836,13 @@
       loadView("duel", true);
     }
   }, ACTIVE_POLL_MS);
-  window.setInterval(updateCountdown, COUNTDOWN_TICK_MS);
+  window.setInterval(() => { updateCountdown(); updateBossCountdown(); }, COUNTDOWN_TICK_MS);
+  window.setInterval(() => {
+    const delay = !bossSnapshot?.battle ? BOSS_IDLE_POLL_MS :
+      bossSnapshot.battle.phase === "resolving" ? BOSS_WAIT_POLL_MS : BOSS_POLL_MS;
+    if (!document.hidden && currentView === "boss" && sessionToken &&
+        performance.now() - bossPollStartedAt >= delay) loadView("boss", true);
+  }, BOSS_POLL_MS);
 
   async function bootstrap() {
     const webApp = window.Telegram?.WebApp;

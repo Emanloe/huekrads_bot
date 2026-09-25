@@ -57,7 +57,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .tab-bar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
   padding: 4px 5px 0;
   background: var(--header);
@@ -175,6 +175,21 @@ main { padding: 7px; min-height: 300px; }
 .hall-player { min-width: 0; overflow-wrap: anywhere; }
 .hall-player strong, .hall-player small { display: block; }
 .hall-player small { color: var(--text-muted); font-size: 10px; }
+.boss-banner { display: flex; gap: 9px; align-items: center; min-width: 0; padding: 9px; border: 1px solid var(--border-strong); background: var(--header); color: var(--text-on-dark); }
+.boss-emoji { flex: none; font-size: 26px; line-height: 1; }
+.boss-identity { min-width: 0; overflow-wrap: anywhere; }
+.boss-identity strong { display: block; font: bold 17px/1.15 Georgia, "Times New Roman", serif; }
+.boss-identity small { display: block; margin-top: 3px; font-size: 11px; }
+.boss-progress { display: block; width: 100%; height: 16px; margin: 7px 0; accent-color: var(--accent); border: 1px solid var(--border-strong); background: var(--surface-alt); }
+.boss-team { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); }
+.boss-team li { display: flex; justify-content: space-between; gap: 8px; padding: 5px 7px; min-width: 0; background: var(--surface-raised); }
+.boss-team li + li { border-top: 1px solid var(--border); }
+.boss-team li:nth-child(even) { background: var(--surface-alt); }
+.boss-team-name { min-width: 0; overflow-wrap: anywhere; font-weight: bold; }
+.boss-team-state { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; text-align: right; }
+.boss-action { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.boss-action .small-button { min-width: 0; flex: 1 1 90px; overflow-wrap: anywhere; }
+.boss-action .small-button.is-selected { background: var(--accent); color: var(--text-on-dark); }
 
 .duel-heading { margin: 0 0 8px; font-weight: bold; }
 .duel-versus { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 9px; }
@@ -198,6 +213,12 @@ main { padding: 7px; min-height: 300px; }
 .previous-duel summary { cursor: pointer; font-weight: bold; }
 .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; border-top: 1px solid var(--border); padding: 6px 9px; background: var(--surface-alt); color: var(--text-muted); font-size: 10px; }
 
+@media (max-width: 560px) {
+  .tab-bar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tab { grid-column: span 2; }
+  .tab:nth-child(n + 4) { grid-column: span 3; }
+}
+
 @media (max-width: 480px) {
   .home-profile-info .data-cell { display: block; padding: 3px 5px; }
   .home-profile-info .label { line-height: 1.1; }
@@ -219,7 +240,7 @@ main { padding: 7px; min-height: 300px; }
   .opponent-row { grid-template-columns: minmax(0, 1fr); }
   .opponent-actions { justify-content: flex-start; }
   .duel-blocker { text-align: left; }
-  .tab { font-size: 11px; padding: 6px 1px; }
+  .tab { font-size: 12px; padding: 6px 1px; }
   .hall-row { grid-template-columns: 20px 32px minmax(0, 1fr); gap: 4px; padding: 5px; }
   .hall-avatar { width: 32px; height: 32px; }
   .hall-row .small-button { grid-column: 3; justify-self: start; }

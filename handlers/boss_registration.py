@@ -78,6 +78,25 @@ def _boss_get_registered_users(chat_id):
         ).fetchall()
 
 
+def _boss_registration_snapshot(chat_id: int, viewer_user_id: int) -> tuple[int, bool]:
+    """Read today's registration without creating a table or writing SQLite."""
+    if not _BOSS_REG_DB_PATH.exists():
+        return 0, False
+    try:
+        with sqlite3.connect(f"{_BOSS_REG_DB_PATH.resolve().as_uri()}?mode=ro",
+                             uri=True, timeout=10) as conn:
+            row = conn.execute(
+                """SELECT COUNT(*), COALESCE(MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END), 0)
+                   FROM boss_registrations WHERE chat_id = ? AND reg_date = ?""",
+                (viewer_user_id, chat_id, _boss_today()),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: boss_registrations" in str(exc):
+            return 0, False
+        raise
+    return int(row[0]), bool(row[1])
+
+
 def _boss_clear_registrations(chat_id, reg_date=None):
     reg_date = reg_date or _boss_today()
     with _boss_registration_connect() as conn:
