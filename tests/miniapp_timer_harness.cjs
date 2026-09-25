@@ -541,7 +541,8 @@ async function testPolling() {
     participants_count: 2, alive_count: 1,
     participants: [
       { user_id: 101, title: "<winner>", alive: true, hits: 4 },
-      { user_id: 202, title: "<fallen>", alive: false, hits: 1 },
+      { user_id: 202, title: "<fallen>", alive: false, hits: 1,
+        blocks: 0, death_round: 2 },
     ],
     hero: { user_id: 101, title: "<winner>", hits: 4, blocks: 2,
       rounds_survived: 3 },
@@ -554,6 +555,7 @@ async function testPolling() {
     registration: { open: true, participants_count: 2, viewer_registered: true } });
   const victoryResult = bossBody.querySelector(".boss-result");
   assert.ok(victoryResult);
+  assert.equal(victoryResult.querySelector(".boss-chronicle"), null);
   assert.equal(findClass(victoryResult, "boss-result-outcome").textContent, "ПОБЕДА");
   assert.equal(victoryResult.querySelector(".boss-identity").textContent, "<boss>");
   assert.equal(victoryResult.querySelector(".boss-team-name").textContent, "<winner>");
@@ -570,6 +572,54 @@ async function testPolling() {
   }, registration: { open: false, participants_count: 0, viewer_registered: false } });
   assert.equal(bossBody.querySelector(".boss-result-outcome").textContent, "ПОРАЖЕНИЕ");
   assert.ok(bossBody.querySelector(".boss-result"));
+  const deathStory = { user_id: 202, title: "<fallen>", round: 2,
+    attack_zone: { id: "dick", label: "Хуй" },
+    defended_zone: { id: "body", label: "Торс" },
+    boss_attack_zone: { id: "head", label: "Голова" },
+    text: "<fallen> пал в раунде 2. Бил в Хуй, защищал Торс." };
+  const story = {
+    survivors: [{ user_id: 101, title: "<winner>",
+      text: "<winner> — выжил. Рубился как настоящий гном." }],
+    deaths: [deathStory],
+    featured: { user_id: 101, role: "victory_hero", title: "<winner>",
+      detail: "Попаданий: 4, блоков: 2." },
+    verdict_kind: "decree", verdict: "<decree> Настоящие гномы победили.",
+  };
+  app.renderBoss({ battle: null, recent_result: {
+    ...recentResult, narrative: story,
+    viewer: { ...recentResult.viewer, chronicle: story.survivors[0] },
+  }, registration: { open: true, participants_count: 2, viewer_registered: true } });
+  const narratedVictory = bossBody.querySelector(".boss-result");
+  assert.equal(narratedVictory.querySelector(".boss-chronicle-entry").textContent,
+    story.survivors[0].text);
+  assert.equal(narratedVictory.querySelector(".boss-featured").children[1].textContent,
+    "<winner>");
+  assert.equal(narratedVictory.querySelector(".boss-verdict").children[1].textContent,
+    story.verdict);
+  assert.ok(narratedVictory.querySelector(".boss-team").children[1].children[1]
+    .textContent.includes("Пал в раунде 2 · попаданий: 1 · блоков: 0"));
+  assert.ok(bossBody.children[0].children.some(node =>
+    node.textContent.includes("Запись на бой")));
+  app.renderBoss({ battle: null, recent_result: {
+    ...recentResult, outcome: "defeat", narrative: {
+      ...story, survivors: [], verdict_kind: "verdict", verdict: "<verdict> Гномы пали.",
+      featured: { user_id: 202, role: "last_gnome", title: "<fallen>",
+        detail: "Попаданий: 1, блоков: 0." },
+    },
+    viewer: { participated: true, alive: false, hits: 1, blocks: 0,
+      rounds_survived: 1, death_round: 2, chronicle: deathStory,
+      rewarded: false, received_item: false },
+    item_loot: null,
+  }, registration: { open: false, participants_count: 0, viewer_registered: false } });
+  const narratedDefeat = bossBody.querySelector(".boss-result");
+  assert.equal(narratedDefeat.querySelector(".boss-chronicle-entry").textContent,
+    deathStory.text);
+  assert.equal(narratedDefeat.querySelector(".boss-featured").children[0].textContent,
+    "Последний настоящий гном");
+  assert.equal(narratedDefeat.querySelector(".boss-verdict").children[1].textContent,
+    "<verdict> Гномы пали.");
+  assert.ok(narratedDefeat.children.some(node => node.className === "notice" &&
+    node.textContent.includes("Пал в раунде 2 · бил: Хуй · защищал: Торс")));
   app.renderBoss(bossModel);
   intervals[2].callback();
   assert.equal(bossFetchCount, 1);

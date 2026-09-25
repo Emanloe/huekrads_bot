@@ -318,20 +318,60 @@
       dataCell("Выжили", result.alive_count),
       dataCell("Выбыли", result.participants_count - result.alive_count)
     );
-    if (result.hero) {
+    if (result.hero && !result.narrative?.featured) {
       grid.append(dataCell("Герой битвы", result.hero.title));
       grid.append(dataCell("Попадания героя", result.hero.hits));
       grid.append(dataCell("Блоки героя", result.hero.blocks));
       if (victory) grid.append(dataCell("Раундов героя", result.hero.rounds_survived));
     }
     section.append(grid);
+    const narrative = result.narrative;
+    if (narrative) {
+      addHeading(section, victory ? "Летопись битвы" : "Посмертная летопись отряда");
+      const chronicle = element("div", "boss-chronicle");
+      if (narrative.survivors?.length) {
+        chronicle.append(element("strong", "boss-chronicle-label", "Выжившие"));
+        for (const entry of narrative.survivors) {
+          chronicle.append(element("p", "boss-chronicle-entry", entry.text));
+        }
+      }
+      if (narrative.deaths?.length) {
+        chronicle.append(element("strong", "boss-chronicle-label", "Как погибли гномы"));
+        for (const entry of narrative.deaths) {
+          chronicle.append(element("p", "boss-chronicle-entry", entry.text));
+        }
+      }
+      section.append(chronicle);
+      if (narrative.featured) {
+        const featured = element("div", "boss-featured");
+        addHeading(featured, narrative.featured.role === "last_gnome" ?
+          "Последний настоящий гном" : "Герой битвы");
+        featured.append(element("strong", null, narrative.featured.title),
+          element("p", null, narrative.featured.detail));
+        section.append(featured);
+      }
+      if (narrative.verdict) {
+        const verdict = element("div", "boss-verdict");
+        addHeading(verdict, narrative.verdict_kind === "decree" ? "Постановление" : "Вердикт");
+        verdict.append(element("p", null, narrative.verdict));
+        section.append(verdict);
+      }
+    }
     addHeading(section, "Ваш результат");
     const viewer = result.viewer || {};
     let own = "Вы не участвовали в этой битве.";
     if (viewer.participated) {
-      own = viewer.alive ? "Вы выжили." : "Вы выбыли.";
-      own += ` Попаданий: ${viewer.hits ?? 0}.`;
-      own += ` Блоков: ${viewer.blocks ?? 0}. Раундов: ${viewer.rounds_survived ?? 0}.`;
+      const death = narrative && !viewer.alive ? viewer.chronicle : null;
+      if (death && death.round != null) {
+        own = `Пал в раунде ${death.round} · бил: ${death.attack_zone.label}` +
+          ` · защищал: ${death.defended_zone.label}` +
+          ` · босс атаковал: ${death.boss_attack_zone.label}`;
+        own += ` · попаданий: ${viewer.hits ?? 0} · блоков: ${viewer.blocks ?? 0}.`;
+      } else {
+        own = viewer.alive ? "Вы выжили." : "Вы выбыли.";
+        own += ` Попаданий: ${viewer.hits ?? 0}.`;
+        own += ` Блоков: ${viewer.blocks ?? 0}. Раундов: ${viewer.rounds_survived ?? 0}.`;
+      }
       if (viewer.rewarded) own += " Награда получена: 100 очков и восстановление.";
       if (viewer.received_item) own += " Вы получили предмет.";
     }
@@ -348,8 +388,9 @@
         const row = element("li");
         row.append(element("span", "boss-team-name", participant.title),
           element("span", "boss-team-state", participant.alive ?
-            `Выжил · попаданий: ${participant.hits}` :
-            `Выбыл · попаданий: ${participant.hits}`));
+            `Выжил · попаданий: ${participant.hits} · блоков: ${participant.blocks ?? 0}` :
+            `${participant.death_round ? `Пал в раунде ${participant.death_round}` : "Выбыл"}` +
+            ` · попаданий: ${participant.hits} · блоков: ${participant.blocks ?? 0}`));
         team.append(row);
       }
       section.append(team);

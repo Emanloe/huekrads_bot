@@ -2,6 +2,7 @@
 
 import random
 
+from database import format_user_title_plain
 from handlers.duel_formatting import boss_player_title as _boss_player_title
 from handlers.duel_text import _boss_battle_hero, _plural_rounds
 from text_resources import get_text, get_text_list, get_text_mapping
@@ -13,7 +14,21 @@ BOSS_ZONE_NAMES = get_text_mapping("boss.zones.display")
 _BOSS_UNKNOWN_ZONE = get_text("boss.zones.unknown")
 
 
-def _boss_death_epitaph(participant, boss_name):
+class BossFinalReport(str):
+    """Telegram's unchanged text with the choices made during its composition."""
+
+    def __new__(cls, text: str, narrative: dict):
+        report = super().__new__(cls, text)
+        report.narrative = narrative
+        return report
+
+
+def _plain_markup(value: str) -> str:
+    """The existing boss resources use bold tags only for Telegram formatting."""
+    return value.replace("<b>", "").replace("</b>", "")
+
+
+def _boss_death_epitaph(participant, boss_name, *, chronicle=None):
     title = _boss_player_title(participant)
     attack_zone = BOSS_ZONE_NAMES.get(
         participant.get("death_attack_zone"),
@@ -32,7 +47,7 @@ def _boss_death_epitaph(participant, boss_name):
     )
 
     phrase = random.choice(get_text_list("boss.death_epitaphs"))
-    return phrase.format(
+    rendered = phrase.format(
         title=title,
         round_num=round_num,
         attack_zone=attack_zone,
@@ -40,9 +55,30 @@ def _boss_death_epitaph(participant, boss_name):
         boss_name=boss_name,
         death_zone=death_zone,
     )
+    if chronicle is not None:
+        chronicle.append({
+            "user_id": getattr(participant.get("tg_user"), "id", None),
+            "title": format_user_title_plain(participant["data"]),
+            "round": participant.get("death_round"),
+            "attack_zone": {"id": participant.get("death_attack_zone"),
+                            "label": attack_zone},
+            "defended_zone": {"id": participant.get("death_defended_zone"),
+                              "label": defended_zone},
+            "boss_attack_zone": {"id": participant.get("death_by_zone"),
+                                 "label": death_zone},
+            "text": _plain_markup(phrase).format(
+                title=format_user_title_plain(participant["data"]),
+                round_num=round_num,
+                attack_zone=attack_zone,
+                defended_zone=defended_zone,
+                boss_name=boss_name,
+                death_zone=death_zone,
+            ),
+        })
+    return rendered
 
 
-def _boss_survivor_epitaph(participant):
+def _boss_survivor_epitaph(participant, *, chronicle=None):
     title = _boss_player_title(participant)
     hits = participant.get("hits", 0)
     misses = participant.get("misses", 0)
@@ -60,7 +96,7 @@ def _boss_survivor_epitaph(participant):
     else:
         phrase = get_text("boss.survivor.phrases.brazen")
 
-    return get_text(
+    rendered = get_text(
         "boss.survivor.summary",
         title=title,
         phrase=phrase,
@@ -69,6 +105,18 @@ def _boss_survivor_epitaph(participant):
         blocks=blocks,
         survived=survived,
     )
+    if chronicle is not None:
+        chronicle.append({
+            "user_id": getattr(participant.get("tg_user"), "id", None),
+            "title": format_user_title_plain(participant["data"]),
+            "text": _plain_markup(get_text(
+                "boss.survivor.summary",
+                title=format_user_title_plain(participant["data"]),
+                phrase=phrase,
+                hits=hits, misses=misses, blocks=blocks, survived=survived,
+            )),
+        })
+    return rendered
 
 def _boss_final_report(battle, victory: bool):
     participants = list(battle["participants"].values())
@@ -83,6 +131,8 @@ def _boss_final_report(battle, victory: bool):
         if not p["alive"]
     ]
     hero = _boss_battle_hero(participants)
+    narrative = {"deaths": [], "survivors": [], "featured": None,
+                 "verdict": None, "verdict_kind": "decree" if victory else "verdict"}
 
     lines = []
 
@@ -98,7 +148,7 @@ def _boss_final_report(battle, victory: bool):
         ])
 
         lines.extend(
-            _boss_survivor_epitaph(p)
+            _boss_survivor_epitaph(p, chronicle=narrative["survivors"])
             for p in survivors
         )
 
@@ -108,30 +158,39 @@ def _boss_final_report(battle, victory: bool):
                 get_text("boss.report.victory.dead_header"),
             ])
             lines.extend(
-                _boss_death_epitaph(p, boss_name)
+                _boss_death_epitaph(p, boss_name, chronicle=narrative["deaths"])
                 for p in dead
             )
 
         if hero:
             hero_title = _boss_player_title(hero)
+            hero_stats = get_text(
+                "boss.report.victory.hero_stats",
+                hits=hero.get("hits", 0),
+                blocks=hero.get("blocks", 0),
+                rounds_survived=hero.get("rounds_survived", 0),
+                round_word=_plural_rounds(hero.get("rounds_survived", 0)),
+            )
+            narrative["featured"] = {
+                "user_id": getattr(hero.get("tg_user"), "id", None),
+                "role": "victory_hero",
+                "title": format_user_title_plain(hero["data"]),
+                "detail": _plain_markup(hero_stats),
+            }
             lines.extend([
                 "",
                 get_text("boss.report.victory.hero", hero_title=hero_title),
-                get_text(
-                    "boss.report.victory.hero_stats",
-                    hits=hero.get("hits", 0),
-                    blocks=hero.get("blocks", 0),
-                    rounds_survived=hero.get("rounds_survived", 0),
-                    round_word=_plural_rounds(hero.get("rounds_survived", 0)),
-                ),
+                hero_stats,
             ])
 
+        decree = get_text("boss.report.victory.decree")
+        narrative["verdict"] = _plain_markup(decree)
         lines.extend([
             "",
             get_text("boss.report.victory.reward_points"),
             get_text("boss.report.victory.reward_dick"),
             "",
-            get_text("boss.report.victory.decree"),
+            decree,
         ])
 
     else:
@@ -147,25 +206,34 @@ def _boss_final_report(battle, victory: bool):
         ])
 
         lines.extend(
-            _boss_death_epitaph(p, boss_name)
+            _boss_death_epitaph(p, boss_name, chronicle=narrative["deaths"])
             for p in dead
         )
 
         if hero:
             hero_title = _boss_player_title(hero)
+            hero_stats = get_text(
+                "boss.report.defeat.hero_stats",
+                hits=hero.get("hits", 0),
+                blocks=hero.get("blocks", 0),
+            )
+            narrative["featured"] = {
+                "user_id": getattr(hero.get("tg_user"), "id", None),
+                "role": "last_gnome",
+                "title": format_user_title_plain(hero["data"]),
+                "detail": _plain_markup(hero_stats),
+            }
             lines.extend([
                 "",
                 get_text("boss.report.defeat.hero", hero_title=hero_title),
-                get_text(
-                    "boss.report.defeat.hero_stats",
-                    hits=hero.get("hits", 0),
-                    blocks=hero.get("blocks", 0),
-                ),
+                hero_stats,
             ])
 
+        verdict = get_text("boss.report.defeat.verdict")
+        narrative["verdict"] = _plain_markup(verdict)
         lines.extend([
             "",
-            get_text("boss.report.defeat.verdict"),
+            verdict,
         ])
 
-    return "\n".join(lines)
+    return BossFinalReport("\n".join(lines), narrative)

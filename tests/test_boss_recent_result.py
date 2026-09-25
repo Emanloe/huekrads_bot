@@ -228,6 +228,7 @@ async def test_recent_result_api_is_read_only_chat_scoped_and_keeps_registration
             assert data["recent_result"]["viewer"] == {
                 "participated": True, "alive": True, "hits": 5,
                 "blocks": 0, "rounds_survived": 0,
+                "death_round": None, "chronicle": None,
                 "rewarded": False, "received_item": False,
             }
             assert data["registration"]["open"] is True

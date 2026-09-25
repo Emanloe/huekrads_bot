@@ -93,6 +93,12 @@ def _public_recent_result(result: dict, viewer_user_id: int) -> dict:
         None,
     )
     loot = result["item_loot"]
+    narrative = result["narrative"]
+    viewer_story = next(
+        (row for row in (narrative["deaths"] + narrative["survivors"])
+         if row["user_id"] == viewer_user_id),
+        None,
+    ) if narrative else None
     return {
         "battle_id": result["battle_id"],
         "boss": {"id": result["boss_id"], "name": result["boss_name"]},
@@ -110,12 +116,15 @@ def _public_recent_result(result: dict, viewer_user_id: int) -> dict:
             "rounds_survived": hero["rounds_survived"],
         } if hero else None,
         "item_loot": loot,
+        "narrative": narrative,
         "viewer": {
             "participated": viewer is not None,
             "alive": viewer["alive"] if viewer else None,
             "hits": viewer["hits"] if viewer else None,
             "blocks": viewer["blocks"] if viewer else None,
             "rounds_survived": viewer["rounds_survived"] if viewer else None,
+            "death_round": viewer["death_round"] if viewer else None,
+            "chronicle": viewer_story,
             "rewarded": viewer_user_id in result["rewarded_user_ids"],
             "received_item": bool(loot and loot["recipient_user_id"] == viewer_user_id),
         },

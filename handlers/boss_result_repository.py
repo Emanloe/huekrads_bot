@@ -78,12 +78,22 @@ def update_boss_result_loot(chat_id: int, battle_id: str, item_loot: dict) -> No
         )
 
 
+def update_boss_result_narrative(chat_id: int, battle_id: str,
+                                 narrative: dict) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE boss_battle_results SET narrative_json = ?
+               WHERE chat_id = ? AND battle_id = ? AND narrative_json IS NULL""",
+            (json.dumps(narrative, ensure_ascii=False), chat_id, battle_id),
+        )
+
+
 def get_latest_boss_result(chat_id: int) -> dict | None:
     with get_db() as conn:
         row = conn.execute(
             """SELECT chat_id, battle_id, boss_id, boss_name, finished_at, outcome,
                       hits, required_hits, rounds, participants_json, hero_user_id,
-                      rewarded_user_ids_json, item_loot_json
+                      rewarded_user_ids_json, item_loot_json, narrative_json
                FROM boss_battle_results
                WHERE chat_id = ?
                ORDER BY finished_at DESC, rowid DESC LIMIT 1""",
@@ -98,4 +108,5 @@ def get_latest_boss_result(chat_id: int) -> dict | None:
         "participants": json.loads(row[9]), "hero_user_id": row[10],
         "rewarded_user_ids": json.loads(row[11]),
         "item_loot": json.loads(row[12]) if row[12] is not None else None,
+        "narrative": json.loads(row[13]) if row[13] is not None else None,
     }

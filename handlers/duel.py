@@ -97,7 +97,7 @@ from handlers.duel_service import (
 from handlers.boss_service import apply_boss_action
 from handlers.boss_result_repository import (
     build_boss_result, save_boss_result, update_boss_result_loot,
-    update_boss_result_rewards,
+    update_boss_result_narrative, update_boss_result_rewards,
 )
 from handlers.persistent_duel_publisher import recover_persistent_duel_chat
 from handlers.duel_state import (
@@ -2569,6 +2569,13 @@ async def _boss_send_final_report(
         # Финальный отчёт не должен исчезать из-за одной ошибки
         # в красивой статистике.
         text = get_text("boss.report.fallback")
+
+    narrative = getattr(text, "narrative", None)
+    if battle.get("battle_id") and narrative is not None:
+        try:
+            update_boss_result_narrative(chat_id, battle["battle_id"], narrative)
+        except Exception:
+            logging.exception("Не удалось сохранить летопись боя с боссом в чате %s", chat_id)
 
     try:
         item_loot_text = _maybe_award_boss_item(chat_id, battle)

@@ -473,9 +473,14 @@ def init_db():
                 hero_user_id INTEGER,
                 rewarded_user_ids_json TEXT NOT NULL DEFAULT '[]',
                 item_loot_json TEXT,
+                narrative_json TEXT,
                 PRIMARY KEY (chat_id, battle_id)
             )
         """)
+        cursor.execute("PRAGMA table_info(boss_battle_results)")
+        boss_result_columns = {row[1] for row in cursor.fetchall()}
+        if "narrative_json" not in boss_result_columns:
+            cursor.execute("ALTER TABLE boss_battle_results ADD COLUMN narrative_json TEXT")
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_boss_battle_results_recent
             ON boss_battle_results (chat_id, finished_at DESC)

@@ -193,6 +193,12 @@ main { padding: 7px; min-height: 300px; }
 .boss-result-outcome { display: block; margin: 7px 0; padding: 5px 8px; border: 1px solid var(--border-strong); font: bold 16px/1.1 Georgia, "Times New Roman", serif; }
 .boss-result-outcome.victory { background: #dcebd8; color: #153f24; }
 .boss-result-outcome.defeat { background: #eadada; color: #5a2020; }
+.boss-chronicle, .boss-featured, .boss-verdict { margin: 6px 0 9px; border: 1px solid var(--border); background: var(--surface-raised); padding: 7px; min-width: 0; overflow-wrap: anywhere; }
+.boss-chronicle-label { display: block; margin: 4px 0; color: var(--accent-dark); }
+.boss-chronicle-entry { margin: 0; padding: 6px 0; line-height: 1.35; }
+.boss-chronicle-entry + .boss-chronicle-entry { border-top: 1px solid var(--border); }
+.boss-featured strong { display: block; }
+.boss-featured p, .boss-verdict p { margin: 5px 0 0; line-height: 1.35; }
 
 .duel-heading { margin: 0 0 8px; font-weight: bold; }
 .duel-versus { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 9px; }
