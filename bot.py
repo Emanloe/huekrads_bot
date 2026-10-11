@@ -56,6 +56,7 @@ from handlers.past_pizda import (
 )
 
 from handlers.triggers import (
+    amigo_reply_to_rost_trigger,
     respond_trigger,
 )
 
@@ -537,6 +538,11 @@ async def main():
     # ============================================================
     # TEXT TRIGGERS
     # ============================================================
+
+    application.add_handler(
+        MessageHandler(filters.ALL, amigo_reply_to_rost_trigger),
+        group=-2,
+    )
 
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, elite_ball_question),

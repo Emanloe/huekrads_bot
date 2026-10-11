@@ -31,7 +31,7 @@ def test_bot_public_import_contracts():
         "init_db", "set_boss_enabled", "start_command", "donate_command", "top_command",
         "force_pidor_command", "set_bday_command", "toggle_forward_reply_command",
         "toggle_autodelete_command", "daily_beauty_job", "schedule_past_pizda_job",
-        "respond_trigger", "get_file_id_handler", "error_handler", "weather_inline_query",
+        "amigo_reply_to_rost_trigger", "respond_trigger", "get_file_id_handler", "error_handler", "weather_inline_query",
         "weather_chosen_inline_result", "weather_stub_callback", "duel_command",
         "duel_select_callback", "duel_action_callback", "duel_stats_command", "inspect_command",
         "duel_top_command", "duel_delete_command", "gnomed_command", "boss_daily_job", "boss_callback",
@@ -138,6 +138,55 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
         assert handlers[0].commands == frozenset(
             command if isinstance(command, tuple) else (command,)
         )
+
+
+@pytest.mark.asyncio
+async def test_amigo_reply_handler_is_registered_once_before_general_text_rules(monkeypatch):
+    from telegram.ext import MessageHandler
+    import bot
+
+    registered = []
+
+    class FakeApplication:
+        job_queue = None
+
+        def add_handler(self, handler, group=0):
+            registered.append((group, handler))
+
+        def add_error_handler(self, _handler):
+            pass
+
+        async def run_polling(self, **_kwargs):
+            pass
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def post_init(self, _callback):
+            return self
+
+        def build(self):
+            return FakeApplication()
+
+    monkeypatch.setattr(bot, "run_ptb_and_http", AsyncMock())
+    monkeypatch.setattr(bot, "init_db", lambda: None)
+    monkeypatch.setattr(bot.Application, "builder", lambda: FakeBuilder())
+
+    await bot.main()
+
+    amigo = [
+        (group, handler) for group, handler in registered
+        if isinstance(handler, MessageHandler)
+        and handler.callback is bot.amigo_reply_to_rost_trigger
+    ]
+    generic = [
+        (group, handler) for group, handler in registered
+        if isinstance(handler, MessageHandler) and handler.callback is bot.respond_trigger
+    ]
+    assert len(amigo) == len(generic) == 1
+    assert amigo[0][0] == -2
+    assert generic[0][0] == 0
 
 
 @pytest.mark.asyncio

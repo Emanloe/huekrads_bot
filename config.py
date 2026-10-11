@@ -42,6 +42,15 @@ with open(_BIRTHDAY_CONTENT_PATH, encoding="utf-8") as _birthday_file:
 
 BIRTHDAY_GIF_ID = _birthday_content["birthday_gif_id"]
 
+_TRIGGER_CONTENT_PATH = Path(__file__).resolve().parent / "data" / "trigger_content.json"
+with open(_TRIGGER_CONTENT_PATH, encoding="utf-8") as _trigger_content_file:
+    _trigger_content = json.load(_trigger_content_file)
+
+_amigo_reply_content = _trigger_content["amigo_reply"]
+AMIGO_USER_ID = _amigo_reply_content["user_id"]
+AMIGO_REPLY_TARGET_USER_ID = _amigo_reply_content["target_user_id"]
+AMIGO_REPLY_TARGET_USERNAME = _amigo_reply_content["target_username"]
+AMIGO_REPLY_GIF_ID = _amigo_reply_content["gif_file_id"]
 # --- Настройки планировщика ---
 GAME_HOUR = 10
 GAME_MINUTE = 0

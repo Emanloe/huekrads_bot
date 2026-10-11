@@ -9,7 +9,16 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import OREL_GIF_IDS, BIRTHDAY_GIF_ID, LET_DO_STICKER_IDS, DUEL_TIMEZONE
+from config import (
+    AMIGO_REPLY_GIF_ID,
+    AMIGO_REPLY_TARGET_USER_ID,
+    AMIGO_REPLY_TARGET_USERNAME,
+    AMIGO_USER_ID,
+    OREL_GIF_IDS,
+    BIRTHDAY_GIF_ID,
+    LET_DO_STICKER_IDS,
+    DUEL_TIMEZONE,
+)
 from database import (
     save_or_update_user,
     set_user_birthdate_with_cooldown,
@@ -77,6 +86,67 @@ SHAKING_RE = re.compile(
 )
 
 
+def is_amigo_reply_to_rost(message) -> bool:
+    """Return whether the message replies to the configured user."""
+    replied_message = getattr(message, "reply_to_message", None)
+    original_sender = getattr(replied_message, "from_user", None)
+    return getattr(original_sender, "id", None) == AMIGO_REPLY_TARGET_USER_ID
+
+
+def _entity_text(text, entity) -> str | None:
+    """Read Telegram's UTF-16 entity range without trusting plain-text search."""
+    if not isinstance(text, str):
+        return None
+    offset = getattr(entity, "offset", None)
+    length = getattr(entity, "length", None)
+    if not isinstance(offset, int) or not isinstance(length, int) or offset < 0 or length < 0:
+        return None
+    try:
+        encoded = text.encode("utf-16-le")
+        return encoded[offset * 2:(offset + length) * 2].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+
+
+def has_rost_mention(message) -> bool:
+    """Match only Telegram mention entities in text and media captions."""
+    sources = (
+        (getattr(message, "text", None), getattr(message, "entities", None)),
+        (getattr(message, "caption", None), getattr(message, "caption_entities", None)),
+    )
+    for text, entities in sources:
+        for entity in entities or ():
+            entity_type = getattr(getattr(entity, "type", None), "value", getattr(entity, "type", None))
+            if entity_type == "text_mention":
+                if getattr(getattr(entity, "user", None), "id", None) == AMIGO_REPLY_TARGET_USER_ID:
+                    return True
+            elif entity_type == "mention":
+                entity_value = _entity_text(text, entity)
+                if entity_value is not None and entity_value.casefold() == f"@{AMIGO_REPLY_TARGET_USERNAME}".casefold():
+                    return True
+    return False
+
+
+def is_amigo_rost_message(message) -> bool:
+    """Return whether Amigo replied to Rost or mentioned Rost via an entity."""
+    return (
+        getattr(getattr(message, "from_user", None), "id", None) == AMIGO_USER_ID
+        and (is_amigo_reply_to_rost(message) or has_rost_mention(message))
+    )
+
+
+async def amigo_reply_to_rost_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the configured GIF when Amigo replies to the configured user."""
+    message = getattr(update, "message", None)
+    if message is None or not is_amigo_rost_message(message):
+        return
+
+    await message.reply_animation(
+        animation=AMIGO_REPLY_GIF_ID,
+        reply_to_message_id=message.message_id,
+    )
+
+
 async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.from_user:
         return
@@ -86,6 +156,11 @@ async def respond_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_raw = (update.message.text or "").strip()
 
     save_or_update_user(update.message.from_user, chat_id)
+
+    # The dedicated rule is handled in the earlier narrow MessageHandler.
+    # Avoid adding the old random Amigo replies to its guaranteed GIF.
+    if is_amigo_rost_message(update.message):
+        return
 
     # Запись ДР по шаблону @username 26.01.1994
     bday_pattern = r"^(@\w+)\s+(\d{2}\.\d{2}(?:\.\d{4})?)$"
