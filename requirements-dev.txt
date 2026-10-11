@@ -1,3 +1,15 @@
 -r requirements.txt
-pytest>=8.0
-pytest-asyncio>=0.23
+
+# Direct development dependencies
+pytest==9.1.1
+pytest-asyncio==1.4.0
+
+# Development-only transitive dependencies
+backports-asyncio-runner==1.2.0 ; python_version < "3.11"
+colorama==0.4.6 ; sys_platform == "win32"
+exceptiongroup==1.3.1 ; python_version < "3.11"
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+tomli==2.5.0 ; python_version < "3.11"
