@@ -1229,7 +1229,8 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
         "Поражений: <b>8</b>\n"
         "Хуяние:\n<b>🍆 Победитель (12)\n💀 Лузер (8)\n🔪 Вор (3)</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
-        "Статус на сегодня: <b>С хуем 🍆</b>\n"
+        "Статус на сегодня: <b>С хуем 🍆</b>\n\n"
+        "Питомец: Нет\n\n"
         "<b>Инвентарь:</b> Промасленная жилетка, Нож",
     )
 
@@ -1243,7 +1244,8 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     assert sent.await_args.args[2].endswith(
         "Хуяние:\n<b>Нет званий</b>\n"
         "👹 Побеждено боссов: <b>4</b>\n"
-        "Статус на сегодня: <b>Без хуя 💀</b>\n"
+        "Статус на сегодня: <b>Без хуя 💀</b>\n\n"
+        "Питомец: Нет\n\n"
         "<b>Инвентарь:</b> Промасленная жилетка, Нож"
     )
 

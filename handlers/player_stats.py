@@ -99,7 +99,6 @@ def format_player_stats_telegram(model: dict, *, inspected: bool = False) -> str
     )
     if model.get("telegram_equipment"):
         text += "\n\n" + model["telegram_equipment"]
-    text += "\n" + get_text("duel.inventory.line", items=model["telegram_inventory"])
-    if model["pet"]:
-        text += "\n" + model["pet"]
+    text += "\n\n" + (model["pet"] or get_text("huecrab.inventory_empty"))
+    text += "\n\n" + get_text("duel.inventory.line", items=model["telegram_inventory"])
     return text

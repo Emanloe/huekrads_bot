@@ -251,6 +251,9 @@ async def test_registered_duel_stats_handler_shows_base_items_only_in_equipment(
     assert "🧥 Верхняя одежда: Промасленная жилетка" in final_output
     assert "💍 Аксессуар 1: Пусто" in final_output
     assert "💍 Аксессуар 2: Пусто" in final_output
+    assert "Питомец: Нет" in final_output
+    assert final_output.index("💍 Аксессуар 2: Пусто") < final_output.index(
+        "Питомец: Нет") < final_output.index("<b>Инвентарь:</b>")
     assert "Промасленная жилетка ×2" not in final_output
     assert "Нож ×2" not in final_output
 

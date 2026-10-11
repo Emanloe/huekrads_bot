@@ -97,6 +97,8 @@ async def test_me_matches_real_duel_stats_without_base_inventory_duplication_and
     assert "<b>Инвентарь:</b> Промасленная жилетка" not in telegram_text
     assert me["pet"] == get_text("huecrab.inventory")
     assert me["pet"] in telegram_text
+    assert telegram_text.index("💍 Аксессуар 2:") < telegram_text.index(
+        me["pet"]) < telegram_text.index("<b>Инвентарь:</b>")
     assert [item["id"] for item in BASE_DUEL_ITEMS] == ["oiled_vest", "knife"]
     assert [item["item_id"] for item in database.get_duel_inventory(CHAT_A, 101)] == [
         "ceremonial_bolt", "ceremonial_bolt", "cork_with_bite_marks", "knife",

@@ -122,6 +122,9 @@ async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
     telegram = sent.await_args.args[2]
     assert telegram.startswith("🔎 <b>Осмотр игрока: ")
     assert "Информация о гноме:" not in telegram
+    assert "Питомец: Нет" in telegram
+    assert telegram.index("💍 Аксессуар 2: Пусто") < telegram.index(
+        "Питомец: Нет") < telegram.index("<b>Инвентарь:</b>")
     for value in ("0 / 100", "100", "200", "Без хуя", "Парадный болт ×2"):
         assert value in telegram
     sent.reset_mock()
@@ -149,6 +152,7 @@ async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
                 (CHAT_A, 202),
             ).fetchone() == (None,)
         own_me = (await client.get("/api/v1/me", headers=own)).json()
+        assert own_me["pet"] is None
         inspect_stats = {key: value for key, value in inspect.items()
                          if key != "gnome_image_url"}
         assert inspect_stats == {key: value for key, value in own_me.items()
@@ -169,6 +173,26 @@ async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
             "FROM duel_users WHERE chat_id = ? AND user_id = ?", (CHAT_A, 202),
         ))
     assert after == before
+
+
+@pytest.mark.asyncio
+async def test_inspect_shows_owned_huecrab_between_equipment_and_inventory(
+    temp_database, fake_context, monkeypatch,
+):
+    register(CHAT_A, 101, "viewer")
+    register(CHAT_A, 202, "owner")
+    with database.get_db() as conn:
+        conn.execute("INSERT INTO huecrab_owners (chat_id, user_id) VALUES (?, ?)",
+                     (CHAT_A, 202))
+    sent = AsyncMock()
+    monkeypatch.setattr(duel, "send_and_schedule", sent)
+
+    await duel.inspect_command(update_for(CHAT_A, 101, reply_id=202), fake_context)
+
+    output = sent.await_args.args[2]
+    assert database.has_huecrab(CHAT_A, 202)
+    assert output.index("💍 Аксессуар 2: Пусто") < output.index(
+        "Питомец: Хуекраб") < output.index("<b>Инвентарь:</b>")
 
 
 @pytest.mark.asyncio
