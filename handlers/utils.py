@@ -1,8 +1,10 @@
 import logging
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS
 from database import is_auto_delete_enabled
+from handlers.duel_messaging import is_message_to_delete_not_found
 from text_resources import get_text, get_text_mapping
 
 
@@ -36,8 +38,22 @@ async def delete_messages_job(context: ContextTypes.DEFAULT_TYPE):
     if is_auto_delete_enabled(chat_id):
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        except Exception as e:
-            logging.warning(f"Не удалось удалить сообщение {message_id}: {e}")
+        except BadRequest as exc:
+            if is_message_to_delete_not_found(exc):
+                logging.info(
+                    "COMMAND_MESSAGE_DELETE_ALREADY_ABSENT chat_id=%s message_id=%s",
+                    chat_id, message_id,
+                )
+            else:
+                logging.exception(
+                    "COMMAND_MESSAGE_DELETE_FAILED chat_id=%s message_id=%s",
+                    chat_id, message_id,
+                )
+        except Exception:
+            logging.exception(
+                "COMMAND_MESSAGE_DELETE_FAILED chat_id=%s message_id=%s",
+                chat_id, message_id,
+            )
 
 
 async def reply_or_send(

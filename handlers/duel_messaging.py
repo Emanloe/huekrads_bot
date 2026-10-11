@@ -1,10 +1,19 @@
 import logging
 
 from telegram import Update, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 
 AUTO_DELETE_DELAY = 60
+_MESSAGE_TO_DELETE_NOT_FOUND = "message to delete not found"
+
+
+def is_message_to_delete_not_found(error: Exception) -> bool:
+    return (
+        isinstance(error, BadRequest)
+        and str(error).strip().casefold() == _MESSAGE_TO_DELETE_NOT_FOUND
+    )
 
 
 async def delete_messages_job(context: ContextTypes.DEFAULT_TYPE):
@@ -23,6 +32,17 @@ async def delete_messages_job(context: ContextTypes.DEFAULT_TYPE):
             )
             logging.info(
                 "%s_DELETE_OK chat_id=%s battle_id=%s round=%s message_id=%s",
+                prefix, chat_id, battle_id, round_num, msg_id,
+            )
+        except BadRequest as exc:
+            if is_message_to_delete_not_found(exc):
+                logging.info(
+                    "%s_DELETE_ALREADY_ABSENT chat_id=%s battle_id=%s round=%s message_id=%s",
+                    prefix, chat_id, battle_id, round_num, msg_id,
+                )
+                continue
+            logging.exception(
+                "%s_DELETE_FAILED chat_id=%s battle_id=%s round=%s message_id=%s",
                 prefix, chat_id, battle_id, round_num, msg_id,
             )
         except Exception:

@@ -2,6 +2,8 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from telegram.error import BadRequest
+
 
 def test_duel_reexports_messaging_contract():
     from handlers import duel, duel_messaging
@@ -66,6 +68,73 @@ async def test_delete_messages_job_continues_after_delete_error(caplog):
     assert deleted_ids == [(-56, 1), (-56, 2), (-56, 3)]
     assert "TEMP_MESSAGE_DELETE_OK chat_id=-56" in caplog.text
     assert "TEMP_MESSAGE_DELETE_FAILED chat_id=-56" in caplog.text
+
+
+async def test_delete_messages_job_logs_success_without_failure(caplog):
+    from handlers.duel_messaging import delete_messages_job
+
+    caplog.set_level(logging.INFO)
+    context = SimpleNamespace(
+        job=SimpleNamespace(data={"chat_id": -57, "message_ids": [10]}),
+        bot=SimpleNamespace(delete_message=AsyncMock(return_value=True)),
+    )
+
+    await delete_messages_job(context)
+
+    context.bot.delete_message.assert_awaited_once_with(chat_id=-57, message_id=10)
+    assert "TEMP_MESSAGE_DELETE_OK chat_id=-57" in caplog.text
+    assert "TEMP_MESSAGE_DELETE_FAILED chat_id=-57" not in caplog.text
+
+
+async def test_delete_messages_job_treats_missing_message_as_idempotent(caplog):
+    from handlers.duel_messaging import delete_messages_job
+
+    caplog.set_level(logging.INFO)
+    context = SimpleNamespace(
+        job=SimpleNamespace(data={"chat_id": -58, "message_ids": [11]}),
+        bot=SimpleNamespace(
+            delete_message=AsyncMock(
+                side_effect=BadRequest("Message to delete not found"),
+            ),
+        ),
+    )
+
+    await delete_messages_job(context)
+
+    assert "TEMP_MESSAGE_DELETE_ALREADY_ABSENT chat_id=-58" in caplog.text
+    assert "TEMP_MESSAGE_DELETE_FAILED chat_id=-58" not in caplog.text
+    record = next(
+        item for item in caplog.records
+        if "TEMP_MESSAGE_DELETE_ALREADY_ABSENT" in item.getMessage()
+    )
+    assert record.levelno == logging.INFO
+    assert record.exc_info is None
+
+
+async def test_delete_messages_job_does_not_suppress_other_bad_requests(caplog):
+    from handlers.duel_messaging import delete_messages_job
+
+    caplog.set_level(logging.INFO)
+    context = SimpleNamespace(
+        job=SimpleNamespace(data={"chat_id": -59, "message_ids": [12, 13]}),
+        bot=SimpleNamespace(
+            delete_message=AsyncMock(
+                side_effect=[BadRequest("Message can't be deleted"), True],
+            ),
+        ),
+    )
+
+    await delete_messages_job(context)
+
+    assert context.bot.delete_message.await_count == 2
+    assert "TEMP_MESSAGE_DELETE_FAILED chat_id=-59" in caplog.text
+    assert "TEMP_MESSAGE_DELETE_OK chat_id=-59" in caplog.text
+    failure = next(
+        item for item in caplog.records
+        if "TEMP_MESSAGE_DELETE_FAILED" in item.getMessage()
+    )
+    assert failure.levelno == logging.ERROR
+    assert failure.exc_info is not None
 
 
 async def test_battle_delete_jobs_keep_identity_and_log_failures(fake_context, caplog):
