@@ -244,6 +244,8 @@ async def test_registered_duel_stats_handler_shows_base_items_only_in_equipment(
         reply_text.reset_mock()
     assert outputs[0] == outputs[1]
     final_output = outputs[0]
+    assert final_output.startswith("📊 <b>Информация о гноме: ")
+    assert "Статистика дуэлей:" not in final_output
     assert f"<b>Инвентарь:</b> {expected_inventory}" in final_output
     assert "⚔️ Оружие: Нож" in final_output
     assert "🧥 Верхняя одежда: Промасленная жилетка" in final_output

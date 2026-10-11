@@ -159,7 +159,8 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
             response = await client.get(path)
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
-            assert '<h1>ГНОМЬИ БОИ НА НОЖАХ</h1>' in response.text
+            assert '<h1>HUEKRADS</h1>' in response.text
+            assert '<title>HUEKRADS</title>' in response.text
             assert 'id="header-player"' not in response.text
             for removed in ("Чатовая арена", "Арена</span>",
                             "Игровой мир текущего чата", "Дуэли гномов",
@@ -463,7 +464,7 @@ def test_home_and_opponents_render_full_read_only_stats_safely():
     assert 'dataCell("Побеждено боссов", data.boss_wins)' in js
     assert 'dataCell("Статус на сегодня", data.dick_status?.text' in js
     assert 'dataCell("Хуй сегодня"' not in js
-    assert 'if (data.pet) content.append(notice(data.pet))' in js
+    assert 'content.append(notice(data.pet || "Питомец: Нет"))' in js
 
     for category in ('["wins", "Победы"]', '["losses", "Поражения"]',
                      '["stolen_dicks", "Украденные хуи"]'):
@@ -488,9 +489,10 @@ def test_compact_header_only_has_centered_title_and_profile_keeps_dwarf_name():
     js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
     header = re.search(r'<header class="site-header">(.*?)</header>', html, re.S).group(1)
-    assert re.sub(r"<[^>]+>", "", header).strip() == "ГНОМЬИ БОИ НА НОЖАХ"
+    assert re.sub(r"<[^>]+>", "", header).strip() == "HUEKRADS"
     assert header.count("<h1>") == 1
-    assert html.index('<h1>ГНОМЬИ БОИ НА НОЖАХ</h1>') < html.index('class="tab-bar"')
+    assert html.index('<h1>HUEKRADS</h1>') < html.index('class="tab-bar"')
+    assert "ГНОМЬИ БОИ НА НОЖАХ" not in html
     assert 'dataCell("Имя гнома", data.dwarf_name' in js
     assert 'header-player' not in html + css + js
     assert 'text-align: center' in css

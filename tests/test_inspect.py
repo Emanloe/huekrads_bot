@@ -120,6 +120,8 @@ async def test_inspect_matches_me_and_telegram_stats_without_gameplay_writes(
     reply_update.message.delete.assert_awaited_once_with()
     reply_update.message.reply_to_message.delete.assert_not_awaited()
     telegram = sent.await_args.args[2]
+    assert telegram.startswith("🔎 <b>Осмотр игрока: ")
+    assert "Информация о гноме:" not in telegram
     for value in ("0 / 100", "100", "200", "Без хуя", "Парадный болт ×2"):
         assert value in telegram
     sent.reset_mock()

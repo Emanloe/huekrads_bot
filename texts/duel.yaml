@@ -190,7 +190,7 @@ stats:
   title_item: "{title} ({count})"
   no_titles: Нет званий
   summary: |-
-    📊 <b>Статистика дуэлей: {title}</b>
+    📊 <b>Информация о гноме: {title}</b>
 
     Очки: <b>{points} / {max_points}</b>
     Побед: <b>{wins}</b>

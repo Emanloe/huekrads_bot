@@ -276,7 +276,7 @@
       }
       content.append(inventory);
     }
-    if (data.pet) content.append(notice(data.pet));
+    content.append(notice(data.pet || "Питомец: Нет"));
     body.replaceChildren(content);
   }
 

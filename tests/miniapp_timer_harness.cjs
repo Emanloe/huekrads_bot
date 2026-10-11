@@ -311,6 +311,10 @@ assert.equal(equipmentLayout.children[0].children[1].children[1].children[0].tex
 assert.equal(equipmentLayout.children[1].children[1].children[0].children[1].textContent, "Именной меч");
 assert.equal(equipmentLayout.children[1].children[1].children[3].children[0].textContent, "💍 Аксессуар 1");
 assert.equal(equipmentLayout.children[1].children[1].children[4].children[0].textContent, "💍 Аксессуар 2");
+assert.ok(homeContent.children.some(child => child.textContent === "Питомец: Нет"));
+app.renderHome({ ...ownProfile, pet: "Питомец: Хуекраб" });
+assert.ok(nodes.get("home-content").children[0].children.some(
+  child => child.textContent === "Питомец: Хуекраб"));
 app.renderProfile(ownProfile, nodes.get("opponents-content"), true);
 const inspectedProfile = nodes.get("opponents-content").children[0];
 const inspectedHero = findClass(inspectedProfile, "home-profile");

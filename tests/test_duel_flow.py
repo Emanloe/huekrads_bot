@@ -1223,7 +1223,7 @@ async def test_duel_stats_command_preserves_yaml_backed_output(monkeypatch, fake
     sent.assert_awaited_once_with(
         update,
         fake_context,
-        "📊 <b>Статистика дуэлей: &lt;b&gt;Статист&lt;/b&gt;</b>\n\n"
+        "📊 <b>Информация о гноме: &lt;b&gt;Статист&lt;/b&gt;</b>\n\n"
         "Очки: <b>37 / 100</b>\n"
         "Побед: <b>12</b>\n"
         "Поражений: <b>8</b>\n"
