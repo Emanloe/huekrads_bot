@@ -3,6 +3,7 @@
 import logging
 import random
 import sqlite3
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 
@@ -180,10 +181,10 @@ def _claim_hyperboreic_huy(
     )
 
     try:
-        with sqlite3.connect(
+        with closing(sqlite3.connect(
             str(db_path),
             timeout=10,
-        ) as conn:
+        )) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM deleted_users WHERE user_id = ?", (user_id,)).fetchone():
                 return "missing"
@@ -263,7 +264,9 @@ def _claim_hyperboreic_huy_for_other(
         # button is registered before an event can be resolved.
         get_or_create_duel_user(tg_user, chat_id)
 
-        with sqlite3.connect(str(_HYPERBOREAN_DB_PATH), timeout=10) as conn:
+        with closing(sqlite3.connect(
+            str(_HYPERBOREAN_DB_PATH), timeout=10,
+        )) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM deleted_users WHERE user_id = ?", (tg_user.id,)).fetchone():
                 return "missing", None, False

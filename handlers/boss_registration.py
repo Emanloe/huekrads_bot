@@ -3,6 +3,7 @@
 import logging
 import random
 import sqlite3
+from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -50,46 +51,50 @@ def _legacy_registration_today():
     return datetime.now(timezone).date().isoformat()
 
 
+@contextmanager
 def _boss_registration_connect():
     conn = sqlite3.connect(str(_BOSS_REG_DB_PATH), timeout=10)
     try:
-        # Serialize migration with registration and consumption.
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute(_NEXT_TABLE_SQL)
-        conn.execute(_NEXT_BOSS_SQL)
-        conn.execute("""CREATE TABLE IF NOT EXISTS deleted_users (
-            user_id INTEGER PRIMARY KEY, username TEXT, deleted_at TEXT NOT NULL
-        )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS boss_registration_meta (
-            key TEXT PRIMARY KEY
-        )""")
-        migrated = conn.execute(
-            "SELECT 1 FROM boss_registration_meta WHERE key = 'next_queue_v1'"
-        ).fetchone()
-        if not migrated:
-            legacy = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boss_registrations'"
+        try:
+            # Serialize migration with registration and consumption.
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(_NEXT_TABLE_SQL)
+            conn.execute(_NEXT_BOSS_SQL)
+            conn.execute("""CREATE TABLE IF NOT EXISTS deleted_users (
+                user_id INTEGER PRIMARY KEY, username TEXT, deleted_at TEXT NOT NULL
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS boss_registration_meta (
+                key TEXT PRIMARY KEY
+            )""")
+            migrated = conn.execute(
+                "SELECT 1 FROM boss_registration_meta WHERE key = 'next_queue_v1'"
             ).fetchone()
-            if legacy:
-                # Old code only read today's Moscow registrations. Skipped
-                # starts left older rows behind, but never read them again.
-                conn.execute("""
-                    INSERT OR IGNORE INTO boss_next_registrations
-                        (chat_id, user_id, username, first_name, last_name)
-                    SELECT chat_id, user_id, username, first_name, last_name
-                    FROM boss_registrations AS r WHERE reg_date = ?
-                      AND NOT EXISTS (SELECT 1 FROM deleted_users AS d WHERE d.user_id = r.user_id)
-                    ORDER BY rowid
-                """, (_legacy_registration_today(),))
-            conn.execute(
-                "INSERT INTO boss_registration_meta (key) VALUES ('next_queue_v1')"
-            )
-        conn.commit()
-    except Exception:
-        conn.rollback()
+            if not migrated:
+                legacy = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boss_registrations'"
+                ).fetchone()
+                if legacy:
+                    # Old code only read today's Moscow registrations. Skipped
+                    # starts left older rows behind, but never read them again.
+                    conn.execute("""
+                        INSERT OR IGNORE INTO boss_next_registrations
+                            (chat_id, user_id, username, first_name, last_name)
+                        SELECT chat_id, user_id, username, first_name, last_name
+                        FROM boss_registrations AS r WHERE reg_date = ?
+                          AND NOT EXISTS (SELECT 1 FROM deleted_users AS d WHERE d.user_id = r.user_id)
+                        ORDER BY rowid
+                    """, (_legacy_registration_today(),))
+                conn.execute(
+                    "INSERT INTO boss_registration_meta (key) VALUES ('next_queue_v1')"
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        with conn:
+            yield conn
+    finally:
         conn.close()
-        raise
-    return conn
 
 
 def _prepared_boss_from_row(row) -> dict:
@@ -173,8 +178,11 @@ def _boss_registration_snapshot(chat_id: int, viewer_user_id: int) -> tuple[int,
     """Read the next queue without creating tables or writing SQLite."""
     if not _BOSS_REG_DB_PATH.exists():
         return 0, False
-    with sqlite3.connect(f"{_BOSS_REG_DB_PATH.resolve().as_uri()}?mode=ro",
-                         uri=True, timeout=10) as conn:
+    with closing(sqlite3.connect(
+        f"{_BOSS_REG_DB_PATH.resolve().as_uri()}?mode=ro",
+        uri=True,
+        timeout=10,
+    )) as conn:
         next_table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boss_next_registrations'"
         ).fetchone()

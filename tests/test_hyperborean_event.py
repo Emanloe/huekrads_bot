@@ -7,6 +7,33 @@ from datetime import date, timedelta
 import pytest
 
 
+def _track_handler_connections(monkeypatch, module, *, fail_sql=None):
+    original_connect = sqlite3.connect
+    connections = []
+
+    class TrackingConnection(sqlite3.Connection):
+        closed = False
+
+        def execute(self, sql, parameters=(), /):
+            normalized = " ".join(sql.split())
+            if fail_sql and fail_sql in normalized:
+                raise RuntimeError("forced SQLite failure")
+            return super().execute(sql, parameters)
+
+        def close(self):
+            self.closed = True
+            return super().close()
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = TrackingConnection
+        conn = original_connect(*args, **kwargs)
+        connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(module, "sqlite3", SimpleNamespace(connect=connect))
+    return connections
+
+
 def test_hyperborean_public_reexports():
     from handlers import duel, hyperborean_event
 
@@ -151,6 +178,46 @@ def test_claim_uses_temporary_database(monkeypatch, temp_database, tg_user):
     monkeypatch.setattr(event, "_HYPERBOREAN_DB_PATH", temp_database)
     assert event._claim_hyperboreic_huy(-99, tg_user) == "exploded"
     assert event._claim_hyperboreic_huy(-99, tg_user) == "restored"
+
+
+def test_claim_connections_close_after_success(monkeypatch, temp_database, tg_user):
+    from handlers import hyperborean_event as event
+
+    monkeypatch.setattr(event, "_HYPERBOREAN_DB_PATH", temp_database)
+    connections = _track_handler_connections(monkeypatch, event)
+
+    assert event._claim_hyperboreic_huy(-99, tg_user) == "exploded"
+    result, selected, _ = event._claim_hyperboreic_huy_for_other(-99, tg_user)
+
+    assert result == "exploded"
+    assert selected["user_id"] == tg_user.id
+    assert len(connections) == 2
+    assert all(conn.closed for conn in connections)
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "fail_sql", "expected"),
+    [
+        ("_claim_hyperboreic_huy", "SELECT dick_stolen_today", "error"),
+        ("_claim_hyperboreic_huy_for_other", "SELECT user_id, username", "error"),
+    ],
+)
+def test_claim_connections_close_after_sql_error(
+    monkeypatch, temp_database, tg_user, claim_name, fail_sql, expected,
+):
+    from handlers import hyperborean_event as event
+
+    monkeypatch.setattr(event, "_HYPERBOREAN_DB_PATH", temp_database)
+    connections = _track_handler_connections(
+        monkeypatch, event, fail_sql=fail_sql,
+    )
+
+    result = getattr(event, claim_name)(-99, tg_user)
+
+    if isinstance(result, tuple):
+        result = result[0]
+    assert result == expected
+    assert connections[-1].closed is True
 
 
 def _duel_user(user_id, username):

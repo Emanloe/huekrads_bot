@@ -51,6 +51,89 @@ def next_queue(temp_database, monkeypatch):
     duel._BOSS_START_LOCKS.clear()
 
 
+def _track_handler_connections(monkeypatch, module, *, fail_sql=None):
+    original_connect = sqlite3.connect
+    connections = []
+
+    class TrackingConnection(sqlite3.Connection):
+        closed = False
+
+        def execute(self, sql, parameters=(), /):
+            normalized = " ".join(sql.split())
+            if fail_sql and fail_sql in normalized:
+                raise RuntimeError("forced SQLite failure")
+            return super().execute(sql, parameters)
+
+        def close(self):
+            self.closed = True
+            return super().close()
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = TrackingConnection
+        conn = original_connect(*args, **kwargs)
+        connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(module, "sqlite3", SimpleNamespace(connect=connect))
+    return connections
+
+
+def test_boss_registration_closes_connections_after_success(next_queue, monkeypatch):
+    connections = _track_handler_connections(monkeypatch, boss_registration)
+
+    assert boss_registration._boss_register_user(-1, user(11)) is True
+    assert boss_registration._boss_get_registered_users(-1)[0][0] == 11
+    assert boss_registration._boss_registration_snapshot(-1, 11) == (1, True)
+    assert boss_registration._boss_get_registered_chat_ids() == {-1}
+    assert boss_registration._boss_consume_registrations(-1)[0][0] == 11
+
+    assert len(connections) == 5
+    assert all(conn.closed for conn in connections)
+
+
+def test_boss_registration_rolls_back_and_closes_on_caller_error(
+    next_queue, monkeypatch,
+):
+    connections = _track_handler_connections(monkeypatch, boss_registration)
+
+    def fail_selector():
+        raise RuntimeError("selection failed")
+
+    with pytest.raises(RuntimeError, match="selection failed"):
+        boss_registration._boss_prepare_next_boss(-1, fail_selector)
+
+    assert connections[-1].closed is True
+    with sqlite3.connect(next_queue) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM boss_next_battles WHERE chat_id = -1"
+        ).fetchone()[0] == 0
+
+
+def test_boss_registration_closes_connection_on_init_error(next_queue, monkeypatch):
+    connections = _track_handler_connections(
+        monkeypatch,
+        boss_registration,
+        fail_sql="CREATE TABLE IF NOT EXISTS boss_next_registrations",
+    )
+    with pytest.raises(RuntimeError, match="forced SQLite failure"):
+        boss_registration._boss_get_registered_users(-1)
+    assert connections[-1].closed is True
+
+
+def test_boss_registration_closes_connection_on_snapshot_error(
+    next_queue, monkeypatch,
+):
+    boss_registration._boss_get_registered_users(-1)
+    connections = _track_handler_connections(
+        monkeypatch,
+        boss_registration,
+        fail_sql="SELECT COUNT(DISTINCT user_id)",
+    )
+    with pytest.raises(RuntimeError, match="forced SQLite failure"):
+        boss_registration._boss_registration_snapshot(-1, 11)
+    assert connections[-1].closed is True
+
+
 def _seed_legacy(next_queue, rows):
     with sqlite3.connect(next_queue) as conn:
         conn.execute("""CREATE TABLE boss_registrations (
