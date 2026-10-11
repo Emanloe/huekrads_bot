@@ -8,11 +8,16 @@ tests/
 pytest.ini
 requirements-dev.txt
 .pytest_cache/
+.pytest-tmp/
+.coverage
+htmlcov/
 
 # Python cache
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+venv/
 
 # Environment / secrets
 .env
@@ -24,7 +29,10 @@ __pycache__/
 *.db-*
 *.db.backup*
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
+backups/
 
 # IDE / OS
 .idea/
@@ -36,3 +44,4 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+bot_text_review*.txt
