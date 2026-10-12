@@ -37,7 +37,7 @@ def test_bot_public_import_contracts():
         "duel_top_command", "duel_delete_command", "gnomed_command", "boss_daily_job", "boss_callback",
         "boss_command", "boss_reg_command", "hyperboreic_huy_daily_job",
         "hyperboreic_huy_callback",
-        "duel_item_event_job", "duel_item_event_callback",
+        "duel_item_event_job", "duel_item_event_callback", "lure_command",
     )
     for name in names:
         assert callable(getattr(bot, name))
@@ -73,6 +73,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("name", "Назвать своего гнома"),
         ("summary", "Месячная статистика чата"),
         ("dig", "Копать за 10 очков"),
+        ("lure", "Выбросить предмет ради хуекраба"),
         ("ball", "Активировать элитный мячик"),
         ("me", "Статистика дуэлей"),
         ("inspect", "Осмотреть игрока"),
@@ -128,6 +129,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
         (bot.name_command, "name"),
         (bot.summary_command, "summary"),
         (bot.dig_command, "dig"),
+        (bot.lure_command, "lure"),
     ):
         handlers = [
             item

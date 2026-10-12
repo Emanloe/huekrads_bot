@@ -106,6 +106,7 @@ from handlers.elite_ball import (
     elite_ball_question, ELITE_BALL_CALLBACK_DATA, ELITE_BALL_INLINE_CALLBACK_PREFIX,
 )
 from handlers.dig import dig_command
+from handlers.lure import lure_command
 from handlers.modules import modules_command, modules_callback
 from handlers.huecrab import (
     HUECRAB_CHECK_MINUTES, huecrab_autoloot_job,
@@ -142,6 +143,7 @@ BOT_COMMANDS = [
     BotCommand("name", get_text("menu.commands.name")),
     BotCommand("summary", get_text("menu.commands.summary")),
     BotCommand("dig", get_text("menu.commands.dig")),
+    BotCommand("lure", get_text("menu.commands.lure")),
     BotCommand("ball", get_text("menu.commands.ball")),
     BotCommand("me", get_text("menu.commands.me")),
     BotCommand("inspect", get_text("menu.commands.inspect")),
@@ -423,6 +425,7 @@ async def main():
     application.add_handler(CommandHandler("name", name_command))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("dig", dig_command))
+    application.add_handler(CommandHandler("lure", lure_command))
     application.add_handler(CommandHandler("ball", ball_command))
     application.add_handler(CommandHandler("modules", modules_command))
     application.add_handler(CallbackQueryHandler(

@@ -31,22 +31,28 @@ HUECRAB_CHECK_MINUTES = 60
 HUECRAB_DAILY_SPAWNS: dict[int, tuple[date, int]] = {}
 
 
-async def spawn_huecrab_event(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def spawn_huecrab_event(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    *,
+    roll_for_spawn: bool = True,
+) -> bool:
+    """Publish the existing wild Huecrab event after its normal eligibility checks."""
     if not is_module_enabled(chat_id, "duel_random_events"):
-        return
+        return False
     today = date.today()
     last_date, count = HUECRAB_DAILY_SPAWNS.get(chat_id, (today, 0))
     if last_date != today:
         count = 0
     if count >= HUECRAB_EVENT_DAILY_LIMIT or has_active_huecrab_event(chat_id):
-        return
+        return False
     if not has_eligible_huecrab_tamer(chat_id):
-        return
-    if random.random() >= HUECRAB_EVENT_CHANCE:
-        return
+        return False
+    if roll_for_spawn and random.random() >= HUECRAB_EVENT_CHANCE:
+        return False
     event_id = create_huecrab_event(chat_id)
     if event_id is None:
-        return
+        return False
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton(
             get_text("huecrab.button"),
@@ -55,7 +61,7 @@ async def spawn_huecrab_event(context: ContextTypes.DEFAULT_TYPE, chat_id: int) 
     ]])
     if not is_module_enabled(chat_id, "duel_random_events") or not has_eligible_huecrab_tamer(chat_id):
         discard_unpublished_huecrab_event(event_id)
-        return
+        return False
     try:
         message = await context.bot.send_message(
             chat_id=chat_id, text=get_text("huecrab.spawn"),
@@ -66,8 +72,9 @@ async def spawn_huecrab_event(context: ContextTypes.DEFAULT_TYPE, chat_id: int) 
     except Exception:
         discard_unpublished_huecrab_event(event_id)
         logging.exception("Could not publish Huecrab event %s in chat %s", event_id, chat_id)
-        return
+        return False
     HUECRAB_DAILY_SPAWNS[chat_id] = (today, count + 1)
+    return True
 
 
 async def huecrab_event_job(context: ContextTypes.DEFAULT_TYPE) -> None:

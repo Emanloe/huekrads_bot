@@ -1621,6 +1621,51 @@ def remove_duel_inventory_instance(
         return cursor.rowcount == 1
 
 
+def consume_random_unequipped_duel_inventory_item(
+    chat_id: int,
+    user_id: int,
+    item_selector,
+) -> tuple[str, dict | None]:
+    """Atomically remove one selected, non-equipped collectible inventory instance."""
+    from handlers.duel_items import BASE_DUEL_ITEM_IDS
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        if get_duel_user_by_id_in_transaction(
+            cursor, chat_id, user_id, read_only=True,
+        ) is None:
+            return "not_registered", None
+
+        placeholders = ", ".join("?" for _ in BASE_DUEL_ITEM_IDS)
+        rows = cursor.execute(
+            f"""SELECT i.id, i.item_id
+                FROM duel_inventory AS i
+                WHERE i.chat_id = ? AND i.user_id = ?
+                  AND i.item_id NOT IN ({placeholders})
+                  AND NOT EXISTS (
+                      SELECT 1 FROM duel_equipment AS e WHERE e.inventory_id = i.id
+                  )
+                ORDER BY i.id""",
+            (chat_id, user_id, *BASE_DUEL_ITEM_IDS),
+        ).fetchall()
+        if not rows:
+            return "no_item", None
+
+        instance_id, item_id = item_selector(rows)
+        cursor.execute(
+            """DELETE FROM duel_inventory
+               WHERE id = ? AND chat_id = ? AND user_id = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM duel_equipment WHERE inventory_id = duel_inventory.id
+                 )""",
+            (instance_id, chat_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Selected lure inventory instance disappeared")
+        return "consumed", {"id": instance_id, "item_id": item_id}
+
+
 def transfer_duel_inventory_item(
     chat_id: int,
     from_user_id: int,
