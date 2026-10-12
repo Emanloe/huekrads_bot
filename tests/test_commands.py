@@ -45,6 +45,71 @@ async def test_donate_command_replies_with_yaml_text(fake_context, tg_user):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("registered", [False, True])
+async def test_mwspukku_is_exact_and_has_no_profile_requirement(
+    registered, temp_database, fake_context, tg_user,
+):
+    import database as db
+    from handlers import commands
+    from handlers.duel_messaging import delete_messages_job
+
+    if registered:
+        db.get_or_create_duel_user(tg_user, -44)
+    message = SimpleNamespace(
+        from_user=tg_user,
+        chat_id=-44,
+        message_id=777,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=778)),
+    )
+    update = SimpleNamespace(
+        message=message,
+        effective_chat=SimpleNamespace(id=-44),
+        effective_user=tg_user,
+    )
+
+    await commands.mwspukku_command(update, fake_context)
+
+    message.reply_text.assert_awaited_once_with(
+        "И вдобавок у вас украли команду", parse_mode="HTML", reply_markup=None,
+    )
+    assert fake_context.job_queue.calls == [(
+        delete_messages_job, 60,
+        {"data": {"chat_id": -44, "message_ids": [778, 777]}},
+    )]
+    with db.get_db() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM duel_users WHERE chat_id = ? AND user_id = ?", (-44, tg_user.id),
+        ).fetchone()[0] == int(registered)
+
+
+@pytest.mark.asyncio
+async def test_mwspukku_works_for_deleted_gnome(temp_database, fake_context, tg_user):
+    import database as db
+    from handlers import commands
+
+    db.get_or_create_duel_user(tg_user, -44)
+    assert db.delete_gnome(tg_user.id, tg_user.username)
+    message = SimpleNamespace(
+        from_user=tg_user,
+        chat_id=-44,
+        message_id=779,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=780)),
+    )
+    update = SimpleNamespace(
+        message=message,
+        effective_chat=SimpleNamespace(id=-44),
+        effective_user=tg_user,
+    )
+
+    await commands.mwspukku_command(update, fake_context)
+
+    message.reply_text.assert_awaited_once_with(
+        "И вдобавок у вас украли команду", parse_mode="HTML", reply_markup=None,
+    )
+    assert db.is_deleted_user(tg_user.id)
+
+
+@pytest.mark.asyncio
 async def test_set_bday_command_saves_own_date(monkeypatch, temp_database, fake_context, tg_user):
     from handlers import commands
     import database

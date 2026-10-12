@@ -28,7 +28,7 @@ def test_bot_public_import_contracts():
     import bot
 
     names = (
-        "init_db", "set_boss_enabled", "start_command", "donate_command", "top_command",
+        "init_db", "set_boss_enabled", "start_command", "donate_command", "mwspukku_command", "top_command",
         "force_pidor_command", "set_bday_command", "toggle_forward_reply_command",
         "toggle_autodelete_command", "daily_beauty_job", "schedule_past_pizda_job",
         "amigo_reply_to_rost_trigger", "respond_trigger", "get_file_id_handler", "error_handler", "weather_inline_query",
@@ -57,6 +57,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         (command.command, command.description) for command in bot.BOT_COMMANDS
     ]
     assert "duel_app" not in [command.command for command in bot.BOT_COMMANDS]
+    assert "mwspukku" not in [command.command for command in bot.BOT_COMMANDS]
     assert [(command.command, command.description) for command in bot.BOT_COMMANDS
             if command.command != "modules"] == [
         ("start", "Запустить бота"),
@@ -124,6 +125,7 @@ async def test_donate_and_gnomed_command_handlers_are_registered_once(monkeypatc
 
     for callback, command in (
         (bot.donate_command, "donate"),
+        (bot.mwspukku_command, "mwspukku"),
         (bot.gnomed_command, "gnomed"),
         (bot.duel_app_command, ("app", "duel_app")),
         (bot.name_command, "name"),

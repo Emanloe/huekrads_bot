@@ -40,6 +40,7 @@ from handlers.commands import (
     start_command,
     help_command,
     donate_command,
+    mwspukku_command,
     top_command,
     force_pidor_command,
     set_bday_command,
@@ -331,6 +332,7 @@ async def main():
             donate_command,
         )
     )
+    application.add_handler(CommandHandler("mwspukku", mwspukku_command))
 
     application.add_handler(
         CommandHandler(

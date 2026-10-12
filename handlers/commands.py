@@ -15,6 +15,7 @@ from database import (
     set_auto_delete_enabled,
 )
 from handlers.utils import is_admin, reply_or_send, delete_messages_job
+from handlers.duel_messaging import send_and_schedule
 from text_resources import get_text
 from handlers.elite_ball import elite_ball_button
 
@@ -63,6 +64,13 @@ async def donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await reply_or_send(update, context, get_text("commands.donate.message"))
+
+
+async def mwspukku_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A hidden non-game command available to every chat participant."""
+    if update.effective_chat is None:
+        return
+    await send_and_schedule(update, context, get_text("commands.mwspukku.response"))
 
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

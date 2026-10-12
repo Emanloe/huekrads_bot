@@ -326,6 +326,12 @@ async def test_guard_blocks_game_updates_but_leaves_non_game_updates(temp_databa
                                   message=SimpleNamespace(text="/help", reply_text=AsyncMock()))
     await guard_deleted_game_update(help_update, None)
     help_update.message.reply_text.assert_not_awaited()
+    hidden_command = SimpleNamespace(
+        effective_user=_user(), callback_query=None,
+        message=SimpleNamespace(text="/mwspukku@BotUsername", reply_text=AsyncMock()),
+    )
+    await guard_deleted_game_update(hidden_command, None)
+    hidden_command.message.reply_text.assert_not_awaited()
     summary_update = SimpleNamespace(
         effective_user=_user(), callback_query=None,
         message=SimpleNamespace(text="/summary", reply_text=AsyncMock()),
