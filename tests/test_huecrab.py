@@ -263,12 +263,11 @@ def test_due_item_owner_selection_and_no_huegryz(temp_database):
     )[0] == "unavailable"
     assert db.claim_due_item_for_huecrab(
         event_id, 1020, 20, item_selector, owner_selector,
-        lambda pair: pair[0],
     )[0] == "claimed"
     owner_selector.assert_called_once()
     item_selector.assert_not_called()
     assert len(db.get_duel_inventory(-112, 2)) == 1
-    assert db.has_huecrab(-112, 2) and not db.has_huecrab(-112, 1)
+    assert db.has_huecrab(-112, 1) and db.has_huecrab(-112, 2)
     assert db.get_duel_inventory(-113, 3) == []
     assert db.claim_due_item_for_huecrab(
         event_id, 1020, 20, item_selector, owner_selector,
@@ -282,18 +281,16 @@ def test_no_owner_one_owner_and_manual_first_rng_rules(temp_database):
     select = Mock(side_effect=AssertionError("owner selection must not roll"))
     assert db.claim_due_item_for_huecrab(event_id, 1020, 20, lambda: None, select)[0] == "no_owners"
     give_pet(-114, 1)
-    winner = Mock(side_effect=AssertionError("one pet cannot battle itself"))
-    assert db.claim_due_item_for_huecrab(event_id, 1020, 20, lambda: None, select, winner)[0] == "claimed"
+    assert db.claim_due_item_for_huecrab(event_id, 1020, 20, lambda: None, select)[0] == "claimed"
     assert db.has_huecrab(-114, 1)
     select.assert_not_called()
-    winner.assert_not_called()
     second_id = published_item(-114)
     assert db.claim_duel_item_event(second_id, -114, 1, lambda: "x", lambda: False)[0] == "claimed"
     assert db.claim_due_item_for_huecrab(second_id, 1020, 20, lambda: None, select)[0] == "unavailable"
     select.assert_not_called()
 
 
-def test_human_claim_before_timeout_prevents_pet_battle(temp_database):
+def test_human_claim_before_timeout_prevents_pet_autoloot(temp_database):
     chat_id = -129
     for uid in (1, 2, 3):
         register(chat_id, uid)
@@ -301,54 +298,40 @@ def test_human_claim_before_timeout_prevents_pet_battle(temp_database):
     give_pet(chat_id, 2)
     event_id = published_item(chat_id)
     assert db.claim_duel_item_event(event_id, chat_id, 3, lambda: "unused")[0] == "claimed"
-    winner = Mock(side_effect=AssertionError("claimed loot started a battle"))
     assert db.claim_due_item_for_huecrab(
-        event_id, 1020, 20, lambda: "unused", lambda owners: owners[0], winner,
+        event_id, 1020, 20, lambda: "unused", lambda owners: owners[0],
     )[0] == "unavailable"
-    winner.assert_not_called()
     assert all(db.has_huecrab(chat_id, uid) for uid in (1, 2))
     assert db.get_duel_item_event(event_id)["claimed_by"] == 3
 
 
-@pytest.mark.parametrize("winner_index", [0, 1])
-def test_two_pet_battle_awards_one_loot_and_removes_only_loser(
-    temp_database, winner_index,
-):
-    chat_id = -123 - winner_index
+def test_multiple_huecrabs_compete_for_loot_without_pet_loss(temp_database):
+    chat_id = -123
     for uid in (1, 2, 3):
         register(chat_id, uid)
         give_pet(chat_id, uid)
     event_id = published_item(chat_id)
-    choices = []
-
     def choose_owner(candidates):
-        choices.append([owner[0] for owner in candidates])
         return candidates[0]
 
-    winner_roll = Mock(side_effect=lambda pair: pair[winner_index])
     status, claim = db.claim_due_item_for_huecrab(
         event_id, 1020, 20, Mock(side_effect=AssertionError("fixed item rerolled")),
-        choose_owner, winner_roll,
+        choose_owner,
     )
     assert status == "claimed"
-    assert choices == [[1, 2, 3], [2, 3]]
-    winner_roll.assert_called_once()
-    assert claim["owner"]["user_id"] != claim["loser"]["user_id"]
+    assert claim["owner"]["user_id"] == 1
     assert db.get_duel_item_event(event_id)["claimed_by"] == claim["owner"]["user_id"]
     assert [item["item_id"] for item in db.get_duel_inventory(
         chat_id, claim["owner"]["user_id"],
     )] == ["vevangel_wing"]
-    assert db.has_huecrab(chat_id, claim["owner"]["user_id"])
-    assert not db.has_huecrab(chat_id, claim["loser"]["user_id"])
-    assert db.has_huecrab(chat_id, 3)
-    assert db.has_eligible_huecrab_tamer(chat_id)
+    assert all(db.has_huecrab(chat_id, user_id) for user_id in (1, 2, 3))
+    assert not db.has_eligible_huecrab_tamer(chat_id)
     assert db.claim_due_item_for_huecrab(
-        event_id, 1020, 20, lambda: "unused", choose_owner, winner_roll,
+        event_id, 1020, 20, lambda: "unused", choose_owner,
     )[0] == "unavailable"
-    winner_roll.assert_called_once()
 
 
-def test_deleted_or_petless_users_cannot_enter_battle(temp_database):
+def test_deleted_or_petless_users_cannot_receive_huecrab_autoloot(temp_database):
     chat_id = -128
     for uid in (1, 2, 3, 4):
         register(chat_id, uid)
@@ -362,44 +345,35 @@ def test_deleted_or_petless_users_cannot_enter_battle(temp_database):
         return candidates[0]
 
     status, claim = db.claim_due_item_for_huecrab(
-        event_id, 1020, 20, lambda: "unused", select, lambda pair: pair[0],
+        event_id, 1020, 20, lambda: "unused", select,
     )
     assert status == "claimed"
-    assert {claim["owner"]["user_id"], claim["loser"]["user_id"]} == {1, 2}
+    assert claim["owner"]["user_id"] == 1
+    assert db.has_huecrab(chat_id, 2)
     assert db.get_duel_inventory(chat_id, 4) == []
 
 
 @pytest.mark.asyncio
-async def test_battle_announcement_uses_escaped_titles_and_existing_loot_edit(
+async def test_multiple_huecrabs_autoloot_keeps_all_pets_and_sends_no_extra_message(
     temp_database, fake_context, monkeypatch,
 ):
     chat_id = -125
     for uid in (1, 2):
         register(chat_id, uid)
         give_pet(chat_id, uid)
-    with db.get_db() as conn:
-        conn.execute("UPDATE duel_users SET username = '<winner>' WHERE chat_id = ? AND user_id = 1", (chat_id,))
     event_id = published_item(chat_id)
     monkeypatch.setattr(huecrab, "time", lambda: 1020)
     choose = Mock(side_effect=lambda values: values[0])
     monkeypatch.setattr(huecrab.random, "choice", choose)
     await huecrab.huecrab_autoloot_job(fake_context)
-    assert choose.call_count == 2  # first owner and fair 50/50 winner
+    assert choose.call_count == 1
     assert db.get_duel_item_event(event_id)["claimed_by"] == 1
-    assert not db.has_huecrab(chat_id, 2)
-    battle = fake_context.bot.send_message.await_args.kwargs
-    assert battle["chat_id"] == chat_id and battle["parse_mode"] == "HTML"
-    assert "хуекрабрейв денс батле победил хуекраб &lt;winner&gt;" in battle["text"]
-    assert "хуекраб user2 убегает" in battle["text"]
+    assert all(db.has_huecrab(chat_id, user_id) for user_id in (1, 2))
+    fake_context.bot.send_message.assert_not_awaited()
     assert "Находка" in fake_context.bot.edit_message_text.await_args.kwargs["text"]
     assert fake_context.job_queue.calls == [
-        (delete_messages_job, 60, {"data": {"chat_id": chat_id, "message_ids": [101]}}),
         (delete_messages_job, 60, {"data": {"chat_id": chat_id, "message_ids": [event_id + 500]}}),
     ]
-    monkeypatch.setattr(huecrab.random, "random", lambda: 0.0)
-    await huecrab.spawn_huecrab_event(fake_context, chat_id)
-    assert fake_context.bot.send_message.await_count == 2
-    assert "Появился дикий хуекраб" in fake_context.bot.send_message.await_args.kwargs["text"]
 
 
 def test_manual_vs_auto_claim_is_atomic(temp_database):
@@ -412,33 +386,29 @@ def test_manual_vs_auto_claim_is_atomic(temp_database):
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [
             pool.submit(db.claim_duel_item_event, event_id, -115, 1, lambda: "x", huegryz),
-            pool.submit(db.claim_due_item_for_huecrab, event_id, 1020, 20, lambda: "x", lambda owners: owners[0], lambda pair: pair[0]),
+            pool.submit(db.claim_due_item_for_huecrab, event_id, 1020, 20, lambda: "x", lambda owners: owners[0]),
         ]
         statuses = [future.result()[0] for future in futures]
     assert statuses.count("claimed") == 1
     assert len(db.get_duel_inventory(-115, 1) + db.get_duel_inventory(-115, 2)) == 1
     assert huegryz.call_count == int(statuses[0] == "claimed")
-    assert sum(db.has_huecrab(-115, uid) for uid in (1, 2)) == (
-        2 if statuses[0] == "claimed" else 1
-    )
+    assert all(db.has_huecrab(-115, uid) for uid in (1, 2))
 
 
-def test_concurrent_auto_tasks_resolve_at_most_one_battle(temp_database):
+def test_concurrent_auto_tasks_claim_once_without_pet_loss(temp_database):
     chat_id = -126
     for uid in (1, 2):
         register(chat_id, uid)
         give_pet(chat_id, uid)
     event_id = published_item(chat_id)
-    winner_roll = Mock(side_effect=lambda pair: pair[0])
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(
             db.claim_due_item_for_huecrab, event_id, 1020, 20,
-            lambda: "unused", lambda owners: owners[0], winner_roll,
+            lambda: "unused", lambda owners: owners[0],
         ) for _ in range(2)]
         results = [future.result() for future in futures]
     assert sorted(status for status, _ in results) == ["claimed", "unavailable"]
-    winner_roll.assert_called_once()
-    assert sum(db.has_huecrab(chat_id, uid) for uid in (1, 2)) == 1
+    assert all(db.has_huecrab(chat_id, uid) for uid in (1, 2))
     assert sum(len(db.get_duel_inventory(chat_id, uid)) for uid in (1, 2)) == 1
 
 
@@ -486,32 +456,10 @@ def test_item_choice_failure_rolls_back_auto_claim(temp_database):
     with pytest.raises(sqlite3.IntegrityError, match="award blocked"):
         db.claim_due_item_for_huecrab(
             event_id, 1020, 20, lambda: "generated_item",
-            lambda owners: owners[0], lambda pair: pair[0],
+            lambda owners: owners[0],
         )
     assert not db.get_duel_item_event(event_id)["claimed"]
     assert all(db.has_huecrab(-117, uid) for uid in (1, 2))
-
-
-def test_loser_removal_failure_rolls_back_generated_loot(temp_database):
-    chat_id = -127
-    for uid in (1, 2):
-        register(chat_id, uid)
-        give_pet(chat_id, uid)
-    event_id = published_item(chat_id, item_id=None)
-    with db.get_db() as conn:
-        conn.execute("""CREATE TRIGGER reject_pet_loss BEFORE DELETE ON huecrab_owners
-                        BEGIN SELECT RAISE(ABORT, 'blocked'); END""")
-    generator = Mock(return_value=("uncommitted_crab_item", "Несохранённая вещь"))
-    with pytest.raises(sqlite3.IntegrityError, match="blocked"):
-        db.claim_due_item_for_huecrab(
-            event_id, 1020, 20, generator, lambda owners: owners[0],
-            lambda pair: pair[0],
-        )
-    generator.assert_called_once_with()
-    assert not db.get_duel_item_event(event_id)["claimed"]
-    assert db.get_generated_item_name("uncommitted_crab_item") is None
-    assert all(db.has_huecrab(chat_id, uid) for uid in (1, 2))
-    assert all(db.get_duel_inventory(chat_id, uid) == [] for uid in (1, 2))
 
 
 @pytest.mark.asyncio
@@ -547,7 +495,7 @@ async def test_scheduled_and_dig_items_start_clock_only_after_send(
     for event_id, chat_id, _, _ in rows:
         assert db.get_duel_item_event(event_id)["claimed_by"] == 1
         assert len(db.get_duel_inventory(chat_id, 1)) == 1
-        assert db.has_huecrab(chat_id, 1) and not db.has_huecrab(chat_id, 2)
+        assert db.has_huecrab(chat_id, 1) and db.has_huecrab(chat_id, 2)
     generated.assert_called_once_with()
     dig_event = next(event_id for event_id, chat_id, _, _ in rows if chat_id == -119)
     assert db.get_duel_item_event(dig_event)["item_id"] == dig_data["item_id"]
@@ -578,7 +526,7 @@ async def test_unclaimed_or_failed_autoloot_does_not_schedule_loot_deletion(
 
 
 @pytest.mark.asyncio
-async def test_battle_send_failure_keeps_claim_and_schedules_loot_cleanup(
+async def test_autoloot_does_not_send_a_battle_message(
     temp_database, fake_context, monkeypatch,
 ):
     chat_id = -132
@@ -588,11 +536,11 @@ async def test_battle_send_failure_keeps_claim_and_schedules_loot_cleanup(
     event_id = published_item(chat_id)
     monkeypatch.setattr(huecrab, "time", lambda: 1020)
     monkeypatch.setattr(huecrab.random, "choice", lambda values: values[0])
-    fake_context.bot.send_message.side_effect = RuntimeError("Telegram unavailable")
     await huecrab.huecrab_autoloot_job(fake_context)
     assert db.get_duel_item_event(event_id)["claimed_by"] == 1
     assert len(db.get_duel_inventory(chat_id, 1)) == 1
-    assert db.has_huecrab(chat_id, 1) and not db.has_huecrab(chat_id, 2)
+    assert db.has_huecrab(chat_id, 1) and db.has_huecrab(chat_id, 2)
+    fake_context.bot.send_message.assert_not_awaited()
     fake_context.bot.edit_message_text.assert_awaited_once()
     assert fake_context.job_queue.calls == [
         (delete_messages_job, 60, {"data": {"chat_id": chat_id, "message_ids": [event_id + 500]}}),
@@ -684,12 +632,11 @@ async def test_persistent_pocket_publication_then_autoloot_preserves_origin_owne
     assert duel_items.get_duel_item_name(item["item_id"]) in event["origin_text"]
     assert db.list_due_huecrab_item_events((NOW + 20_005) / 1000, 20) == []
     monkeypatch.setattr(huecrab.random, "random", Mock(side_effect=AssertionError("Huegryz rolled")))
-    choices = iter((1, 0))  # choose player3, then that pet wins
-    monkeypatch.setattr(huecrab.random, "choice", lambda values: values[next(choices)])
+    monkeypatch.setattr(huecrab.random, "choice", lambda values: values[1])
     monkeypatch.setattr(huecrab, "time", lambda: (NOW + 20_006) / 1000)
     await huecrab.huecrab_autoloot_job(fake_context)
     assert db.get_duel_item_event(event_id)["item_id"] == item["item_id"]
-    assert db.has_huecrab(CHAT, 3) and not db.has_huecrab(CHAT, 1)
+    assert db.has_huecrab(CHAT, 3) and db.has_huecrab(CHAT, 1)
     edit = fake_context.bot.edit_message_text.await_args.kwargs
     assert "Карман порвался" in edit["text"]
     assert "player2" in edit["text"]  # original owner from immutable snapshot

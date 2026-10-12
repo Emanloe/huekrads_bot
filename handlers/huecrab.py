@@ -154,29 +154,11 @@ async def huecrab_autoloot_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
             status, claim = claim_due_item_for_huecrab(
                 event_id, time(), HUECRAB_AUTOLOOT_DELAY_SECONDS,
-                roll_generated_item, random.choice, random.choice,
+                roll_generated_item, random.choice,
             )
         except Exception:
             logging.exception("Huecrab auto-loot claim failed for item event %s", event_id)
             continue
-        if status == "claimed" and claim.get("loser"):
-            try:
-                battle_message = await context.bot.send_message(
-                    chat_id=claim["chat_id"],
-                    text=get_text(
-                        "huecrab.battle",
-                        winner_name=format_user_title(claim["owner"]),
-                        loser_name=format_user_title(claim["loser"]),
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                logging.exception("Could not announce Huecrab battle for item event %s", event_id)
-            else:
-                try:
-                    schedule_auto_delete(context, claim["chat_id"], [battle_message.message_id])
-                except Exception:
-                    logging.exception("Could not schedule Huecrab battle message deletion for event %s", event_id)
     try:
         pending = list_unannounced_huecrab_claims()
     except Exception:

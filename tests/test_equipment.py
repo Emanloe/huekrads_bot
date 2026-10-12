@@ -374,19 +374,16 @@ def test_dig_pickup_equips_accessory_only_after_claim(temp_database):
     assert db.get_duel_equipment(CHAT, 1)["accessory"]["inventory_id"] == instance["id"]
 
 
-@pytest.mark.parametrize("battle,kind,slot", [
-    (False, "головной убор", "head"), (True, "головной убор", "head"),
-    (False, "аксессуар", "accessory"), (True, "аксессуар", "accessory"),
+@pytest.mark.parametrize("kind,slot", [
+    ("головной убор", "head"),
+    ("аксессуар", "accessory"),
 ])
-def test_huecrab_autoloot_and_battle_winner_auto_equip(temp_database, battle, kind, slot):
+def test_huecrab_autoloot_auto_equips_without_pet_loss(temp_database, kind, slot):
     register(1)
-    owners = [1]
-    if battle:
-        register(2)
-        owners.append(2)
+    register(2)
     with db.get_db() as conn:
         conn.executemany("INSERT INTO huecrab_owners (chat_id, user_id) VALUES (?, ?)",
-                         [(CHAT, user_id) for user_id in owners])
+                         [(CHAT, user_id) for user_id in (1, 2)])
     event_id = db.create_duel_item_event(CHAT)
     assert db.set_duel_item_event_message(event_id, 913, "Crab")
     with db.get_db() as conn:
@@ -395,14 +392,12 @@ def test_huecrab_autoloot_and_battle_winner_auto_equip(temp_database, battle, ki
         event_id, 1020, 20,
         Mock(return_value=("crab_item", "Крабья вещь", kind)),
         lambda candidates: candidates[0],
-        winner_selector=(lambda pair: pair[1]) if battle else None,
     )
     assert status == "claimed"
     winner_id = claim["owner"]["user_id"]
-    assert winner_id == (2 if battle else 1)
+    assert winner_id == 1
     assert db.get_duel_equipment(CHAT, winner_id)[slot]["inventory_id"] == claim["id"]
-    if battle:
-        assert db.get_duel_equipment(CHAT, 1) == {}
+    assert db.has_huecrab(CHAT, 1) and db.has_huecrab(CHAT, 2)
 
 
 def test_effective_defaults_overrides_and_telegram_inventory(temp_database):
