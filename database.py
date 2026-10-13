@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 import re
@@ -40,6 +41,192 @@ def moscow_date_key(when: datetime | None = None) -> str:
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("Dig date requires a timezone-aware instant")
     return instant.astimezone(ZoneInfo(DUEL_TIMEZONE)).date().isoformat()
+
+
+def _utc_now_ms() -> int:
+    return int(_utc_now().timestamp() * 1000)
+
+
+def record_game_event_in_transaction(
+    cursor,
+    chat_id: int,
+    user_id: int,
+    event_type: str,
+    data: dict,
+    *,
+    source_id: str | None = None,
+    occurred_at_ms: int | None = None,
+) -> bool:
+    """Append one confirmed fact to the recap journal, idempotently."""
+    if not isinstance(data, dict):
+        raise TypeError("Game event data must be a dictionary")
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO game_events
+            (occurred_at, chat_id, user_id, event_type, data_json, source_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            _utc_now_ms() if occurred_at_ms is None else int(occurred_at_ms),
+            chat_id,
+            user_id,
+            event_type,
+            json.dumps(data, ensure_ascii=False, sort_keys=True, allow_nan=False),
+            source_id,
+        ),
+    )
+    return cursor.rowcount == 1
+
+
+def record_game_event(
+    chat_id: int,
+    user_id: int,
+    event_type: str,
+    data: dict,
+    *,
+    source_id: str | None = None,
+    occurred_at_ms: int | None = None,
+) -> bool:
+    with get_db() as conn:
+        return record_game_event_in_transaction(
+            conn.cursor(), chat_id, user_id, event_type, data,
+            source_id=source_id, occurred_at_ms=occurred_at_ms,
+        )
+
+
+def list_game_events(
+    chat_id: int,
+    user_id: int,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict]:
+    """Return one player's events from one chat in a half-open UTC interval."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, occurred_at, event_type, data_json, source_id
+            FROM game_events
+            WHERE chat_id = ? AND user_id = ?
+              AND occurred_at >= ? AND occurred_at < ?
+            ORDER BY occurred_at, id
+            """,
+            (chat_id, user_id, int(start_ms), int(end_ms)),
+        ).fetchall()
+    return [
+        {
+            "id": row[0], "occurred_at": row[1], "event_type": row[2],
+            "data": json.loads(row[3]), "source_id": row[4],
+        }
+        for row in rows
+    ]
+
+
+def list_finished_duels_for_recap(
+    chat_id: int,
+    user_id: int,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict]:
+    """Read authoritative duel history, including records from before the journal."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, player1_user_id, player2_user_id,
+                   player1_snapshot_json, player2_snapshot_json,
+                   result_json, round_no, finished_at
+            FROM duel_sessions
+            WHERE chat_id = ? AND status = 'finished'
+              AND (player1_user_id = ? OR player2_user_id = ?)
+              AND finished_at >= ? AND finished_at < ?
+              AND finished_at > COALESCE(
+                  (SELECT reset_at_ms FROM gnome_profile_resets WHERE user_id = ?), 0
+              )
+            ORDER BY finished_at, id
+            """,
+            (chat_id, user_id, user_id, int(start_ms), int(end_ms), user_id),
+        ).fetchall()
+    result = []
+    for row in rows:
+        stored = json.loads(row[5])
+        if not isinstance(stored, dict) or stored.get("kind") != "finalized":
+            continue
+        result.append({
+            "duel_id": row[0],
+            "player1_user_id": row[1],
+            "player2_user_id": row[2],
+            "player1": json.loads(row[3]),
+            "player2": json.loads(row[4]),
+            "result": stored,
+            "rounds": row[6],
+            "finished_at": row[7],
+        })
+    return result
+
+
+def list_item_receipts_for_recap(
+    chat_id: int,
+    user_id: int,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict]:
+    """Read exact legacy pickup facts; item discovery ownership is not inferred."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT event_id, item_id, autoloot_claimed,
+                   CAST(strftime('%s', claimed_at) AS INTEGER) * 1000
+            FROM duel_item_events
+            WHERE chat_id = ? AND claimed = 1 AND claimed_by = ?
+              AND claimed_at >= datetime(? / 1000.0, 'unixepoch')
+              AND claimed_at < datetime(? / 1000.0, 'unixepoch')
+              AND CAST(strftime('%s', claimed_at) AS INTEGER) * 1000 > COALESCE(
+                  (SELECT reset_at_ms FROM gnome_profile_resets WHERE user_id = ?), 0
+              )
+            ORDER BY claimed_at, event_id
+            """,
+            (chat_id, user_id, int(start_ms), int(end_ms), user_id),
+        ).fetchall()
+    return [
+        {
+            "item_event_id": row[0], "item_id": row[1],
+            "method": "huecrab" if row[2] else "claim", "occurred_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+def get_huecrab_tame_for_recap(
+    chat_id: int,
+    user_id: int,
+    start_ms: int,
+    end_ms: int,
+) -> dict | None:
+    """Return the exact acquisition time of this player's current pet, if today."""
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT CAST(strftime('%s', obtained_at) AS INTEGER) * 1000
+            FROM huecrab_owners
+            WHERE chat_id = ? AND user_id = ?
+              AND obtained_at >= datetime(? / 1000.0, 'unixepoch')
+              AND obtained_at < datetime(? / 1000.0, 'unixepoch')
+              AND CAST(strftime('%s', obtained_at) AS INTEGER) * 1000 > COALESCE(
+                  (SELECT reset_at_ms FROM gnome_profile_resets WHERE user_id = ?), 0
+              )
+            """,
+            (chat_id, user_id, int(start_ms), int(end_ms), user_id),
+        ).fetchone()
+    return {"occurred_at": row[0]} if row else None
+
+
+def delete_game_event_in_transaction(
+    cursor, event_type: str, source_id: str, user_id: int,
+) -> None:
+    """Remove a journal fact when its gameplay operation is compensated."""
+    cursor.execute(
+        "DELETE FROM game_events WHERE event_type = ? AND source_id = ? AND user_id = ?",
+        (event_type, source_id, user_id),
+    )
 
 
 @contextmanager
@@ -528,6 +715,26 @@ def init_db():
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_huecrab_events_active_chat
             ON huecrab_events (chat_id) WHERE consumed = 0
+        """)
+
+        # Append-only personal history used by /recap.  Gameplay tables remain
+        # authoritative; this journal only stores the already committed facts
+        # needed to describe them to a player later.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS game_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                source_id TEXT,
+                UNIQUE (chat_id, event_type, source_id, user_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_events_recap
+            ON game_events (chat_id, user_id, occurred_at, id)
         """)
 
         cursor.execute("""
@@ -1663,6 +1870,14 @@ def consume_random_unequipped_duel_inventory_item(
         )
         if cursor.rowcount != 1:
             raise RuntimeError("Selected lure inventory instance disappeared")
+        record_game_event_in_transaction(
+            cursor,
+            chat_id,
+            user_id,
+            "item_lost",
+            {"item_id": item_id, "reason": "lure", "inventory_id": instance_id},
+            source_id=f"lure:{instance_id}",
+        )
         return "consumed", {"id": instance_id, "item_id": item_id}
 
 
@@ -1787,6 +2002,14 @@ def create_duel_item_event_from_inventory_in_transaction(
     )
     if cursor.rowcount != 1:
         raise RuntimeError("Selected duel inventory instance disappeared")
+    record_game_event_in_transaction(
+        cursor,
+        chat_id,
+        user_id,
+        "item_lost",
+        {"item_id": row[0], "reason": "duel_drop", "item_event_id": event_id},
+        source_id=f"duel_drop:{event_id}",
+    )
     return {
         "event_id": event_id,
         "chat_id": chat_id,
@@ -1815,6 +2038,9 @@ def restore_unpublished_duel_drop_in_transaction(
             != drop.get("profile_reset_at_ms", 0)):
         cursor.execute("DELETE FROM duel_item_events WHERE event_id = ? AND claimed = 0",
                        (drop["event_id"],))
+        delete_game_event_in_transaction(
+            cursor, "item_lost", f"duel_drop:{drop['event_id']}", drop["user_id"],
+        )
         return False
     cursor.execute(
         """
@@ -1848,6 +2074,9 @@ def restore_unpublished_duel_drop_in_transaction(
     )
     if cursor.rowcount != 1:
         raise RuntimeError("Unpublished duel drop disappeared during restoration")
+    delete_game_event_in_transaction(
+        cursor, "item_lost", f"duel_drop:{drop['event_id']}", drop["user_id"],
+    )
     return True
 
 
@@ -1977,6 +2206,15 @@ def try_duel_dig(chat_id: int, user_id: int, roll, item_selector) -> tuple[str, 
         if cursor.rowcount != 1:
             raise RuntimeError("Dig daily limit changed during locked transaction")
 
+        record_game_event_in_transaction(
+            cursor,
+            chat_id,
+            user_id,
+            "item_found",
+            {"item_id": item_id, "item_event_id": event_id, "method": "dig"},
+            source_id=f"dig:{event_id}",
+        )
+
         return "found", {
             "chat_id": chat_id,
             "user_id": user_id,
@@ -2005,6 +2243,9 @@ def cancel_unpublished_duel_dig(dig: dict, message_id: int | None = None) -> boo
             cursor.execute(
                 "DELETE FROM duel_item_events WHERE event_id = ? AND claimed = 0",
                 (dig["event_id"],),
+            )
+            delete_game_event_in_transaction(
+                cursor, "item_found", f"dig:{dig['event_id']}", dig["user_id"],
             )
             return False
         cursor.execute(
@@ -2038,6 +2279,9 @@ def cancel_unpublished_duel_dig(dig: dict, message_id: int | None = None) -> boo
         )
         if cursor.rowcount != 1:
             raise RuntimeError("Dig event disappeared before refund")
+        delete_game_event_in_transaction(
+            cursor, "item_found", f"dig:{dig['event_id']}", dig["user_id"],
+        )
         return True
 
 
@@ -2165,6 +2409,9 @@ def claim_duel_item_event(
         )
         if instance is None:
             return "already_claimed", None
+        _record_item_receipt_in_transaction(
+            cursor, chat_id, user_id, event_id, instance["item_id"], "claim",
+        )
         if huegryz_decider is not None:
             instance["huegryz_outcome"] = None
             if huegryz_decider():
@@ -2181,6 +2428,15 @@ def claim_duel_item_event(
                 instance["huegryz_outcome"] = (
                     "bitten" if cursor.rowcount == 1 else "already_dickless"
                 )
+                if instance["huegryz_outcome"] == "bitten":
+                    record_game_event_in_transaction(
+                        cursor,
+                        chat_id,
+                        user_id,
+                        "dick_stolen",
+                        {"by": "huegryz", "item_event_id": event_id},
+                        source_id=f"huegryz:{event_id}",
+                    )
         return "claimed", instance
 
 
@@ -2222,6 +2478,42 @@ def _claim_item_in_transaction(
         (item_id, event_id),
     )
     return instance
+
+
+def _record_item_receipt_in_transaction(
+    cursor, chat_id: int, user_id: int, event_id: int, item_id: str, method: str,
+) -> None:
+    record_game_event_in_transaction(
+        cursor,
+        chat_id,
+        user_id,
+        "item_received",
+        {"item_id": item_id, "item_event_id": event_id, "method": method},
+        source_id=f"item:{event_id}",
+    )
+    found = cursor.execute(
+        """SELECT user_id FROM game_events
+           WHERE event_type = 'item_found' AND source_id = ? LIMIT 1""",
+        (f"dig:{event_id}",),
+    ).fetchone()
+    if found is None or found[0] == user_id:
+        return
+    claimant = get_duel_user_by_id_in_transaction(
+        cursor, chat_id, user_id, read_only=True,
+    )
+    record_game_event_in_transaction(
+        cursor,
+        chat_id,
+        found[0],
+        "item_missed",
+        {
+            "item_id": item_id,
+            "item_event_id": event_id,
+            "claimed_by_user_id": user_id,
+            "claimed_by_name": format_user_title_plain(claimant) if claimant else str(user_id),
+        },
+        source_id=f"missed:{event_id}",
+    )
 
 
 def list_due_huecrab_item_events(now: float, delay_seconds: int) -> list[int]:
@@ -2273,6 +2565,9 @@ def claim_due_item_for_huecrab(
         )
         if instance is None:
             return "unavailable", None
+        _record_item_receipt_in_transaction(
+            cursor, chat_id, user_id, event_id, instance["item_id"], "huecrab",
+        )
         cursor.execute(
             "UPDATE duel_item_events SET autoloot_claimed = 1 WHERE event_id = ?",
             (event_id,),
@@ -2417,6 +2712,14 @@ def tame_huecrab_event(
             (chat_id, user_id),
         )
         cursor.execute("UPDATE huecrab_events SET tamed = 1 WHERE event_id = ?", (event_id,))
+        record_game_event_in_transaction(
+            cursor,
+            chat_id,
+            user_id,
+            "huecrab_tamed",
+            {"huecrab_event_id": event_id},
+            source_id=f"huecrab:{event_id}",
+        )
         return "tamed"
 
 

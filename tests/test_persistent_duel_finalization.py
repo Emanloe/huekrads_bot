@@ -143,6 +143,11 @@ def test_terminal_finish_commits_once_and_replays_without_rng(
         "dicks_stolen": 0, "duels": 1, "bosses_killed": 0,
     }
     assert events(temp_database) == []
+    recap_events = database.list_game_events(CHAT, winner, NOW, NOW + 100)
+    assert len(recap_events) == 1
+    assert recap_events[0]["event_type"] == "duel_finished"
+    assert recap_events[0]["data"]["winner_user_id"] == winner
+    assert len(database.list_game_events(CHAT, loser, NOW, NOW + 100)) == 1
     assert [entry[0] for entry in trace.trace] == ["random", "choice", "random", "random"]
 
     before = list(trace.trace)
@@ -151,6 +156,7 @@ def test_terminal_finish_commits_once_and_replays_without_rng(
     assert replay.result == result.result
     assert trace.trace == before
     assert database.get_monthly_chat_stats(CHAT, month)["duels"] == 1
+    assert len(database.list_game_events(CHAT, winner, NOW, NOW + 100)) == 1
 
 
 @pytest.mark.parametrize("mode,expected", [

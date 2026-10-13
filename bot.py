@@ -102,6 +102,7 @@ from handlers.duel_name import name_command
 from handlers.miniapp import duel_app_command
 from miniapp_api import create_miniapp_api
 from handlers.monthly_summary import monthly_summary_job, summary_command
+from handlers.recap import recap_command
 from handlers.elite_ball import (
     ball_command, elite_ball_callback, elite_ball_inline_callback,
     elite_ball_question, ELITE_BALL_CALLBACK_DATA, ELITE_BALL_INLINE_CALLBACK_PREFIX,
@@ -143,6 +144,7 @@ BOT_COMMANDS = [
     BotCommand("app", get_text("menu.commands.app")),
     BotCommand("name", get_text("menu.commands.name")),
     BotCommand("summary", get_text("menu.commands.summary")),
+    BotCommand("recap", get_text("menu.commands.recap")),
     BotCommand("dig", get_text("menu.commands.dig")),
     BotCommand("lure", get_text("menu.commands.lure")),
     BotCommand("ball", get_text("menu.commands.ball")),
@@ -426,6 +428,7 @@ async def main():
 
     application.add_handler(CommandHandler("name", name_command))
     application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("recap", recap_command))
     application.add_handler(CommandHandler("dig", dig_command))
     application.add_handler(CommandHandler("lure", lure_command))
     application.add_handler(CommandHandler("ball", ball_command))

@@ -1,0 +1,258 @@
+"""Personal current-game-day chronicle for registered gnomes."""
+
+from __future__ import annotations
+
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from html import escape
+from zoneinfo import ZoneInfo
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from config import DUEL_TIMEZONE
+from database import (
+    format_user_title_plain,
+    get_duel_user_by_id,
+    get_huecrab_tame_for_recap,
+    list_finished_duels_for_recap,
+    list_game_events,
+    list_item_receipts_for_recap,
+)
+from handlers.duel_items import get_duel_item_name
+from handlers.duel_messaging import send_and_schedule
+from text_resources import get_text
+
+
+TELEGRAM_SAFE_TEXT_LIMIT = 4000
+
+
+def game_day_bounds_ms(when: datetime | None = None) -> tuple[int, int]:
+    """Return the half-open UTC interval for the current Moscow game day."""
+    instant = when if when is not None else datetime.now(timezone.utc)
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("Recap clock must be timezone-aware")
+    local = instant.astimezone(ZoneInfo(DUEL_TIMEZONE))
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+
+def _short(value: object, limit: int = 100) -> str:
+    text = str(value or "—").replace("\n", " ").replace("\r", " ")
+    if len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return escape(text)
+
+
+def _item_name(item_id: object) -> str:
+    try:
+        return _short(get_duel_item_name(str(item_id)))
+    except Exception:
+        return _short(item_id)
+
+
+def _native_duel_as_event(duel: dict) -> dict:
+    result = duel["result"]
+    player1 = duel["player1"]
+    player2 = duel["player2"]
+    participants = {player1["user_id"]: player1, player2["user_id"]: player2}
+    winner = participants[result["winner_user_id"]]
+    loser = participants[result["loser_user_id"]]
+    return {
+        "event_type": "duel_finished",
+        "source_id": f"duel:{duel['duel_id']}",
+        "occurred_at": duel["finished_at"],
+        "data": {
+            "duel_id": duel["duel_id"],
+            "initiator_user_id": player1["user_id"],
+            "initiator_name": format_user_title_plain(player1),
+            "opponent_user_id": player2["user_id"],
+            "opponent_name": format_user_title_plain(player2),
+            "winner_user_id": winner["user_id"],
+            "winner_name": format_user_title_plain(winner),
+            "loser_user_id": loser["user_id"],
+            "loser_name": format_user_title_plain(loser),
+            "winner_points_delta": result.get("winner_points_delta", 0),
+            "loser_points_delta": result.get("loser_points_delta", 0),
+            "is_dick_stolen": bool(result.get("is_dick_stolen")),
+            "stolen_item": result.get("stolen_item"),
+            "rounds": duel["rounds"],
+        },
+    }
+
+
+def _counter_lines(counter: Counter, template: str) -> list[str]:
+    return [get_text(template, name=name, count=count) for name, count in counter.most_common()]
+
+
+def _fit_message(header: str, sections: list[tuple[str, list[str]]], total: str) -> str:
+    """Keep whole HTML lines and the day totals under Telegram's hard limit."""
+    chosen: list[str] = [header]
+    omitted = 0
+    for title, lines in sections:
+        accepted: list[str] = []
+        for line in lines:
+            candidate = "\n\n".join(chosen + [title + "\n" + "\n".join(accepted + [line]), total])
+            if len(candidate) > TELEGRAM_SAFE_TEXT_LIMIT:
+                omitted += 1
+            else:
+                accepted.append(line)
+        if accepted:
+            chosen.append(title + "\n" + "\n".join(accepted))
+    if omitted:
+        marker = get_text("recap.more", count=omitted)
+        candidate = "\n\n".join(chosen + [marker, total])
+        if len(candidate) <= TELEGRAM_SAFE_TEXT_LIMIT:
+            chosen.append(marker)
+    return "\n\n".join(chosen + [total])
+
+
+def build_recap_text(events: list[dict], user_id: int) -> str:
+    if not events:
+        return get_text("recap.empty")
+
+    duel_lines: list[str] = []
+    attacks = Counter()
+    attacked_by = Counter()
+    theft_lines: list[str] = []
+    found = Counter()
+    received = Counter()
+    pet_received = Counter()
+    lost = Counter()
+    missed: list[str] = []
+    tamed = 0
+    wins = losses = points_delta = 0
+    missed_ids = {
+        event.get("data", {}).get("item_event_id")
+        for event in events if event.get("event_type") == "item_missed"
+    }
+
+    for event in events:
+        kind = event.get("event_type")
+        data = event.get("data") or {}
+        if kind == "duel_finished":
+            won = data.get("winner_user_id") == user_id
+            opponent_name = (
+                data.get("loser_name") if won else data.get("winner_name")
+            )
+            delta = int(data.get("winner_points_delta" if won else "loser_points_delta", 0))
+            points_delta += delta
+            wins += int(won)
+            losses += int(not won)
+            duel_lines.append(get_text(
+                "recap.duel_line",
+                result=get_text("recap.win" if won else "recap.loss"),
+                opponent=_short(opponent_name),
+                delta=f"{delta:+d}",
+                rounds=int(data.get("rounds", 1)),
+            ))
+            if data.get("initiator_user_id") == user_id:
+                attacks[_short(data.get("opponent_name"))] += 1
+            else:
+                attacked_by[_short(data.get("initiator_name"))] += 1
+            if data.get("is_dick_stolen"):
+                theft_lines.append(get_text(
+                    "recap.theft_line",
+                    action=get_text("recap.stole" if won else "recap.stolen_from"),
+                    opponent=_short(opponent_name),
+                ))
+            stolen_item = data.get("stolen_item")
+            if isinstance(stolen_item, dict) and stolen_item.get("item_name"):
+                item_name = _short(stolen_item["item_name"])
+                if won:
+                    received[item_name] += 1
+                else:
+                    lost[(item_name, get_text("recap.loss_stolen"))] += 1
+        elif kind == "dick_stolen":
+            theft_lines.append(get_text("recap.huegryz_theft"))
+        elif kind == "item_found" and data.get("item_event_id") not in missed_ids:
+            found[_item_name(data.get("item_id"))] += 1
+        elif kind == "item_received":
+            target = pet_received if data.get("method") == "huecrab" else received
+            target[_item_name(data.get("item_id"))] += 1
+        elif kind == "item_lost":
+            reason = get_text("recap.loss_lure" if data.get("reason") == "lure" else "recap.loss_duel")
+            lost[(_item_name(data.get("item_id")), reason)] += 1
+        elif kind == "item_missed":
+            missed.append(get_text(
+                "recap.item_missed",
+                item=_item_name(data.get("item_id")),
+                player=_short(data.get("claimed_by_name")),
+            ))
+        elif kind == "huecrab_tamed":
+            tamed += 1
+
+    sections: list[tuple[str, list[str]]] = []
+    if duel_lines:
+        duel_summary = []
+        duel_summary.extend(_counter_lines(attacked_by, "recap.attacked_by"))
+        duel_summary.extend(_counter_lines(attacks, "recap.attacked"))
+        sections.append((get_text("recap.sections.duels"), duel_summary + duel_lines))
+    if theft_lines:
+        sections.append((get_text("recap.sections.thefts"), theft_lines))
+
+    loot_lines = []
+    loot_lines.extend(get_text("recap.item_found", item=name, count=count) for name, count in found.most_common())
+    loot_lines.extend(get_text("recap.item_received", item=name, count=count) for name, count in received.most_common())
+    loot_lines.extend(missed)
+    loot_lines.extend(
+        get_text("recap.item_lost", item=item, reason=reason, count=count)
+        for (item, reason), count in lost.most_common()
+    )
+    if loot_lines:
+        sections.append((get_text("recap.sections.loot"), loot_lines))
+
+    pet_lines = []
+    if tamed:
+        pet_lines.append(get_text("recap.pet_tamed", count=tamed))
+    pet_lines.extend(
+        get_text("recap.pet_loot", item=name, count=count)
+        for name, count in pet_received.most_common()
+    )
+    if pet_lines:
+        sections.append((get_text("recap.sections.pets"), pet_lines))
+
+    if not sections:
+        return get_text("recap.empty")
+    total = get_text(
+        "recap.total", wins=wins, losses=losses, delta=f"{points_delta:+d}",
+        found=sum(found.values()) + len(missed),
+        received=sum(received.values()) + sum(pet_received.values()),
+        lost=sum(lost.values()),
+    )
+    return _fit_message(get_text("recap.title"), sections, total)
+
+
+async def recap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat is None or update.effective_user is None:
+        return
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    if get_duel_user_by_id(chat_id, user_id, read_only=True) is None:
+        await send_and_schedule(update, context, get_text("recap.not_registered"))
+        return
+
+    start_ms, end_ms = game_day_bounds_ms()
+    events = list_game_events(chat_id, user_id, start_ms, end_ms)
+    sources = {event.get("source_id") for event in events}
+    for duel in list_finished_duels_for_recap(chat_id, user_id, start_ms, end_ms):
+        source = f"duel:{duel['duel_id']}"
+        if source not in sources:
+            events.append(_native_duel_as_event(duel))
+    for receipt in list_item_receipts_for_recap(chat_id, user_id, start_ms, end_ms):
+        source = f"item:{receipt['item_event_id']}"
+        if source not in sources:
+            events.append({
+                "event_type": "item_received", "source_id": source,
+                "occurred_at": receipt["occurred_at"], "data": receipt,
+            })
+    if not any(event.get("event_type") == "huecrab_tamed" for event in events):
+        tame = get_huecrab_tame_for_recap(chat_id, user_id, start_ms, end_ms)
+        if tame is not None:
+            events.append({
+                "event_type": "huecrab_tamed", "source_id": None,
+                "occurred_at": tame["occurred_at"], "data": {},
+            })
+    events.sort(key=lambda event: (event.get("occurred_at", 0), event.get("id", 0)))
+    await send_and_schedule(update, context, build_recap_text(events, user_id))

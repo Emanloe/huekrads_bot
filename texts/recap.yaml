@@ -1,0 +1,36 @@
+title: "📜 <b>Личная хроника за сегодня</b>"
+empty: "Сегодня твой гном пока ничем не отличился. Подозрительно тихий день."
+not_registered: "Сначала зарегистрируй гнома через /duel."
+more: "• …ещё событий: {count}"
+
+sections:
+  duels: "⚔️ <b>Дуэли</b>"
+  thefts: "🍆 <b>Кражи</b>"
+  loot: "💎 <b>Добыча</b>"
+  pets: "🦀 <b>Хуекрабы</b>"
+
+win: "победа"
+loss: "поражение"
+stole: "украл хуй у"
+stolen_from: "лишился хуя из-за"
+loss_lure: "выброшен через /lure"
+loss_duel: "выпал после дуэли"
+loss_stolen: "украден соперником"
+
+attacked_by: "• На тебя нападал {name} — {count} р."
+attacked: "• Ты нападал на {name} — {count} р."
+duel_line: "• {result}: {opponent}; очки {delta}; раундов: {rounds}"
+theft_line: "• {action} {opponent}"
+huegryz_theft: "• Хуегрыз откусил тебе хуй при подборе добычи"
+
+item_found: "• Найдено через /dig: {item} ×{count}"
+item_received: "• Получено в инвентарь: {item} ×{count}"
+item_missed: "• Упущенная находка: {item} — забрал {player}"
+item_lost: "• Потеряно: {item} ×{count} ({reason})"
+pet_tamed: "• Приручено хуекрабов: {count}"
+pet_loot: "• Хуекраб подобрал: {item} ×{count}"
+
+total: |-
+  📊 <b>Итог дня</b>
+  Дуэли: побед {wins}, поражений {losses}; очки {delta}
+  Добыча: найдено {found}, получено {received}, потеряно {lost}

@@ -28,6 +28,7 @@ from database import (
     consume_equipped_item_for_hit_in_transaction,
     gnome_profile_reset_at_ms_in_transaction,
     restore_unpublished_duel_drop_in_transaction,
+    record_game_event_in_transaction,
     transfer_duel_inventory_item_in_transaction,
 )
 from duel_outbox_repository import (
@@ -441,6 +442,32 @@ def finalize_persistent_duel(
             chat_id, duel_id, session["turn_id"], result, timestamp, cursor=cursor,
         ):
             raise RuntimeError("Validated terminal duel could not be finalized")
+        recap_data = {
+            "duel_id": duel_id,
+            "initiator_user_id": player1["user_id"],
+            "initiator_name": format_user_title_plain(player1),
+            "opponent_user_id": player2["user_id"],
+            "opponent_name": format_user_title_plain(player2),
+            "winner_user_id": winner["user_id"],
+            "winner_name": format_user_title_plain(winner),
+            "loser_user_id": loser["user_id"],
+            "loser_name": format_user_title_plain(loser),
+            "winner_points_delta": winner_delta,
+            "loser_points_delta": loser_delta,
+            "is_dick_stolen": is_dick_stolen,
+            "stolen_item": stolen_item,
+            "rounds": session["round_no"],
+        }
+        for participant_id in (player1["user_id"], player2["user_id"]):
+            record_game_event_in_transaction(
+                cursor,
+                chat_id,
+                participant_id,
+                "duel_finished",
+                recap_data,
+                source_id=f"duel:{duel_id}",
+                occurred_at_ms=timestamp,
+            )
         finished = get_duel_session_in_transaction(chat_id, duel_id, cursor=cursor)
         create_duel_publication_in_transaction(
             cursor, chat_id, duel_id, "final_result", finished["turn_id"],

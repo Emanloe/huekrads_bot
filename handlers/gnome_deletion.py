@@ -22,7 +22,7 @@ _confirmations = {}
 _confirmation_lock = asyncio.Lock()
 _GAME_COMMANDS = frozenset({
     "duel", "app", "duel_app", "name", "dig", "lure", "ball", "me", "duel_stats", "inspect",
-    "duel_top", "duel_delete", "boss", "boss_reg", "gnomed",
+    "duel_top", "duel_delete", "boss", "boss_reg", "gnomed", "recap",
 })
 _GAME_CALLBACK_PREFIXES = (
     "start_duel_", "duel_strike_", "duel_block_", "duel_item_claim_",
