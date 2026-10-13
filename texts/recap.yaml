@@ -9,17 +9,14 @@ sections:
   loot: "💎 <b>Добыча</b>"
   pets: "🦀 <b>Хуекрабы</b>"
 
-win: "победа"
-loss: "поражение"
 stole: "украл хуй у"
 stolen_from: "лишился хуя из-за"
 loss_lure: "выброшен через /lure"
 loss_duel: "выпал после дуэли"
 loss_stolen: "украден соперником"
 
-attacked_by: "• На тебя нападал {name} — {count} р."
-attacked: "• Ты нападал на {name} — {count} р."
-duel_line: "• {result}: {opponent}; очки {delta}; раундов: {rounds}"
+attacked_by: "• На тебя нападал {name} — {count} {times}"
+attacked: "• Ты нападал на {name} — {count} {times}"
 theft_line: "• {action} {opponent}"
 huegryz_theft: "• Хуегрыз откусил тебе хуй при подборе добычи"
 
@@ -32,5 +29,5 @@ pet_loot: "• Хуекраб подобрал: {item} ×{count}"
 
 total: |-
   📊 <b>Итог дня</b>
-  Дуэли: побед {wins}, поражений {losses}; очки {delta}
+  Дуэли: побед {wins}, поражений {losses}
   Добыча: найдено {found}, получено {received}, потеряно {lost}

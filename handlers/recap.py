@@ -83,7 +83,16 @@ def _native_duel_as_event(duel: dict) -> dict:
 
 
 def _counter_lines(counter: Counter, template: str) -> list[str]:
-    return [get_text(template, name=name, count=count) for name, count in counter.most_common()]
+    return [
+        get_text(template, name=name, count=count, times=_plural_times(count))
+        for name, count in counter.most_common()
+    ]
+
+
+def _plural_times(count: int) -> str:
+    if 11 <= count % 100 <= 14:
+        return "раз"
+    return "раза" if count % 10 in (2, 3, 4) else "раз"
 
 
 def _fit_message(header: str, sections: list[tuple[str, list[str]]], total: str) -> str:
@@ -112,7 +121,6 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
     if not events:
         return get_text("recap.empty")
 
-    duel_lines: list[str] = []
     attacks = Counter()
     attacked_by = Counter()
     theft_lines: list[str] = []
@@ -122,7 +130,7 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
     lost = Counter()
     missed: list[str] = []
     tamed = 0
-    wins = losses = points_delta = 0
+    wins = losses = 0
     missed_ids = {
         event.get("data", {}).get("item_event_id")
         for event in events if event.get("event_type") == "item_missed"
@@ -133,25 +141,16 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
         data = event.get("data") or {}
         if kind == "duel_finished":
             won = data.get("winner_user_id") == user_id
-            opponent_name = (
-                data.get("loser_name") if won else data.get("winner_name")
-            )
-            delta = int(data.get("winner_points_delta" if won else "loser_points_delta", 0))
-            points_delta += delta
             wins += int(won)
             losses += int(not won)
-            duel_lines.append(get_text(
-                "recap.duel_line",
-                result=get_text("recap.win" if won else "recap.loss"),
-                opponent=_short(opponent_name),
-                delta=f"{delta:+d}",
-                rounds=int(data.get("rounds", 1)),
-            ))
             if data.get("initiator_user_id") == user_id:
                 attacks[_short(data.get("opponent_name"))] += 1
             else:
                 attacked_by[_short(data.get("initiator_name"))] += 1
             if data.get("is_dick_stolen"):
+                opponent_name = (
+                    data.get("loser_name") if won else data.get("winner_name")
+                )
                 theft_lines.append(get_text(
                     "recap.theft_line",
                     action=get_text("recap.stole" if won else "recap.stolen_from"),
@@ -184,11 +183,11 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
             tamed += 1
 
     sections: list[tuple[str, list[str]]] = []
-    if duel_lines:
+    if attacks or attacked_by:
         duel_summary = []
         duel_summary.extend(_counter_lines(attacked_by, "recap.attacked_by"))
         duel_summary.extend(_counter_lines(attacks, "recap.attacked"))
-        sections.append((get_text("recap.sections.duels"), duel_summary + duel_lines))
+        sections.append((get_text("recap.sections.duels"), duel_summary))
     if theft_lines:
         sections.append((get_text("recap.sections.thefts"), theft_lines))
 
@@ -216,7 +215,7 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
     if not sections:
         return get_text("recap.empty")
     total = get_text(
-        "recap.total", wins=wins, losses=losses, delta=f"{points_delta:+d}",
+        "recap.total", wins=wins, losses=losses,
         found=sum(found.values()) + len(missed),
         received=sum(received.values()) + sum(pet_received.values()),
         lost=sum(lost.values()),
