@@ -36,6 +36,7 @@ async function scenario({ webApp, scriptEvent = null, search = "", apiResult, ho
       return apiResult;
     },
     loadView: async () => { if (homeError) throw new Error("home failure"); },
+    loadRecap: async () => {},
     sessionToken: null,
     globalThis: null,
   };

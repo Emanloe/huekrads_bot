@@ -51,6 +51,7 @@ from handlers.duel_text import (
     _plural_rounds, get_duel_round_presentation, get_duel_title_read_model,
 )
 from handlers.player_stats import player_stats_read_model, public_player_stats
+from handlers.recap import build_recap_model, load_recap_events
 from miniapp_auth import InitDataError, verify_telegram_init_data
 from miniapp_sessions import MiniAppSession, exchange_launch_token, get_miniapp_session
 from text_resources import get_text
@@ -498,6 +499,15 @@ def create_miniapp_api(*, bot_token: str | None = None,
                 session.chat_id, session.user_id,
             ),
         }
+
+    @app.get("/api/v1/recap")
+    async def recap(session: MiniAppSession = Depends(require_session)):
+        if await run_in_threadpool(get_duel_user_by_id, session.chat_id,
+                                   session.user_id, read_only=True) is None:
+            raise HTTPException(status_code=404, detail="Player not found")
+        events = await run_in_threadpool(load_recap_events, session.chat_id,
+                                         session.user_id)
+        return await run_in_threadpool(build_recap_model, events, session.user_id)
 
     @app.get("/api/v1/equipment/{slot}")
     async def equipment_items(slot: EquipmentSlot,

@@ -74,6 +74,10 @@ for (const view of ["home", "opponents", "duel", "hall", "boss"]) {
   nodes.set(`screen-${view}`, screen);
   nodes.set(`${view}-content`, content);
 }
+const recapContent = new Node();
+recapContent.className = "panel-body recap-content";
+nodes.get("screen-duel").insertBefore(recapContent, nodes.get("duel-content"));
+nodes.set("recap-content", recapContent);
 const intervals = [];
 const timeouts = [];
 let now = 0;
@@ -92,6 +96,11 @@ let bossPostMode = "accepted";
 let bossPostRelease = null;
 let equipmentWorn = false;
 let equipmentPosts = 0;
+let recapFetchCount = 0;
+let recapModel = { empty: true };
+let recapMode = "ok";
+let recapHold = false;
+const recapResolvers = [];
 let bossModel = { battle: null, registration: {
   open: true, participants_count: 0, viewer_registered: false,
 }, viewer: { in_battle: false } };
@@ -113,6 +122,12 @@ const window = {
 };
 const epoch = 1_700_000_000_000;
 const fetch = async (url, options) => {
+  if (url === "/api/v1/recap") {
+    recapFetchCount++;
+    if (recapMode === "error") throw new Error("network");
+    if (recapHold) return new Promise(resolve => recapResolvers.push(resolve));
+    return recapResponse(recapModel);
+  }
   if (url === "/api/v1/me") return {
     ok: true,
     headers: { get: name => name === "content-type" ? "application/json" : null },
@@ -232,13 +247,21 @@ const fetch = async (url, options) => {
     json: async () => ({ duel: serverDuel, recent_finished: null }),
   };
 };
+function recapResponse(model) {
+  return {
+    ok: true,
+    headers: { get: name => name === "content-type" ? "application/json" : null },
+    json: async () => model,
+  };
+}
 const source = fs.readFileSync(path.join(__dirname, "..", "miniapp_static", "app.js"), "utf8");
 const boot = /\s+bootstrap\(\);\s*\}\)\(\);\s*$/;
 assert.ok(boot.test(source));
 const instrumented = source.replace(boot, `
   globalThis.appTest = {
     renderHome, renderProfile, renderDuel, renderOpponents, renderHall, renderBoss,
-    updateCountdown, updateBossCountdown, loadView, submitMove, submitBossAction,
+    updateCountdown, updateBossCountdown, loadView, loadRecap, navigate, pluralTimes,
+    submitMove, submitBossAction,
     setContext(token, view) { sessionToken = token; currentView = view; },
     get countdownTurn() { return countdownTurn; },
   };
@@ -840,4 +863,69 @@ async function testEquipment() {
   assert.ok(grid.children.every(button => button.disabled));
 }
 
-testPolling().then(testEquipment).catch(error => { console.error(error); process.exitCode = 1; });
+function recapText() {
+  const parts = [];
+  const visit = node => { parts.push(node.textContent); node.children.forEach(visit); };
+  visit(nodes.get("recap-content"));
+  return parts.join(" ");
+}
+
+async function testRecap() {
+  getMode = "ok";
+  app.setContext("test-session", "home");
+  assert.equal(app.pluralTimes(1), "раз");
+  assert.equal(app.pluralTimes(2), "раза");
+  assert.equal(app.pluralTimes(5), "раз");
+  assert.equal(app.pluralTimes(12), "раз");
+  recapModel = {
+    empty: false,
+    duels: [{ user_id: 202, name: "<script>alert(1)</script>",
+      incoming: 2, outgoing: 1, wins: 2, losses: 1 }],
+    thefts: ["• украл хуй у соперника"], loot: ["• Получено: <img src=x> ×1"], pets: [],
+    totals: { wins: 2, losses: 1, found: 0, received: 1, lost: 0 },
+  };
+  await app.loadRecap();
+  assert.ok(recapText().includes("2 раза"));
+  assert.ok(recapText().includes("1 раз"));
+  assert.equal(recapText().split("Твои победы: 2").length - 1, 1);
+  assert.ok(recapText().includes("<script>alert(1)</script>"));
+  assert.ok(recapText().includes("<img src=x>"));
+  assert.equal(nodes.get("recap-content").querySelector("script"), null);
+  assert.equal(nodes.get("recap-content").querySelector("img"), null);
+  assert.ok(!recapText().includes("раунд"));
+
+  const previous = recapFetchCount;
+  app.navigate("duel");
+  await new Promise(setImmediate);
+  assert.equal(recapFetchCount, previous + 1);
+  recapModel = { empty: true };
+  document.hidden = false;
+  document.listeners.visibilitychange();
+  await new Promise(setImmediate);
+  assert.ok(recapText().includes("Подозрительно тихий день"), recapText());
+  const currentDuel = nodes.get("duel-content").children[0];
+
+  recapMode = "error";
+  await app.loadRecap();
+  assert.ok(recapText().includes("временно недоступна"));
+  assert.equal(nodes.get("duel-content").children[0], currentDuel);
+  recapMode = "ok";
+
+  recapHold = true;
+  const stale = app.loadRecap();
+  const fresh = app.loadRecap();
+  assert.equal(recapResolvers.length, 2);
+  recapResolvers.pop()(recapResponse({ empty: true }));
+  await fresh;
+  recapResolvers.pop()(recapResponse({ ...recapModel, empty: false,
+    duels: [], thefts: ["• устаревший ответ"], loot: [], pets: [],
+    totals: { wins: 0, losses: 0, found: 0, received: 0, lost: 0 } }));
+  await stale;
+  assert.ok(recapText().includes("Подозрительно тихий день"));
+  assert.ok(!recapText().includes("устаревший ответ"));
+  recapHold = false;
+}
+
+testPolling().then(testEquipment).then(testRecap).catch(error => {
+  console.error(error); process.exitCode = 1;
+});

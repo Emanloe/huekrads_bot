@@ -117,6 +117,13 @@ main { padding: 7px; min-height: 300px; }
   padding: 8px;
   min-width: 0;
 }
+.recap-content { margin-bottom: 8px; overflow-wrap: anywhere; }
+.recap-section + .recap-section { margin-top: 10px; }
+.recap-section h3 { margin: 0 0 5px; color: var(--accent-dark); font-size: 13px; }
+.recap-line { margin: 3px 0; }
+.recap-opponent { margin: 0 0 8px; }
+.recap-results { margin: 3px 0 0 12px; color: var(--text-muted); }
+.recap-totals { border-top: 1px solid var(--border); padding-top: 8px; }
 #screen-home > .panel-body { border-top: 1px solid var(--border); }
 .empty-content { color: var(--text-muted); }
 .subheading {

@@ -28,6 +28,21 @@ def test_duel_timer_and_action_layout_in_browser_runtime():
     subprocess.run([node, str(harness)], check=True, timeout=10)
 
 
+def test_recap_panel_is_above_current_duel_and_loads_on_open_without_polling():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    duel = html[html.index('<section id="screen-duel"'):html.index('<section id="screen-hall"')]
+    assert duel.index('id="recap-content"') < duel.index('id="duel-content"')
+    assert "📜 Личная хроника за сегодня" in duel
+    assert ".recap-content { margin-bottom: 8px; overflow-wrap: anywhere; }" in css
+    assert 'const RECAP_PATH = "/api/v1/recap"' in js
+    assert 'sessionToken = created.session_token;\n      loadRecap();' in js
+    assert 'if (view === "duel") loadRecap();' in js
+    assert 'if (currentView !== "duel") return;\n    loadRecap();' in js
+    assert 'window.setInterval(() => loadRecap()' not in js
+
+
 def test_equipment_columns_keep_two_flexible_tracks_on_narrow_screens():
     css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
     assert re.search(r"\.equipment-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)", css)
@@ -204,6 +219,7 @@ async def test_frontend_routes_and_api_auth_are_served_without_route_conflicts(t
         assert "Telegram" in js.text
         assert css.headers["x-content-type-options"] == "nosniff"
         assert (await client.get("/api/v1/me")).status_code == 401
+        assert (await client.get("/api/v1/recap")).status_code == 401
         assert (await client.get("/api/v1/players/202")).status_code == 401
         assert (await client.get("/api/v1/duel/opponents")).status_code == 401
         assert (await client.get("/api/v1/duel/active")).status_code == 401
@@ -328,6 +344,7 @@ def test_frontend_routes_include_authorized_equipment_actions():
     assert routes == {
         "/api/v1/session": {"POST"},
         "/api/v1/me": {"GET"},
+        "/api/v1/recap": {"GET"},
         "/api/v1/equipment/{slot}": {"GET"},
         "/api/v1/equipment/equip": {"POST"},
         "/api/v1/equipment/unequip": {"POST"},

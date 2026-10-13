@@ -10,6 +10,7 @@
   const REQUEST_TIMEOUT_MS = 12000;
   const START_DUEL_PATH = "/api/v1/duel/start";
   const MOVE_DUEL_PATH = "/api/v1/duel/move";
+  const RECAP_PATH = "/api/v1/recap";
   const API_PATHS = {
     home: "/api/v1/me",
     opponents: "/api/v1/duel/opponents",
@@ -41,6 +42,7 @@
   let hallSnapshot = null;
   let moveInFlight = false;
   let equipmentActionInFlight = false;
+  let recapRequestVersion = 0;
   const loading = { home: null, opponents: null, duel: null, hall: null, boss: null };
 
   const viewStatuses = { home: null, opponents: null, duel: null, hall: null, boss: null };
@@ -77,6 +79,7 @@
   }
 
   function showUnavailable(message, diagnosticCode = null) {
+    recapRequestVersion += 1;
     sessionToken = null;
     activeDuel = null;
     bossSnapshot = null;
@@ -89,10 +92,11 @@
       clearViewStatus(view);
       const unavailable = notice(message, true);
       if (diagnosticCode) unavailable.append(element("small", "bootstrap-debug-code", diagnosticCode));
-      document.getElementById(`screen-${view}`).querySelector(".panel-body").replaceChildren(
+      document.getElementById(`${view}-content`).replaceChildren(
         unavailable
       );
     }
+    document.getElementById("recap-content").replaceChildren(notice(message, true));
   }
 
   function dataCell(label, value) {
@@ -107,6 +111,72 @@
 
   function notice(message, bad = false) {
     return element("p", bad ? "notice bad" : "notice", message);
+  }
+
+  function pluralTimes(count) {
+    return count % 100 >= 11 && count % 100 <= 14 ? "раз" :
+      [2, 3, 4].includes(count % 10) ? "раза" : "раз";
+  }
+
+  function recapSection(title) {
+    const section = element("section", "recap-section");
+    section.append(element("h3", null, title));
+    return section;
+  }
+
+  function renderRecap(data) {
+    const body = document.getElementById("recap-content");
+    if (data.empty) {
+      body.replaceChildren(notice("Сегодня твой гном пока ничем не отличился. Подозрительно тихий день."));
+      return;
+    }
+    const content = element("div");
+    if (data.duels?.length) {
+      const section = recapSection("⚔️ Дуэли");
+      for (const opponent of data.duels) {
+        const group = element("div", "recap-opponent");
+        if (opponent.incoming) group.append(element("p", "recap-line",
+          `• На тебя нападал ${opponent.name} — ${opponent.incoming} ${pluralTimes(opponent.incoming)}`));
+        if (opponent.outgoing) group.append(element("p", "recap-line",
+          `• Ты нападал на ${opponent.name} — ${opponent.outgoing} ${pluralTimes(opponent.outgoing)}`));
+        group.append(element("p", "recap-results",
+          `Твои победы: ${opponent.wins} · Победы соперника: ${opponent.losses}`));
+        section.append(group);
+      }
+      content.append(section);
+    }
+    for (const [key, title] of [
+      ["thefts", "🍆 Кражи"], ["loot", "💎 Добыча"], ["pets", "🦀 Хуекрабы"],
+    ]) {
+      if (!data[key]?.length) continue;
+      const section = recapSection(title);
+      for (const line of data[key]) section.append(element("p", "recap-line", line));
+      content.append(section);
+    }
+    const totals = recapSection("📊 Итог дня");
+    totals.className += " recap-totals";
+    totals.append(element("p", "recap-line",
+      `Дуэли: побед ${data.totals.wins}, поражений ${data.totals.losses}`),
+      element("p", "recap-line",
+        `Добыча: найдено ${data.totals.found}, получено ${data.totals.received}, потеряно ${data.totals.lost}`));
+    content.append(totals);
+    body.replaceChildren(content);
+  }
+
+  async function loadRecap() {
+    if (!sessionToken) return;
+    const version = ++recapRequestVersion;
+    const token = sessionToken;
+    const body = document.getElementById("recap-content");
+    body.replaceChildren(notice("Загрузка хроники…"));
+    try {
+      const data = await apiRequest(RECAP_PATH);
+      if (version === recapRequestVersion && sessionToken === token) renderRecap(data);
+    } catch (error) {
+      if (version !== recapRequestVersion || sessionToken !== token) return;
+      if (error.status === 401) showUnavailable(error.message);
+      else body.replaceChildren(notice("Хроника временно недоступна. Откройте вкладку ещё раз позже.", true));
+    }
   }
 
   function renderTitles(titles, compact = false) {
@@ -987,6 +1057,7 @@
 
   function navigate(view) {
     currentView = view;
+    if (view === "duel") loadRecap();
     if (view !== "duel") {
       countdownNode = null;
       countdownTurn = null;
@@ -1018,6 +1089,7 @@
       return;
     }
     if (currentView !== "duel") return;
+    loadRecap();
     updateCountdown();
     // An older request may have started before the WebView was backgrounded.
     // Finish it first, then fetch a fresh authoritative state on return.
@@ -1087,6 +1159,7 @@
       stage = "session_response";
       if (typeof created.session_token !== "string" || !created.session_token) throw new Error();
       sessionToken = created.session_token;
+      loadRecap();
       stage = "home_load";
       await loadView("home");
     } catch (error) {

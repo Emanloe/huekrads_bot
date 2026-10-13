@@ -42,7 +42,7 @@ def _short(value: object, limit: int = 100) -> str:
     text = str(value or "—").replace("\n", " ").replace("\r", " ")
     if len(text) > limit:
         text = text[: limit - 1] + "…"
-    return escape(text)
+    return text
 
 
 def _item_name(item_id: object) -> str:
@@ -110,10 +110,8 @@ def _fit_message(header: str, sections: list[tuple[str, list[str]]], total: str)
     return "\n\n".join(chosen + [total])
 
 
-def build_recap_text(events: list[dict], user_id: int) -> str:
-    if not events:
-        return get_text("recap.empty")
-
+def build_recap_model(events: list[dict], user_id: int) -> dict:
+    """Plain-text, JSON-safe chronicle shared by Telegram and Mini App."""
     opponents: dict[int, dict[str, int | str]] = {}
     theft_lines: list[str] = []
     found = Counter()
@@ -190,29 +188,6 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
         elif kind == "huecrab_tamed":
             tamed += 1
 
-    sections: list[tuple[str, list[str]]] = []
-    if opponents:
-        duel_summary = []
-        for opponent in opponents.values():
-            directions = []
-            if opponent["incoming"]:
-                directions.append(get_text(
-                    "recap.attacked_by", name=opponent["name"],
-                    count=opponent["incoming"], times=_plural_times(opponent["incoming"]),
-                ))
-            if opponent["outgoing"]:
-                directions.append(get_text(
-                    "recap.attacked", name=opponent["name"],
-                    count=opponent["outgoing"], times=_plural_times(opponent["outgoing"]),
-                ))
-            directions.append(get_text(
-                "recap.duel_results", wins=opponent["wins"], losses=opponent["losses"],
-            ))
-            duel_summary.append("\n".join(directions))
-        sections.append((get_text("recap.sections.duels"), duel_summary))
-    if theft_lines:
-        sections.append((get_text("recap.sections.thefts"), theft_lines))
-
     loot_lines = []
     loot_lines.extend(get_text("recap.item_found", item=name, count=count) for name, count in found.most_common())
     loot_lines.extend(get_text("recap.item_received", item=name, count=count) for name, count in received.most_common())
@@ -221,9 +196,6 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
         get_text("recap.item_lost", item=item, reason=reason, count=count)
         for (item, reason), count in lost.most_common()
     )
-    if loot_lines:
-        sections.append((get_text("recap.sections.loot"), loot_lines))
-
     pet_lines = []
     if tamed:
         pet_lines.append(get_text("recap.pet_tamed", count=tamed))
@@ -231,18 +203,56 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
         get_text("recap.pet_loot", item=name, count=count)
         for name, count in pet_received.most_common()
     )
-    if pet_lines:
-        sections.append((get_text("recap.sections.pets"), pet_lines))
-
-    if not sections:
-        return get_text("recap.empty")
     wins = sum(opponent["wins"] for opponent in opponents.values())
     losses = sum(opponent["losses"] for opponent in opponents.values())
+    return {
+        "empty": not (opponents or theft_lines or loot_lines or pet_lines),
+        "duels": [{"user_id": opponent_id, **opponent}
+                  for opponent_id, opponent in opponents.items()],
+        "thefts": theft_lines,
+        "loot": loot_lines,
+        "pets": pet_lines,
+        "totals": {
+            "wins": wins, "losses": losses,
+            "found": sum(found.values()) + len(missed),
+            "received": sum(received.values()) + sum(pet_received.values()),
+            "lost": sum(lost.values()),
+        },
+    }
+
+
+def build_recap_text(events: list[dict], user_id: int) -> str:
+    model = build_recap_model(events, user_id)
+    if model["empty"]:
+        return get_text("recap.empty")
+
+    sections: list[tuple[str, list[str]]] = []
+    if model["duels"]:
+        duel_summary = []
+        for opponent in model["duels"]:
+            directions = []
+            if opponent["incoming"]:
+                directions.append(get_text(
+                    "recap.attacked_by", name=escape(opponent["name"]),
+                    count=opponent["incoming"], times=_plural_times(opponent["incoming"]),
+                ))
+            if opponent["outgoing"]:
+                directions.append(get_text(
+                    "recap.attacked", name=escape(opponent["name"]),
+                    count=opponent["outgoing"], times=_plural_times(opponent["outgoing"]),
+                ))
+            directions.append(get_text(
+                "recap.duel_results", wins=opponent["wins"], losses=opponent["losses"],
+            ))
+            duel_summary.append("\n".join(directions))
+        sections.append((get_text("recap.sections.duels"), duel_summary))
+    for section, key in (("thefts", "thefts"), ("loot", "loot"), ("pets", "pets")):
+        if model[key]:
+            sections.append((get_text(f"recap.sections.{section}"),
+                             [escape(line) for line in model[key]]))
+    totals = model["totals"]
     total = get_text(
-        "recap.total", wins=wins, losses=losses,
-        found=sum(found.values()) + len(missed),
-        received=sum(received.values()) + sum(pet_received.values()),
-        lost=sum(lost.values()),
+        "recap.total", **totals,
     )
     return _fit_message(get_text("recap.title"), sections, total)
 
@@ -256,7 +266,13 @@ async def recap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await send_and_schedule(update, context, get_text("recap.not_registered"))
         return
 
-    start_ms, end_ms = game_day_bounds_ms()
+    events = load_recap_events(chat_id, user_id)
+    await send_and_schedule(update, context, build_recap_text(events, user_id))
+
+
+def load_recap_events(chat_id: int, user_id: int, when: datetime | None = None) -> list[dict]:
+    """Read this user's current Moscow-day events, including legacy fallbacks."""
+    start_ms, end_ms = game_day_bounds_ms(when)
     events = list_game_events(chat_id, user_id, start_ms, end_ms)
     sources = {event.get("source_id") for event in events}
     for duel in list_finished_duels_for_recap(chat_id, user_id, start_ms, end_ms):
@@ -278,4 +294,4 @@ async def recap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 "occurred_at": tame["occurred_at"], "data": {},
             })
     events.sort(key=lambda event: (event.get("occurred_at", 0), event.get("id", 0)))
-    await send_and_schedule(update, context, build_recap_text(events, user_id))
+    return events
