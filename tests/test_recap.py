@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import database as db
+import handlers.recap as recap
 from handlers.recap import (
     TELEGRAM_SAFE_TEXT_LIMIT,
     build_recap_text,
@@ -165,7 +166,8 @@ def test_recap_aggregates_duel_attacks_without_individual_results(temp_database)
     assert "побед 1, поражений 1" in text
     assert "украл хуй у Enemy" in text
     assert "Ты нападал на &lt;b&gt;Evil&lt;/b&gt; — 1 раз" in text
-    assert "На тебя нападал Enemy — 1 раз" in text
+    assert "На тебя нападал &lt;b&gt;Evil&lt;/b&gt; — 1 раз" in text
+    assert text.count("Твои победы: 1 · Победы соперника: 1") == 1
     assert "&lt;b&gt;Evil&lt;/b&gt;" in text
     assert "победа:" not in text
     assert "поражение:" not in text
@@ -186,6 +188,88 @@ def test_recap_combines_repeated_attacks_by_the_same_player(temp_database):
     text = build_recap_text([event("duel_finished", duel), event("duel_finished", duel)], 1)
     assert "На тебя нападал Гобелен — 2 раза" in text
     assert text.count("На тебя нападал Гобелен") == 1
+    assert text.count("Твои победы: 2 · Победы соперника: 0") == 1
+
+
+def test_recap_counts_all_initiator_and_winner_combinations_for_one_opponent(temp_database):
+    def duel(initiator_id, winner_id):
+        return event("duel_finished", {
+            "initiator_user_id": initiator_id,
+            "initiator_name": "Мой гном" if initiator_id == 1 else "Соперник",
+            "opponent_user_id": 2 if initiator_id == 1 else 1,
+            "opponent_name": "Соперник" if initiator_id == 1 else "Мой гном",
+            "winner_user_id": winner_id,
+            "winner_name": "Мой гном" if winner_id == 1 else "Соперник",
+            "loser_user_id": 2 if winner_id == 1 else 1,
+            "loser_name": "Соперник" if winner_id == 1 else "Мой гном",
+            "is_dick_stolen": False, "stolen_item": None,
+        })
+
+    text = build_recap_text([
+        duel(1, 1), duel(1, 2), duel(2, 2), duel(2, 1),
+    ], 1)
+    assert "Ты нападал на Соперник — 2 раза" in text
+    assert "На тебя нападал Соперник — 2 раза" in text
+    assert text.count("Твои победы: 2 · Победы соперника: 2") == 1
+    assert "Дуэли: побед 2, поражений 2" in text
+
+
+def test_recap_keeps_same_named_opponents_separate_by_user_id(temp_database):
+    first = event("duel_finished", {
+        "initiator_user_id": 2, "initiator_name": "Одинаковый",
+        "opponent_user_id": 1, "opponent_name": "Мой гном",
+        "winner_user_id": 1, "winner_name": "Мой гном",
+        "loser_user_id": 2, "loser_name": "Одинаковый",
+        "is_dick_stolen": False, "stolen_item": None,
+    })
+    second = event("duel_finished", {
+        "initiator_user_id": 3, "initiator_name": "Одинаковый",
+        "opponent_user_id": 1, "opponent_name": "Мой гном",
+        "winner_user_id": 3, "winner_name": "Одинаковый",
+        "loser_user_id": 1, "loser_name": "Мой гном",
+        "is_dick_stolen": False, "stolen_item": None,
+    })
+    text = build_recap_text([first, second], 1)
+    assert text.count("На тебя нападал Одинаковый — 1 раз") == 2
+    assert "Твои победы: 1 · Победы соперника: 0" in text
+    assert "Твои победы: 0 · Победы соперника: 1" in text
+
+
+@pytest.mark.asyncio
+async def test_recap_does_not_double_count_journalled_native_duel(
+    temp_database, fake_context, monkeypatch,
+):
+    register(1)
+    duel_data = {
+        "duel_id": 7, "initiator_user_id": 1, "initiator_name": "Мой гном",
+        "opponent_user_id": 2, "opponent_name": "Соперник",
+        "winner_user_id": 1, "winner_name": "Мой гном",
+        "loser_user_id": 2, "loser_name": "Соперник",
+        "is_dick_stolen": False, "stolen_item": None,
+    }
+    journalled = event("duel_finished", duel_data, source="duel:7")
+    native = {
+        "duel_id": 7, "finished_at": 1, "rounds": 1,
+        "player1": {"user_id": 1, "username": "me", "display_name": "Мой гном", "dwarf_name": None},
+        "player2": {"user_id": 2, "username": "opponent", "display_name": "Соперник", "dwarf_name": None},
+        "result": {"kind": "finalized", "winner_user_id": 1, "loser_user_id": 2},
+    }
+    monkeypatch.setattr(recap, "list_game_events", lambda *_: [journalled])
+    monkeypatch.setattr(recap, "list_finished_duels_for_recap", lambda *_: [native])
+    monkeypatch.setattr(recap, "list_item_receipts_for_recap", lambda *_: [])
+    monkeypatch.setattr(recap, "get_huecrab_tame_for_recap", lambda *_: None)
+    message = SimpleNamespace(
+        message_id=10,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=11)),
+    )
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=CHAT), effective_user=user(1), message=message,
+    )
+    await recap_command(update, fake_context)
+    text = message.reply_text.await_args.args[0]
+    assert "Ты нападал на Соперник — 1 раз" in text
+    assert text.count("Твои победы: 1 · Победы соперника: 0") == 1
+    assert "Дуэли: побед 1, поражений 0" in text
 
 
 def test_stolen_inventory_item_is_rendered_as_a_loss(temp_database):

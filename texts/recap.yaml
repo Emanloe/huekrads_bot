@@ -17,6 +17,7 @@ loss_stolen: "украден соперником"
 
 attacked_by: "• На тебя нападал {name} — {count} {times}"
 attacked: "• Ты нападал на {name} — {count} {times}"
+duel_results: "Твои победы: {wins} · Победы соперника: {losses}"
 theft_line: "• {action} {opponent}"
 huegryz_theft: "• Хуегрыз откусил тебе хуй при подборе добычи"
 

@@ -82,13 +82,6 @@ def _native_duel_as_event(duel: dict) -> dict:
     }
 
 
-def _counter_lines(counter: Counter, template: str) -> list[str]:
-    return [
-        get_text(template, name=name, count=count, times=_plural_times(count))
-        for name, count in counter.most_common()
-    ]
-
-
 def _plural_times(count: int) -> str:
     if 11 <= count % 100 <= 14:
         return "раз"
@@ -121,8 +114,7 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
     if not events:
         return get_text("recap.empty")
 
-    attacks = Counter()
-    attacked_by = Counter()
+    opponents: dict[int, dict[str, int | str]] = {}
     theft_lines: list[str] = []
     found = Counter()
     received = Counter()
@@ -130,7 +122,6 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
     lost = Counter()
     missed: list[str] = []
     tamed = 0
-    wins = losses = 0
     missed_ids = {
         event.get("data", {}).get("item_event_id")
         for event in events if event.get("event_type") == "item_missed"
@@ -140,26 +131,43 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
         kind = event.get("event_type")
         data = event.get("data") or {}
         if kind == "duel_finished":
-            won = data.get("winner_user_id") == user_id
-            wins += int(won)
-            losses += int(not won)
             if data.get("initiator_user_id") == user_id:
-                attacks[_short(data.get("opponent_name"))] += 1
+                opponent_id = data.get("opponent_user_id")
+                opponent_name = _short(data.get("opponent_name"))
+                direction = "outgoing"
             else:
-                attacked_by[_short(data.get("initiator_name"))] += 1
+                opponent_id = data.get("initiator_user_id")
+                opponent_name = _short(data.get("initiator_name"))
+                direction = "incoming"
+            if opponent_id is None:
+                continue
+            opponent = opponents.setdefault(opponent_id, {
+                "name": opponent_name, "incoming": 0, "outgoing": 0,
+                "wins": 0, "losses": 0,
+            })
+            opponent[direction] += 1
+            if data.get("winner_user_id") == user_id:
+                opponent["wins"] += 1
+            else:
+                opponent["losses"] += 1
             if data.get("is_dick_stolen"):
-                opponent_name = (
-                    data.get("loser_name") if won else data.get("winner_name")
+                theft_opponent_name = (
+                    data.get("loser_name")
+                    if data.get("winner_user_id") == user_id
+                    else data.get("winner_name")
                 )
                 theft_lines.append(get_text(
                     "recap.theft_line",
-                    action=get_text("recap.stole" if won else "recap.stolen_from"),
-                    opponent=_short(opponent_name),
+                    action=get_text(
+                        "recap.stole" if data.get("winner_user_id") == user_id
+                        else "recap.stolen_from",
+                    ),
+                    opponent=_short(theft_opponent_name),
                 ))
             stolen_item = data.get("stolen_item")
             if isinstance(stolen_item, dict) and stolen_item.get("item_name"):
                 item_name = _short(stolen_item["item_name"])
-                if won:
+                if data.get("winner_user_id") == user_id:
                     received[item_name] += 1
                 else:
                     lost[(item_name, get_text("recap.loss_stolen"))] += 1
@@ -183,10 +191,24 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
             tamed += 1
 
     sections: list[tuple[str, list[str]]] = []
-    if attacks or attacked_by:
+    if opponents:
         duel_summary = []
-        duel_summary.extend(_counter_lines(attacked_by, "recap.attacked_by"))
-        duel_summary.extend(_counter_lines(attacks, "recap.attacked"))
+        for opponent in opponents.values():
+            directions = []
+            if opponent["incoming"]:
+                directions.append(get_text(
+                    "recap.attacked_by", name=opponent["name"],
+                    count=opponent["incoming"], times=_plural_times(opponent["incoming"]),
+                ))
+            if opponent["outgoing"]:
+                directions.append(get_text(
+                    "recap.attacked", name=opponent["name"],
+                    count=opponent["outgoing"], times=_plural_times(opponent["outgoing"]),
+                ))
+            directions.append(get_text(
+                "recap.duel_results", wins=opponent["wins"], losses=opponent["losses"],
+            ))
+            duel_summary.append("\n".join(directions))
         sections.append((get_text("recap.sections.duels"), duel_summary))
     if theft_lines:
         sections.append((get_text("recap.sections.thefts"), theft_lines))
@@ -214,6 +236,8 @@ def build_recap_text(events: list[dict], user_id: int) -> str:
 
     if not sections:
         return get_text("recap.empty")
+    wins = sum(opponent["wins"] for opponent in opponents.values())
+    losses = sum(opponent["losses"] for opponent in opponents.values())
     total = get_text(
         "recap.total", wins=wins, losses=losses,
         found=sum(found.values()) + len(missed),
