@@ -171,9 +171,8 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
 
     choice = Mock(return_value=answer)
     monkeypatch.setattr(elite_ball.random, "choice", choice)
-    monkeypatch.setattr(elite_ball.random, "random", Mock(
-        side_effect=AssertionError("question used random.random"),
-    ))
+    random_roll = Mock(return_value=0.5)
+    monkeypatch.setattr(elite_ball.random, "random", random_roll)
 
     def question_update(user_id, chat_id, text="Вопрос"):
         message = SimpleNamespace(
@@ -194,8 +193,9 @@ async def test_real_telegram_inline_updates_have_no_chat_and_command_activates_i
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(mine, fake_context)
     choice.assert_called_once_with([
-        "Да", "Нет", "Возможно", "Увлажните шар гнома усерднее",
+        "Да", "Нет", "Возможно",
     ])
+    random_roll.assert_called_once_with()
     mine.message.reply_photo.assert_awaited_once_with(
         photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
         caption=answer,

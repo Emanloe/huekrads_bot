@@ -21,6 +21,13 @@ from text_resources import get_text
 pytestmark = pytest.mark.usefixtures("temp_database")
 
 
+@pytest.fixture(autouse=True)
+def use_primary_answer_branch(monkeypatch):
+    from handlers import elite_ball
+
+    monkeypatch.setattr(elite_ball.random, "random", lambda: 0.5)
+
+
 def activations():
     with get_db() as conn:
         return list(conn.execute(
@@ -76,7 +83,7 @@ async def test_inline_preview_and_callback_work_without_ball_charge(fake_context
     token = button.callback_data.removeprefix("ebi:")
     owner_update, owner_query = callback(token)
     await elite_ball.elite_ball_inline_callback(owner_update, fake_context)
-    answer_choice.assert_called_once_with(["Да", "Нет", "Возможно", "Увлажните шар гнома усерднее"])
+    answer_choice.assert_called_once_with(["Да", "Нет", "Возможно"])
     owner_query.edit_message_media.assert_awaited_once()
     final_media = owner_query.edit_message_media.await_args.kwargs["media"]
     assert isinstance(final_media, InputMediaPhoto)
@@ -102,7 +109,7 @@ async def test_owner_uses_inline_action_without_charge_or_destination_chat(fake_
     await elite_ball.elite_ball_inline_callback(update, fake_context)
 
     assert activations() == []
-    choice.assert_called_once_with(["Да", "Нет", "Возможно", "Увлажните шар гнома усерднее"])
+    choice.assert_called_once_with(["Да", "Нет", "Возможно"])
     kwargs = query.edit_message_media.await_args.kwargs
     assert isinstance(kwargs["media"], InputMediaPhoto)
     assert kwargs["media"].media == elite_ball.ELITE_BALL_PHOTO_FILE_ID

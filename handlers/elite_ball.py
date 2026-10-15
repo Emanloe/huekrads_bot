@@ -32,7 +32,10 @@ def elite_ball_button() -> InlineKeyboardButton:
 
 
 def choose_ball_answer() -> str:
-    return random.choice(get_text_list("elite_ball.answers"))
+    answers = get_text_list("elite_ball.answers")
+    if random.random() < 0.05:
+        return answers[3]
+    return random.choice(answers[:3])
 
 
 def build_elite_ball_inline_result(user_id: int, question: str) -> InlineQueryResultArticle:

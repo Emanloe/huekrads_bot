@@ -23,7 +23,7 @@ def charges():
 ANSWERS = ("Да", "Нет", "Возможно", "Увлажните шар гнома усерднее")
 
 
-def test_answer_resource_contains_exactly_four_equal_weight_options():
+def test_answer_resource_contains_the_four_existing_responses():
     assert get_text_list("elite_ball.answers") == list(ANSWERS)
 
 
@@ -103,10 +103,13 @@ async def test_one_question_one_choice_reply_and_then_no_waiting(fake_context, m
     await elite_ball.elite_ball_callback(update, fake_context)
     choice = Mock(return_value="Да")
     monkeypatch.setattr(elite_ball.random, "choice", choice)
+    random_roll = Mock(return_value=0.5)
+    monkeypatch.setattr(elite_ball.random, "random", random_roll)
     question, message = text_update(text="А завтра?")
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(question, fake_context)
-    choice.assert_called_once_with(list(ANSWERS))
+    choice.assert_called_once_with(list(ANSWERS[:3]))
+    random_roll.assert_called_once_with()
     message.reply_photo.assert_awaited_once_with(
         photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
         caption="Да",
@@ -122,22 +125,22 @@ async def test_one_question_one_choice_reply_and_then_no_waiting(fake_context, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", ANSWERS)
-async def test_each_answer_is_possible_with_one_uniform_choice(
+@pytest.mark.parametrize("answer", ANSWERS[:3])
+async def test_primary_answers_are_chosen_uniformly_after_the_rare_check(
     fake_context, monkeypatch, answer,
 ):
     from handlers import elite_ball
 
     await elite_ball.elite_ball_callback(callback_update()[0], fake_context)
     choice = Mock(return_value=answer)
-    random_roll = Mock(side_effect=AssertionError("answer used random.random"))
+    random_roll = Mock(return_value=0.05)
     monkeypatch.setattr(elite_ball.random, "choice", choice)
     monkeypatch.setattr(elite_ball.random, "random", random_roll)
     update, message = text_update()
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(update, fake_context)
-    choice.assert_called_once_with(list(ANSWERS))
-    random_roll.assert_not_called()
+    choice.assert_called_once_with(list(ANSWERS[:3]))
+    random_roll.assert_called_once_with()
     message.reply_photo.assert_awaited_once_with(
         photo="AgACAgIAAxkBAAPYarOx_Ot9KPfYe1lKYZsAAaKkq7kLAAIsIGsbFCShScvsbybBp2qPAQADAgADeAADPQQ",
         caption=answer,
@@ -148,6 +151,30 @@ async def test_each_answer_is_possible_with_one_uniform_choice(
     assert charges() == set()
 
 
+@pytest.mark.parametrize("roll", [0.0, 0.049999999])
+def test_rare_answer_occupies_exact_five_percent_threshold(monkeypatch, roll):
+    from handlers import elite_ball
+
+    random_roll = Mock(return_value=roll)
+    choice = Mock(side_effect=AssertionError("rare answer selected by choice"))
+    monkeypatch.setattr(elite_ball.random, "random", random_roll)
+    monkeypatch.setattr(elite_ball.random, "choice", choice)
+    assert elite_ball.choose_ball_answer() == ANSWERS[3]
+    random_roll.assert_called_once_with()
+    choice.assert_not_called()
+
+
+@pytest.mark.parametrize("answer", ANSWERS[:3])
+def test_each_primary_answer_uses_an_equal_choice_pool(monkeypatch, answer):
+    from handlers import elite_ball
+
+    monkeypatch.setattr(elite_ball.random, "random", Mock(return_value=0.05))
+    choice = Mock(return_value=answer)
+    monkeypatch.setattr(elite_ball.random, "choice", choice)
+    assert elite_ball.choose_ball_answer() == answer
+    choice.assert_called_once_with(list(ANSWERS[:3]))
+
+
 @pytest.mark.asyncio
 async def test_photo_send_failure_consumes_question_without_reroll(
     fake_context, monkeypatch, caplog,
@@ -156,7 +183,7 @@ async def test_photo_send_failure_consumes_question_without_reroll(
 
     await elite_ball.elite_ball_callback(callback_update()[0], fake_context)
     choice = Mock(return_value="Да")
-    random_roll = Mock(side_effect=AssertionError("answer used random.random"))
+    random_roll = Mock(return_value=0.5)
     monkeypatch.setattr(elite_ball.random, "choice", choice)
     monkeypatch.setattr(elite_ball.random, "random", random_roll)
     update, message = text_update()
@@ -165,8 +192,8 @@ async def test_photo_send_failure_consumes_question_without_reroll(
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(update, fake_context)
 
-    choice.assert_called_once_with(list(ANSWERS))
-    random_roll.assert_not_called()
+    choice.assert_called_once_with(list(ANSWERS[:3]))
+    random_roll.assert_called_once_with()
     message.reply_photo.assert_awaited_once_with(
         photo=elite_ball.ELITE_BALL_PHOTO_FILE_ID,
         caption="Да",
@@ -189,6 +216,7 @@ async def test_other_chat_and_other_users_have_independent_waiting(fake_context,
         (CHAT_ID, 1), (-831, 1), (CHAT_ID, 2),
     }
     monkeypatch.setattr(elite_ball.random, "choice", Mock(return_value="Нет"))
+    monkeypatch.setattr(elite_ball.random, "random", Mock(return_value=0.5))
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(text_update(1, CHAT_ID)[0], fake_context)
     assert charges() == {(-831, 1), (CHAT_ID, 2)}
@@ -208,6 +236,7 @@ async def test_via_bot_message_from_any_inline_bot_does_not_consume_chat_charge(
     ), fake_context)
     choice = Mock(return_value="Да")
     monkeypatch.setattr(elite_ball.random, "choice", choice)
+    monkeypatch.setattr(elite_ball.random, "random", Mock(return_value=0.5))
     inline_message = Update.de_json({
         "update_id": 10,
         "message": {
@@ -228,7 +257,7 @@ async def test_via_bot_message_from_any_inline_bot_does_not_consume_chat_charge(
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(ordinary, fake_context)
     assert charges() == set()
-    choice.assert_called_once_with(list(ANSWERS))
+    choice.assert_called_once_with(list(ANSWERS[:3]))
     message.reply_photo.assert_awaited_once()
 
 
@@ -263,6 +292,7 @@ async def test_commands_nontext_bot_message_and_repeated_click_do_not_consume(
 
     answer_choice = Mock(return_value="Возможно")
     monkeypatch.setattr(elite_ball.random, "choice", answer_choice)
+    monkeypatch.setattr(elite_ball.random, "random", Mock(return_value=0.5))
     question, message = text_update()
     with pytest.raises(ApplicationHandlerStop):
         await elite_ball.elite_ball_question(question, fake_context)
