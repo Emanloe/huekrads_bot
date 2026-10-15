@@ -1682,23 +1682,40 @@ def get_duel_equipment(chat_id: int, user_id: int) -> dict[str, dict]:
             for slot, instance_id, item_id, name in rows}
 
 
-def get_equipped_duel_weapon_name_in_transaction(cursor, chat_id: int, user_id: int) -> str | None:
-    """Only the concrete, currently owned instance in the weapon slot."""
+def _get_equipped_duel_item_name_in_transaction(cursor, chat_id: int, user_id: int,
+                                               slot: str) -> str | None:
+    """Only the concrete, currently owned instance in the requested slot."""
     row = cursor.execute(
         """SELECT g.name FROM duel_equipment e
            JOIN duel_inventory i ON i.id = e.inventory_id
                AND i.chat_id = e.chat_id AND i.user_id = e.user_id
            JOIN generated_item_names g ON g.item_id = i.item_id
-           WHERE e.chat_id = ? AND e.user_id = ? AND e.slot = 'weapon'
-             AND g.kind = 'оружие'""",
-        (chat_id, user_id),
+           WHERE e.chat_id = ? AND e.user_id = ? AND e.slot = ? AND g.kind = ?""",
+        (chat_id, user_id, slot, EQUIPMENT_SLOT_KINDS[slot]),
     ).fetchone()
     return row[0] if row is not None else None
+
+
+def get_equipped_duel_weapon_name_in_transaction(cursor, chat_id: int, user_id: int) -> str | None:
+    return _get_equipped_duel_item_name_in_transaction(cursor, chat_id, user_id, "weapon")
 
 
 def get_equipped_duel_weapon_name(chat_id: int, user_id: int) -> str | None:
     with get_db() as conn:
         return get_equipped_duel_weapon_name_in_transaction(conn.cursor(), chat_id, user_id)
+
+
+def get_equipped_duel_armor_name_in_transaction(cursor, chat_id: int, user_id: int,
+                                               zone: str) -> str | None:
+    slot = PROTECTIVE_ZONE_SLOTS.get(zone)
+    if slot is None:
+        return None
+    return _get_equipped_duel_item_name_in_transaction(cursor, chat_id, user_id, slot)
+
+
+def get_equipped_duel_armor_name(chat_id: int, user_id: int, zone: str) -> str | None:
+    with get_db() as conn:
+        return get_equipped_duel_armor_name_in_transaction(conn.cursor(), chat_id, user_id, zone)
 
 
 def _active_pvp_participant(cursor, chat_id: int, user_id: int) -> bool:

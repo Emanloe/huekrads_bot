@@ -57,6 +57,7 @@ def _resolve_zone_outcome(strike_zone: str, block_zone: str) -> str:
 
 def resolve_duel_round(
     strike_zone: str, block_zone: str, rng, *, weapon_name: str | None = None,
+    armor_name: str | None = None,
 ) -> DuelRoundResolution:
     """Resolve one block using the existing RNG calls in their original order.
 
@@ -65,21 +66,21 @@ def resolve_duel_round(
     """
     if _is_suicide_roll(rng.random()):
         return DuelRoundResolution("suicide", format_duel_weapon_phrase(
-            rng.choice(SUICIDE_PHRASES), weapon_name,
+            rng.choice(SUICIDE_PHRASES), weapon_name, armor_name=armor_name,
         ))
     if _is_miss_roll(rng.random()):
         return DuelRoundResolution(
-            "miss", format_duel_weapon_phrase(rng.choice(MISS_PHRASES), weapon_name),
-            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
+            "miss", format_duel_weapon_phrase(rng.choice(MISS_PHRASES), weapon_name, armor_name=armor_name),
+            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name, armor_name=armor_name),
         )
     if _resolve_zone_outcome(strike_zone, block_zone) == "block":
         return DuelRoundResolution(
-            "block", format_duel_weapon_phrase(rng.choice(BLOCK_PHRASES), weapon_name),
-            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
+            "block", format_duel_weapon_phrase(rng.choice(BLOCK_PHRASES), weapon_name, armor_name=armor_name),
+            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name, armor_name=armor_name),
         )
     return DuelRoundResolution(
-        "hit", format_duel_weapon_phrase(rng.choice(HIT_PHRASES), weapon_name),
-        format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
+        "hit", format_duel_weapon_phrase(rng.choice(HIT_PHRASES), weapon_name, armor_name=armor_name),
+        format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name, armor_name=armor_name),
     )
 
 

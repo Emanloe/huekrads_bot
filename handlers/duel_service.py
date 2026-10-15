@@ -20,6 +20,7 @@ from database import (
     get_duel_inventory,
     get_duel_inventory_in_transaction,
     get_equipped_duel_weapon_name_in_transaction,
+    get_equipped_duel_armor_name_in_transaction,
     get_dick_steal_chance,
     get_duel_top,
     get_duel_user_by_id,
@@ -746,8 +747,11 @@ def _apply_persistent_block(
     weapon_name = get_equipped_duel_weapon_name_in_transaction(
         cursor, chat_id, session["attacker_user_id"],
     )
+    armor_name = get_equipped_duel_armor_name_in_transaction(
+        cursor, chat_id, session["defender_user_id"], session["attack_zone"],
+    )
     round_result = resolve_duel_round(
-        session["attack_zone"], zone, random, weapon_name=weapon_name,
+        session["attack_zone"], zone, random, weapon_name=weapon_name, armor_name=armor_name,
     )
     absorbed_item = (consume_equipped_item_for_hit_in_transaction(
         cursor, chat_id, session["defender_user_id"], session["attack_zone"],

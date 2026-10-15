@@ -1,7 +1,7 @@
 import random
 from html import escape
 
-from loot.grammar import weapon_case_forms
+from loot.grammar import armor_case_forms, weapon_case_forms
 from text_resources import get_text, get_text_list, get_text_mapping
 
 """Pure presentation helpers shared by duel and boss battle output."""
@@ -23,10 +23,13 @@ BERSERK_ALREADY_STOLEN = get_text_list("duel.berserk.already_stolen")
 _BOSS_PHASE_STATUSES = get_text_mapping("duel.boss.phase_status")
 
 
-def format_duel_weapon_phrase(phrase: str, weapon_name: str | None) -> str:
-    """Resolve catalog weapon placeholders once, before persisting round text."""
+def format_duel_weapon_phrase(
+    phrase: str, weapon_name: str | None, *, armor_name: str | None = None,
+) -> str:
+    """Resolve equipment placeholders once, before persisting round text."""
+    forms = {**weapon_case_forms(weapon_name), **armor_case_forms(armor_name)}
     return phrase.format(**{key: escape(value)
-                            for key, value in weapon_case_forms(weapon_name).items()})
+                            for key, value in forms.items()})
 
 
 def get_equipment_break_text(item: dict) -> str:
