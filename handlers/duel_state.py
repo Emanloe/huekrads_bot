@@ -9,6 +9,7 @@ from handlers.duel_text import (
     HIT_PHRASES,
     MISS_PHRASES,
     SUICIDE_PHRASES,
+    format_duel_weapon_phrase,
 )
 
 DUEL_MOVE_TIMEOUT_SECONDS = 10
@@ -54,24 +55,31 @@ def _resolve_zone_outcome(strike_zone: str, block_zone: str) -> str:
     return "block" if strike_zone == block_zone else "hit"
 
 
-def resolve_duel_round(strike_zone: str, block_zone: str, rng) -> DuelRoundResolution:
+def resolve_duel_round(
+    strike_zone: str, block_zone: str, rng, *, weapon_name: str | None = None,
+) -> DuelRoundResolution:
     """Resolve one block using the existing RNG calls in their original order.
 
     ``rng`` is the caller's random module/object so the Telegram path retains
     its existing RNG hook and the future service uses the same rules.
     """
     if _is_suicide_roll(rng.random()):
-        return DuelRoundResolution("suicide", rng.choice(SUICIDE_PHRASES))
+        return DuelRoundResolution("suicide", format_duel_weapon_phrase(
+            rng.choice(SUICIDE_PHRASES), weapon_name,
+        ))
     if _is_miss_roll(rng.random()):
         return DuelRoundResolution(
-            "miss", rng.choice(MISS_PHRASES), rng.choice(ATTACK_PHRASES),
+            "miss", format_duel_weapon_phrase(rng.choice(MISS_PHRASES), weapon_name),
+            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
         )
     if _resolve_zone_outcome(strike_zone, block_zone) == "block":
         return DuelRoundResolution(
-            "block", rng.choice(BLOCK_PHRASES), rng.choice(ATTACK_PHRASES),
+            "block", format_duel_weapon_phrase(rng.choice(BLOCK_PHRASES), weapon_name),
+            format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
         )
     return DuelRoundResolution(
-        "hit", rng.choice(HIT_PHRASES), rng.choice(ATTACK_PHRASES),
+        "hit", format_duel_weapon_phrase(rng.choice(HIT_PHRASES), weapon_name),
+        format_duel_weapon_phrase(rng.choice(ATTACK_PHRASES), weapon_name),
     )
 
 

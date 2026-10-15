@@ -855,7 +855,7 @@ async def test_process_block_choice_successful_hit_passes_current_snapshots_to_f
     assert finish_args.kwargs["strike_zone"] == "head"
     assert finish_args.kwargs["block_zone"] == "body"
     assert duel.HIT_PHRASES[0] in finish_args.kwargs["custom_text"]
-    assert duel.ATTACK_PHRASES[0] in finish_args.kwargs["custom_text"]
+    assert duel.ATTACK_PHRASES[0].format(weapon_instrumental="ножом") in finish_args.kwargs["custom_text"]
     assert state["attacker_tg"].id == 601
     assert state["defender_tg"].id == 602
     assert state["round"] == 3

@@ -1682,6 +1682,25 @@ def get_duel_equipment(chat_id: int, user_id: int) -> dict[str, dict]:
             for slot, instance_id, item_id, name in rows}
 
 
+def get_equipped_duel_weapon_name_in_transaction(cursor, chat_id: int, user_id: int) -> str | None:
+    """Only the concrete, currently owned instance in the weapon slot."""
+    row = cursor.execute(
+        """SELECT g.name FROM duel_equipment e
+           JOIN duel_inventory i ON i.id = e.inventory_id
+               AND i.chat_id = e.chat_id AND i.user_id = e.user_id
+           JOIN generated_item_names g ON g.item_id = i.item_id
+           WHERE e.chat_id = ? AND e.user_id = ? AND e.slot = 'weapon'
+             AND g.kind = 'оружие'""",
+        (chat_id, user_id),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def get_equipped_duel_weapon_name(chat_id: int, user_id: int) -> str | None:
+    with get_db() as conn:
+        return get_equipped_duel_weapon_name_in_transaction(conn.cursor(), chat_id, user_id)
+
+
 def _active_pvp_participant(cursor, chat_id: int, user_id: int) -> bool:
     return cursor.execute(
         """SELECT 1 FROM duel_sessions

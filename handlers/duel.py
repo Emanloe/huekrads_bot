@@ -50,6 +50,7 @@ from database import (
     set_duel_item_event_message,
     transfer_duel_inventory_item,
     consume_equipped_item_for_hit,
+    get_equipped_duel_weapon_name,
 )
 from handlers.duel_text import (
     _boss_alive_players,
@@ -887,7 +888,8 @@ async def _process_block_choice(
 
     att_title = format_user_title(attacker_data)
     def_title = format_user_title(defender_data)
-    resolution = resolve_duel_round(strike_zone, block_zone, random)
+    weapon_name = get_equipped_duel_weapon_name(chat_id, attacker_data["user_id"])
+    resolution = resolve_duel_round(strike_zone, block_zone, random, weapon_name=weapon_name)
     absorbed_item = (consume_equipped_item_for_hit(
         chat_id, defender_data["user_id"], strike_zone,
     ) if resolution.outcome == "hit" else None)

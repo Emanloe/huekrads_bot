@@ -31,8 +31,8 @@ def test_text_resource_missing_key_and_placeholder_have_clear_errors():
 def test_text_list_preserves_duel_catalog_order_and_unicode():
     phrases = text_resources.get_text_list("duel.phrases.attack")
 
-    assert phrases[0] == "замахивается засапожным свинорезом"
-    assert phrases[-1] == "выкидывает грязный финт короткой гномьей заточкой"
+    assert phrases[0] == "замахивается {weapon_instrumental}"
+    assert phrases[-1] == "выкидывает грязный финт, атакуя {weapon_instrumental}"
     assert text_resources.get_text_list("duel.round_flavor.one")[0].startswith("⚡")
 
 

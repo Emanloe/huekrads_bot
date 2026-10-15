@@ -25,8 +25,8 @@ from text_resources import get_text, get_text_list
 
 def test_duel_phrase_catalog_keeps_yaml_order():
     assert ATTACK_PHRASES == get_text_list("duel.phrases.attack")
-    assert ATTACK_PHRASES[0] == "замахивается засапожным свинорезом"
-    assert ATTACK_PHRASES[-1] == "выкидывает грязный финт короткой гномьей заточкой"
+    assert ATTACK_PHRASES[0] == "замахивается {weapon_instrumental}"
+    assert ATTACK_PHRASES[-1] == "выкидывает грязный финт, атакуя {weapon_instrumental}"
     assert HIT_PHRASES == get_text_list("duel.phrases.hit")
     assert BLOCK_PHRASES == get_text_list("duel.phrases.block")
     assert MISS_PHRASES == get_text_list("duel.phrases.miss")
