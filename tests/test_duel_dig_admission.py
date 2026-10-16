@@ -79,7 +79,7 @@ async def test_old_selection_button_rechecks_current_db_and_allows_zero_points(
                         Mock(side_effect=AssertionError("start used random.random")))
     query = SimpleNamespace(
         data="start_duel_opponent", from_user=initiator,
-        answer=AsyncMock(), message=SimpleNamespace(delete=AsyncMock()),
+        answer=AsyncMock(), message=SimpleNamespace(message_id=72, delete=AsyncMock()),
     )
     callback = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=CHAT_ID))
     fake_context.bot.send_message.reset_mock()

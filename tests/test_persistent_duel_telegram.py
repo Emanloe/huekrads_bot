@@ -23,7 +23,7 @@ def user(uid, name):
 
 def callback(data, actor, chat_id=CHAT):
     query = SimpleNamespace(data=data, from_user=actor, answer=AsyncMock(),
-                            message=SimpleNamespace(delete=AsyncMock()))
+                            message=SimpleNamespace(message_id=101, delete=AsyncMock()))
     return SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=chat_id)), query
 
 
@@ -35,11 +35,12 @@ def register(chat_id=CHAT):
 
 
 @pytest.mark.asyncio
-async def test_telegram_selection_actions_final_and_stale_buttons(temp_database, fake_context, monkeypatch):
+async def test_telegram_selection_actions_final_and_stale_buttons(temp_database, fake_context, monkeypatch, open_duel_selection):
     attacker, defender = register()
     monkeypatch.setattr(duel_service.random, "choice", lambda values: values[0])
     monkeypatch.setattr(duel_service.random, "random", lambda: 0.5)
     selection, query = callback("start_duel_defender", attacker)
+    query.message = await open_duel_selection(fake_context, attacker, CHAT)
     await duel.duel_select_callback(selection, fake_context)
     query.answer.assert_awaited_once_with()
     session = get_current_duel_session(CHAT)
@@ -75,7 +76,7 @@ async def test_telegram_selection_actions_final_and_stale_buttons(temp_database,
 @pytest.mark.parametrize("zero_player", ("initiator", "opponent"))
 @pytest.mark.asyncio
 async def test_telegram_entry_allows_zero_point_player_and_uses_persistent_session(
-    temp_database, fake_context, monkeypatch, entry, zero_player,
+    temp_database, fake_context, monkeypatch, entry, zero_player, open_duel_selection,
 ):
     attacker, defender = register()
     zero_id = attacker.id if zero_player == "initiator" else defender.id
@@ -95,6 +96,7 @@ async def test_telegram_entry_allows_zero_point_player_and_uses_persistent_sessi
         await duel.duel_command(SimpleNamespace(message=message), fake_context)
     else:
         selection, query = callback("start_duel_defender", attacker)
+        query.message = await open_duel_selection(fake_context, attacker, CHAT)
         await duel.duel_select_callback(selection, fake_context)
         query.answer.assert_awaited_once_with()
 
@@ -177,7 +179,7 @@ async def test_restart_recovers_overdue_turn_and_isolates_chats(temp_database, f
 @pytest.mark.parametrize("loser_points", (20, 0))
 @pytest.mark.asyncio
 async def test_production_telegram_rng_order_and_duplicate_is_rng_free(
-    temp_database, fake_context, monkeypatch, loser_points,
+    temp_database, fake_context, monkeypatch, loser_points, open_duel_selection,
 ):
     attacker, defender = register()
     with database.get_db() as conn:
@@ -202,7 +204,8 @@ async def test_production_telegram_rng_order_and_duplicate_is_rng_free(
 
     rng = Rng()
     monkeypatch.setattr(duel_service, "random", rng)
-    selection, _ = callback("start_duel_defender", attacker)
+    selection, query = callback("start_duel_defender", attacker)
+    query.message = await open_duel_selection(fake_context, attacker, CHAT)
     await duel.duel_select_callback(selection, fake_context)
     duel_id = get_current_duel_session(CHAT)["id"]
     assert rng.trace == ["choice"]
@@ -280,7 +283,7 @@ async def test_expired_outbox_lease_recovers_without_new_start_rng(
 
 @pytest.mark.asyncio
 async def test_double_start_and_double_clicks_use_one_transition(
-    temp_database, fake_context, monkeypatch,
+    temp_database, fake_context, monkeypatch, open_duel_selection,
 ):
     attacker, defender = register()
     choices = []
@@ -291,8 +294,9 @@ async def test_double_start_and_double_clicks_use_one_transition(
 
     monkeypatch.setattr(duel_service.random, "choice", choose)
     monkeypatch.setattr(duel_service.random, "random", lambda: 0.5)
-    first, _ = callback("start_duel_defender", attacker)
-    second, _ = callback("start_duel_defender", attacker)
+    first, q1 = callback("start_duel_defender", attacker)
+    second, q2 = callback("start_duel_defender", attacker)
+    q1.message = q2.message = await open_duel_selection(fake_context, attacker, CHAT)
     await duel.duel_select_callback(first, fake_context)
     session = get_current_duel_session(CHAT)
     await duel.duel_select_callback(second, fake_context)

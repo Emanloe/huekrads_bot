@@ -61,3 +61,28 @@ def tg_user():
         last_name="User",
         is_bot=False,
     )
+
+
+@pytest.fixture
+def open_duel_selection():
+    """Create buttons through /duel, including their server-side ownership."""
+    next_message_id = 700
+
+    async def open_selection(context, actor, chat_id):
+        from handlers import duel
+
+        nonlocal next_message_id
+        next_message_id += 2
+        sent = SimpleNamespace(message_id=next_message_id, delete=AsyncMock(),
+                               is_accessible=True)
+        message = SimpleNamespace(
+            from_user=actor, chat=SimpleNamespace(id=chat_id), chat_id=chat_id,
+            message_id=next_message_id - 1, text="/duel",
+            reply_text=AsyncMock(return_value=sent),
+        )
+        update = SimpleNamespace(message=message, effective_chat=message.chat)
+        await duel.duel_command(update, context)
+        sent.reply_markup = message.reply_text.await_args.kwargs["reply_markup"]
+        return sent
+
+    return open_selection

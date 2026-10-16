@@ -131,3 +131,4 @@ async def send_and_schedule(
         chat_id=chat_id,
         message_ids=to_delete,
     )
+    return bot_msg

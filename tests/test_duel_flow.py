@@ -79,10 +79,13 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
     monkeypatch,
     fixed_duel_database,
     fake_context,
+    open_duel_selection,
 ):
     import database
     from handlers import duel
-    monkeypatch.setattr(duel, "_process_persistent_duel_fight", duel._process_duel_fight)
+    async def legacy_fight(context, actor, target, chat_id, **_kwargs):
+        await duel._process_duel_fight(context, actor, target, chat_id)
+    monkeypatch.setattr(duel, "_process_persistent_duel_fight", legacy_fight)
 
     attacker_tg = make_user(1, "attacker")
     defender_tg = make_user(2, "defender")
@@ -94,7 +97,7 @@ async def test_selected_duel_runs_callbacks_through_round_change_to_result(
     random_values = iter((0.5, 0.5, 0.5, 0.5, 0.0, 1.0, 1.0))
     monkeypatch.setattr(duel.random, "random", lambda: next(random_values))
 
-    selection_message = SimpleNamespace(delete=AsyncMock())
+    selection_message = await open_duel_selection(fake_context, attacker_tg, CHAT_ID)
     update, query = callback_update(
         "start_duel_defender",
         attacker_tg,
@@ -253,12 +256,15 @@ async def test_completed_duel_callback_sends_prefixed_post_message_last(
     monkeypatch,
     fixed_duel_database,
     fake_context,
+    open_duel_selection,
     post_message,
     telegram_post_message,
 ):
     import database
     from handlers import duel, duel_text
-    monkeypatch.setattr(duel, "_process_persistent_duel_fight", duel._process_duel_fight)
+    async def legacy_fight(context, actor, target, chat_id, **_kwargs):
+        await duel._process_duel_fight(context, actor, target, chat_id)
+    monkeypatch.setattr(duel, "_process_persistent_duel_fight", legacy_fight)
     from text_resources import get_text_list
 
     attacker_tg = make_user(3, "post_attacker")
@@ -321,7 +327,7 @@ async def test_completed_duel_callback_sends_prefixed_post_message_last(
     monkeypatch.setattr(duel.random, "random", random_roll)
     monkeypatch.setattr(duel.random, "choice", choose)
 
-    selection_message = SimpleNamespace(delete=AsyncMock())
+    selection_message = await open_duel_selection(fake_context, attacker_tg, CHAT_ID)
     select_update, _ = callback_update(
         "start_duel_post_defender",
         attacker_tg,
@@ -1365,7 +1371,7 @@ async def test_duel_selection_ui_preserves_text_labels_and_callback_data(
             text="/duel",
         )
     )
-    sent = AsyncMock()
+    sent = AsyncMock(return_value=SimpleNamespace(message_id=702))
     monkeypatch.setattr(duel, "send_and_schedule", sent)
     monkeypatch.setattr(
         duel,

@@ -278,6 +278,7 @@ admission:
 command:
   no_dick: 💀 <b>Ты сегодня уже без хуя.</b> До завтра драться нельзя.
 selection:
+  wrong_actor: Это не твой выбор соперника.
   button_label: ⚔️ {title}
   no_opponents: ❌ В чате нет доступных соперников для дуэли.
   prompt: 🗡️ <b>Выберите соперника для дуэли:</b>

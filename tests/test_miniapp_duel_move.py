@@ -72,6 +72,7 @@ async def telegram_move(fake_context, duel_id, turn_id, actor, action, zone="hea
     query = SimpleNamespace(
         data=f"duel_{action}_{zone}_{duel_id}_{turn_id}",
         from_user=SimpleNamespace(id=actor), answer=AsyncMock(),
+        message=SimpleNamespace(message_id=get_duel_session(CHAT_A, duel_id)["message_id"]),
     )
     update = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=CHAT_A))
     await duel.persistent_duel_action_callback(update, fake_context)
@@ -244,6 +245,7 @@ async def test_concurrent_http_and_telegram_http_races_accept_only_one(
     query = SimpleNamespace(
         data=f"duel_strike_head_{duel_b}_1", from_user=SimpleNamespace(id=101),
         answer=AsyncMock(),
+        message=SimpleNamespace(message_id=get_duel_session(second_chat, duel_b)["message_id"]),
     )
     update = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=second_chat))
     async with client_for(fake_context) as client:

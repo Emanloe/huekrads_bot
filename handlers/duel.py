@@ -11,6 +11,7 @@ from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 from text_resources import get_text
 from module_settings import is_module_enabled
+from duel_session_repository import get_latest_duel_session_id
 from config import (
     TOP_SORT_BY,
     ADMIN_IDS,
@@ -1597,12 +1598,27 @@ async def duel_command(
             keyboard
         )
 
-        await send_and_schedule(
+        latest_duel_id = get_latest_duel_session_id(chat_id)
+        sent = await send_and_schedule(
             update,
             context,
             get_text("duel.selection.prompt"),
             reply_markup=reply_markup,
         )
+        # Telegram callback_data is untrusted. Bind the returned message to
+        # the command author and the exact opponents offered by the server.
+        selections = context.bot_data.setdefault("duel_selections", {})
+        now = time.monotonic()
+        for key, pending in list(selections.items()):
+            if (pending["expires_at"] <= now or
+                    (key[0] == chat_id and pending["initiator"].id == initiator_tg.id)):
+                selections.pop(key)
+        selections[(chat_id, sent.message_id)] = {
+            "initiator": initiator_tg,
+            "opponents": {op.username: op.user_id for op in selection.opponents},
+            "expires_at": now + AUTO_DELETE_DELAY,
+            "latest_duel_id": latest_duel_id,
+        }
 
         return
 
@@ -1638,34 +1654,65 @@ async def duel_select_callback(
 
     if (
         not query
-        or not query.data
+        or not isinstance(query.data, str)
         or not query.data.startswith("start_duel_")
     ):
         return
 
-    target_username = query.data.replace(
-        "start_duel_",
-        "",
-    )
-
-    initiator_tg = query.from_user
+    message = query.message
+    chat = update.effective_chat
+    if (not message or not chat or not query.from_user or
+            not getattr(message, "is_accessible", True)):
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    chat_id = chat.id
+    key = (chat_id, message.message_id)
+    selections = context.bot_data.get("duel_selections", {})
+    pending = selections.get(key)
+    if pending is None:
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    initiator_tg = pending["initiator"]
+    if query.from_user.id != initiator_tg.id:
+        await query.answer(get_text("duel.selection.wrong_actor"))
+        return
+    if (pending["expires_at"] <= time.monotonic() or
+            get_latest_duel_session_id(chat_id) != pending["latest_duel_id"]):
+        selections.pop(key)
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
+    target_username = query.data[len("start_duel_"):]
+    opponent_id = pending["opponents"].get(target_username)
+    opponent = (get_duel_user_by_id(chat_id, opponent_id, read_only=True)
+                if opponent_id is not None else None)
+    if (opponent is None or opponent["user_id"] != opponent_id or
+            (opponent.get("username") or "").lower() != target_username.lower() or
+            opponent_id == initiator_tg.id or
+            _get_duel_participant_ineligibility(opponent) is not None):
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
     if is_deleted_user(initiator_tg.id):
         await query.answer(get_text("gnome_deletion.deleted"), show_alert=True)
         return
-    chat_id = update.effective_chat.id
+
+    # Consume before the first await: competing callbacks cannot reuse this
+    # menu, even while Telegram deletion or duel publication is in flight.
+    selections.pop(key)
+    try:
+        await message.delete()
+    except Exception:
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
 
     await query.answer()
-
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
 
     await _process_persistent_duel_fight(
         context,
         initiator_tg,
         target_username,
         chat_id,
+        opponent_user_id=opponent_id,
+        expected_latest_duel_id=pending["latest_duel_id"],
     )
 
 
@@ -1755,15 +1802,19 @@ async def inspect_command(update, context):
 async def _process_persistent_duel_fight(
     context, initiator_tg, target_username: str, chat_id: int,
     original_msg_id: int | None = None,
+    *, opponent_user_id: int | None = None,
+    expected_latest_duel_id: int | None = None,
 ):
     """Translate Telegram's target selection into one authoritative start."""
     initiator = get_or_create_duel_user(initiator_tg, chat_id)
-    opponent = get_duel_user_by_username(target_username, chat_id)
+    opponent = (get_duel_user_by_username(target_username, chat_id)
+                if opponent_user_id is None else get_duel_user_by_id(chat_id, opponent_user_id))
     opponent_id = opponent["user_id"] if opponent else -1
     try:
         started = start_persistent_duel(
             chat_id, initiator["user_id"], opponent_id,
             original_message_id=original_msg_id,
+            expected_latest_duel_id=expected_latest_duel_id,
         )
     except Exception:
         logging.exception("Persistent duel start failed in chat %s", chat_id)
@@ -1775,6 +1826,8 @@ async def _process_persistent_duel_fight(
             logging.exception("Persistent duel publication failed in chat %s", chat_id)
         return
     reason = started.reason
+    if reason == "stale_selection":
+        return
     if reason == "active_duel":
         message = get_text("duel.admission.active_duel")
     elif reason == "self_target":
@@ -1811,11 +1864,18 @@ async def persistent_duel_action_callback(update: Update, context: ContextTypes.
     if duel_id <= 0 or turn_id <= 0:
         await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
         return
+    if (not query.message or not update.effective_chat or not query.from_user or
+            not getattr(query.message, "is_accessible", True)):
+        await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)
+        return
     chat_id = update.effective_chat.id
     try:
         operation = (submit_persistent_duel_attack if action == "strike"
                      else submit_persistent_duel_block)
-        result = operation(chat_id, duel_id, query.from_user.id, turn_id, zone)
+        result = operation(
+            chat_id, duel_id, query.from_user.id, turn_id, zone,
+            expected_message_id=query.message.message_id,
+        )
     except Exception:
         logging.exception("Persistent duel callback failed in chat %s", chat_id)
         await query.answer(get_text("duel.action_alert.stale_button"), show_alert=True)

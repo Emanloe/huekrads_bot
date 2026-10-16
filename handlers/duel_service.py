@@ -46,6 +46,7 @@ from duel_session_repository import (
     create_duel_session,
     finish_duel_session_in_transaction,
     get_duel_session_in_transaction,
+    get_latest_duel_session_id,
     has_current_duel_session,
     mark_duel_pocket_done_in_transaction,
     save_duel_attack_in_transaction,
@@ -826,6 +827,7 @@ def submit_persistent_duel_attack(
     zone: str,
     *,
     now_ms: int | None = None,
+    expected_message_id: int | None = None,
 ) -> PersistentDuelActionResult:
     """Accept only the current attacker's action for this chat and turn."""
     with get_db() as conn:
@@ -839,6 +841,8 @@ def submit_persistent_duel_attack(
             return PersistentDuelActionResult("wrong_phase")
         if actor_user_id != session["attacker_user_id"]:
             return PersistentDuelActionResult("wrong_actor")
+        if expected_message_id is not None and session["message_id"] != expected_message_id:
+            return PersistentDuelActionResult("stale_button")
         if not isinstance(zone, str) or zone not in TARGET_NAMES:
             return PersistentDuelActionResult("invalid_zone")
         timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
@@ -855,6 +859,7 @@ def submit_persistent_duel_block(
     zone: str,
     *,
     now_ms: int | None = None,
+    expected_message_id: int | None = None,
 ) -> PersistentDuelActionResult:
     """Resolve a block once, without applying any terminal DB effects."""
     with get_db() as conn:
@@ -868,6 +873,8 @@ def submit_persistent_duel_block(
             return PersistentDuelActionResult("wrong_phase")
         if actor_user_id != session["defender_user_id"]:
             return PersistentDuelActionResult("wrong_actor")
+        if expected_message_id is not None and session["message_id"] != expected_message_id:
+            return PersistentDuelActionResult("stale_button")
         if not isinstance(zone, str) or zone not in TARGET_NAMES:
             return PersistentDuelActionResult("invalid_zone")
         timestamp = utc_unix_milliseconds() if now_ms is None else now_ms
@@ -914,6 +921,7 @@ def start_persistent_duel(
     *,
     now_ms: int | None = None,
     original_message_id: int | None = None,
+    expected_latest_duel_id: int | None = None,
 ) -> PersistentDuelStartResult:
     """Reserve a chat's duel slot and snapshot two eligible registered users.
 
@@ -923,6 +931,10 @@ def start_persistent_duel(
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("BEGIN IMMEDIATE")
+
+        if (expected_latest_duel_id is not None and
+                get_latest_duel_session_id(chat_id, cursor=cursor) != expected_latest_duel_id):
+            return PersistentDuelStartResult("stale_selection", None)
 
         if has_current_duel_session(chat_id, cursor=cursor):
             return PersistentDuelStartResult("active_duel", None)

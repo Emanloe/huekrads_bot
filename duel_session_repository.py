@@ -122,6 +122,17 @@ def has_current_duel_session(chat_id: int, *, cursor: sqlite3.Cursor) -> bool:
     ).fetchone() is not None
 
 
+def get_latest_duel_session_id(chat_id: int, *, cursor: sqlite3.Cursor | None = None) -> int:
+    """Include finished duels so an old opponent menu cannot start again."""
+    if cursor is not None:
+        return cursor.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM duel_sessions WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()[0]
+    with get_db() as conn:
+        return get_latest_duel_session_id(chat_id, cursor=conn.cursor())
+
+
 def get_duel_session(chat_id: int, duel_id: int) -> dict | None:
     """Never return a session without matching its chat security boundary."""
     with get_db() as conn:
