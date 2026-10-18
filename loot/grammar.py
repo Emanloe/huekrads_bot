@@ -5,7 +5,7 @@ from functools import lru_cache
 from loot.catalog import ADJECTIVES, BASES, QUALITIES, SOURCES
 
 
-# Explicit inanimate noun forms. Unfamiliar/borrowed bases use a quoted name.
+# Explicit inanimate noun forms. Catalog bases can also remain undeclined.
 _NOUNS = {
     "нож": ("ножом", "нож"), "меч": ("мечом", "меч"),
     "топор": ("топором", "топор"), "копьё": ("копьём", "копьё"),
@@ -30,9 +30,16 @@ _NOUNS = {
     "томахавк": ("томахавком", "томахавк"),
     "полумесяц": ("полумесяцем", "полумесяц"),
     "молотилка": ("молотилкой", "молотилку"), "фалката": ("фалкатой", "фалкату"),
+    "когти": ("когтями", "когти"),
 }
 _WEAPON_BASES = tuple(base for base in BASES if base["kind"] == "оружие") + (
-    {"name": "нож", "list": "m"},
+    {"name": "нож", "list": "m"}, {"name": "когти", "list": "pl"},
+)
+# Native modifiers also used inside generator bases, rather than its adjective
+# pool. Keep explicit gender forms instead of guessing from an unknown noun.
+_BASE_MODIFIERS = (
+    {"m": "демонический", "f": "демоническая", "n": "демоническое", "pl": "демонические"},
+    {"m": "крылатый", "f": "крылатая", "n": "крылатое", "pl": "крылатые"},
 )
 _ARMOR_NOUNS = {
     "шлем": ("шлемом", "шлем", "шлеме"),
@@ -142,7 +149,7 @@ def _modifier(item: dict, form: str) -> tuple[str, str, str] | None:
 
 @lru_cache(maxsize=4)
 def _modifiers(form: str) -> dict[str, tuple[str, str, str]]:
-    return {item[form].lower(): forms for item in (*QUALITIES, *ADJECTIVES)
+    return {item[form].lower(): forms for item in (*QUALITIES, *ADJECTIVES, *_BASE_MODIFIERS)
             if (forms := _modifier(item, form)) is not None}
 
 
@@ -174,7 +181,9 @@ def _base_forms(base: dict, nouns: dict) -> tuple[str, ...] | None:
                  for index in range(len(noun)))
 
 
-def _item_case_forms(name: str, bases: tuple, nouns: dict) -> tuple[str, ...] | None:
+def _item_case_forms(
+    name: str, bases: tuple, nouns: dict, *, preserve_unknown_weapon_base: bool = False,
+) -> tuple[str, ...] | None:
     """Parse whole catalog components, leaving dependent sources and labels intact."""
     lower = name.lower()
     if lower in nouns:
@@ -195,6 +204,13 @@ def _item_case_forms(name: str, bases: tuple, nouns: dict) -> tuple[str, ...] | 
             else:
                 continue
             base_forms = _base_forms(base, nouns)
+            if (base_forms is None and preserve_unknown_weapon_base
+                    and base.get("kind") == "оружие" and base.get("list") in ("m", "f", "n", "pl")
+                    and base["name"].partition(" «")[0].split()[-1] not in nouns):
+                # Gender/number is authoritative catalog metadata. Only the
+                # recognized outer modifiers change; preserve the whole base.
+                original_base = name[len(prefix) + 1:len(without_source)] if prefix else name[:len(without_source)]
+                base_forms = (original_base, original_base)
             if base_forms is None:
                 continue
             for modifiers in _prefix_forms(prefix, base["list"]):
@@ -207,9 +223,9 @@ def _item_case_forms(name: str, bases: tuple, nouns: dict) -> tuple[str, ...] | 
 
 @lru_cache(maxsize=1024)
 def weapon_case_forms(name: str | None) -> dict[str, str]:
-    """Inflect a fully recognized weapon or preserve it in neutral quotes."""
+    """Inflect known modifiers even when a catalog weapon base stays unchanged."""
     name = name or "нож"
-    forms = _item_case_forms(name, _WEAPON_BASES, _NOUNS)
+    forms = _item_case_forms(name, _WEAPON_BASES, _NOUNS, preserve_unknown_weapon_base=True)
     if forms is None:
         instrumental, accusative = f"оружием «{name}»", f"оружие «{name}»"
     else:

@@ -49,7 +49,7 @@ def test_real_catalog_weapon_forms(name, instrumental, accusative):
 
 
 @pytest.mark.parametrize("name", [
-    "Неопознанный артефакт", "Качественный карминовый вирт'с лег поглощения",
+    "Неопознанный артефакт", "Качественный карминовый квазибластер поглощения",
     "Качественное карминовое военный копьё поглощения", "Меч <script>&",
 ])
 def test_unknown_or_mismatched_names_keep_the_full_original_in_quotes(name):
@@ -66,6 +66,88 @@ def test_empty_weapon_uses_knife():
     assert weapon_case_forms(None) == {
         "weapon_instrumental": "ножом", "weapon_accusative": "нож",
     }
+
+
+@pytest.mark.parametrize("name,instrumental,accusative", [
+    ("Поганые советские греатер клавс мерзости", "погаными советскими греатер клавс мерзости",
+     "поганые советские греатер клавс мерзости"),
+    ("Качественные демонические греатер клавс ярости", "качественными демоническими греатер клавс ярости",
+     "качественные демонические греатер клавс ярости"),
+    ("Реликтовые крылатые когти поглощения", "реликтовыми крылатыми когтями поглощения",
+     "реликтовые крылатые когти поглощения"),
+    ("Реликтовые советские карминовые греатер талонс поглощения",
+     "реликтовыми советскими карминовыми греатер талонс поглощения",
+     "реликтовые советские карминовые греатер талонс поглощения"),
+    ("Качественные бывшие в употреблении греатер клавс мерзости",
+     "качественными бывшими в употреблении греатер клавс мерзости",
+     "качественные бывшие в употреблении греатер клавс мерзости"),
+    ("Качественный карминовый вирт'с лег поглощения", "качественным карминовым вирт'с лег поглощения",
+     "качественный карминовый вирт'с лег поглощения"),
+    ("Поганая советская фаскиа мерзости", "поганой советской фаскиа мерзости",
+     "поганую советскую фаскиа мерзости"),
+    ("Качественное карминовое стиллето поглощения", "качественным карминовым стиллето поглощения",
+     "качественное карминовое стиллето поглощения"),
+])
+def test_catalog_metadata_allows_partial_weapon_declension(name, instrumental, accusative):
+    assert weapon_case_forms(name) == {
+        "weapon_instrumental": instrumental, "weapon_accusative": accusative,
+    }
+
+
+@pytest.mark.parametrize("name", [
+    "Поганые советские суперклавсы мерзости",  # No catalog base; plural ending is insufficient.
+    "Качественный карминовый греатер клавс поглощения",  # Catalog base is plural, not masculine.
+    "Поганые неведомые греатер клавс мерзости",  # Unrecognized modifier must not disappear.
+    "Поганые советские греатер клавс неведомости",  # Unknown dependent suffix.
+])
+def test_partial_declension_requires_known_base_and_matching_modifiers(name):
+    assert weapon_case_forms(name) == {
+        "weapon_instrumental": f"оружием «{name}»", "weapon_accusative": f"оружие «{name}»",
+    }
+
+
+def test_partial_weapon_forms_are_used_by_every_shared_phrase():
+    name = "Поганые советские греатер клавс мерзости"
+    forms = weapon_case_forms(name)
+    for phrase in (*duel_text.ATTACK_PHRASES, *duel_text.HIT_PHRASES,
+                   *duel_text.BLOCK_PHRASES, *duel_text.MISS_PHRASES, *duel_text.SUICIDE_PHRASES):
+        text = duel_text.format_duel_weapon_phrase(phrase, name)
+        assert "оружием «" not in text and "оружие «" not in text
+        if "{weapon_instrumental}" in phrase:
+            assert forms["weapon_instrumental"] in text
+        if "{weapon_accusative}" in phrase:
+            assert forms["weapon_accusative"] in text
+
+
+def test_partial_weapon_name_is_presentation_only_and_matches_miniapp(temp_database, monkeypatch):
+    from miniapp_api import _plain_duel_text, _round_read_model
+
+    name = "Поганые советские греатер клавс мерзости"
+    instrumental = "погаными советскими греатер клавс мерзости"
+    register(1, CHAT_A)
+    register(2, CHAT_A)
+    award("partial_weapon", name, "оружие", base_form="pl", chat_id=CHAT_A)
+    session = make_session(status="active", phase="block", attack_zone="head", turn_id=2)
+    inventory_before = db.get_duel_inventory(CHAT_A, 1)
+    rng = TraceRng((0.5, 0.5))
+    monkeypatch.setattr(duel_service, "random", rng)
+    resolved = duel_service.submit_persistent_duel_block(
+        CHAT_A, session["id"], 2, 2, "body", now_ms=PUBLISHED_AT + 1,
+    )
+    assert resolved.resolution["outcome"] == "hit"
+    assert instrumental in resolved.resolution["presentation_html"]
+    assert rng.trace == [("random", 0.5), ("random", 0.5), ("choice", "hit"), ("choice", "attack")]
+    monkeypatch.setattr(duel_service, "random", SimpleNamespace(
+        random=lambda: 0.99, choice=lambda values: values[0],
+    ))
+    final = duel_service.finalize_persistent_duel(CHAT_A, session["id"], now_ms=PUBLISHED_AT + 2)
+    assert final.result["winner_points_delta"] == 10 and final.result["loser_points_delta"] == -5
+    assert instrumental in final.result["final_text"]
+    assert db.get_duel_inventory(CHAT_A, 1) == inventory_before
+    with db.get_db() as conn:
+        assert conn.execute("SELECT name FROM generated_item_names WHERE item_id = 'partial_weapon'").fetchone() == (name,)
+    assert _round_read_model(final.session, resolved.resolution)["presentation_text"] == (
+        _plain_duel_text(resolved.resolution["presentation_html"]))
 
 
 @pytest.mark.parametrize("catalog", [
