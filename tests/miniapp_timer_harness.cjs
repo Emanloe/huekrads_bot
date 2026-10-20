@@ -881,10 +881,15 @@ async function testRecap() {
     empty: false,
     duels: [{ user_id: 202, name: "<script>alert(1)</script>",
       incoming: 2, outgoing: 1, wins: 2, losses: 1 }],
-    thefts: ["• украл хуй у соперника"], loot: ["• Получено: <img src=x> ×1"], pets: [],
+    thefts: ["• украл хуй у соперника", "• Лишился хуя из-за гиперборейского хуя.",
+      "• Лишился хуя из-за хуя Короля Артура."],
+    loot: ["• Получено: <img src=x> ×1"], pets: [],
     totals: { wins: 2, losses: 1, found: 0, received: 1, lost: 0 },
   };
   await app.loadRecap();
+  assert.ok(recapText().includes("🍆 Происшествия с хуём"));
+  assert.ok(recapText().includes("Лишился хуя из-за гиперборейского хуя."));
+  assert.ok(recapText().includes("Лишился хуя из-за хуя Короля Артура."));
   assert.ok(recapText().includes("2 раза"));
   assert.ok(recapText().includes("1 раз"));
   assert.equal(recapText().split("Твои победы: 2").length - 1, 1);

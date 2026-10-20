@@ -5,7 +5,7 @@ more: "• …ещё событий: {count}"
 
 sections:
   duels: "⚔️ <b>Дуэли</b>"
-  thefts: "🍆 <b>Кражи</b>"
+  thefts: "🍆 <b>Происшествия с хуём</b>"
   loot: "💎 <b>Добыча</b>"
   pets: "🦀 <b>Хуекрабы</b>"
 
@@ -20,6 +20,9 @@ attacked: "• Ты нападал на {name} — {count} {times}"
 duel_results: "Твои победы: {wins} · Победы соперника: {losses}"
 theft_line: "• {action} {opponent}"
 huegryz_theft: "• Хуегрыз откусил тебе хуй при подборе добычи"
+event_loss:
+  hyperboreic: "• Лишился хуя из-за гиперборейского хуя."
+  arthur: "• Лишился хуя из-за хуя Короля Артура."
 
 item_found: "• Найдено через /dig: {item} ×{count}"
 item_received: "• Получено в инвентарь: {item} ×{count}"

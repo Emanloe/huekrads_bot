@@ -1,13 +1,18 @@
 """Mini App chronicle shares the Telegram read model and session boundary."""
 
 from html import escape
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 import database as db
 from duel_session_repository import create_duel_session
-from handlers.recap import build_recap_text, game_day_bounds_ms, load_recap_events
+from handlers import hyperborean_event
+from handlers.recap import (
+    build_recap_model, build_recap_text, game_day_bounds_ms, load_recap_events, recap_command,
+)
 from miniapp_api import create_miniapp_api
 from tests.test_miniapp_api import CHAT_A, CHAT_B, register, session_for, snapshot
 from tests.test_miniapp_auth import TEST_BOT_TOKEN
@@ -141,3 +146,41 @@ async def test_recap_api_empty_day(temp_database):
         "empty": True, "duels": [], "thefts": [], "loot": [], "pets": [],
         "totals": {"wins": 0, "losses": 0, "found": 0, "received": 0, "lost": 0},
     }
+
+
+@pytest.mark.asyncio
+async def test_actual_event_losses_match_in_telegram_command_and_miniapp(
+    temp_database, monkeypatch, fake_context,
+):
+    register(CHAT_A, 101, "hero")
+    actor = SimpleNamespace(id=101, username="hero", first_name="hero", last_name=None)
+    monkeypatch.setattr(hyperborean_event, "_HYPERBOREAN_DB_PATH", temp_database)
+    for source, reason, expected in [
+        ("parity:1", "hyperboreic", "exploded"),
+        ("parity:2", "hyperboreic", "restored"),
+        ("parity:3", "arthur", "exploded"),
+    ]:
+        assert hyperborean_event._claim_hyperboreic_huy(CHAT_A, actor, reason, source) == expected
+
+    api = create_miniapp_api(bot_token=TEST_BOT_TOKEN, allowed_origin="")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                 base_url="http://test") as client:
+        response = await client.get("/api/v1/recap",
+                                    headers=await session_for(client, CHAT_A, 101))
+    assert response.status_code == 200
+    events = load_recap_events(CHAT_A, 101)
+    assert response.json() == build_recap_model(events, 101)
+    assert response.json()["thefts"] == [
+        "• Лишился хуя из-за гиперборейского хуя.",
+        "• Лишился хуя из-за хуя Короля Артура.",
+    ]
+    message = SimpleNamespace(message_id=55,
+                              reply_text=AsyncMock(return_value=SimpleNamespace(message_id=77)))
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=CHAT_A),
+                             effective_user=actor, message=message)
+    await recap_command(update, fake_context)
+    telegram_text = message.reply_text.await_args.args[0]
+    assert telegram_text == build_recap_text(events, 101)
+    assert "🍆 <b>Происшествия с хуём</b>" in telegram_text
+    assert all(escape(line) in telegram_text for line in response.json()["thefts"])
+    assert fake_context.job_queue.calls[-1][1] == 60

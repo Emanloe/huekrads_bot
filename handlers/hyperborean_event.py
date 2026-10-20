@@ -10,7 +10,12 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from database import format_user_title, get_all_chats, get_or_create_duel_user
+from database import (
+    format_user_title,
+    get_all_chats,
+    get_or_create_duel_user,
+    record_game_event_in_transaction,
+)
 from text_resources import get_text
 from module_settings import is_module_enabled
 from handlers.moss_choice_event import spawn_moss_choice_event
@@ -152,9 +157,40 @@ async def hyperboreic_huy_daily_job(
             logging.exception("Moss choice check failed in chat %s", chat_id)
 
 
+def _was_hyperborean_resolved(conn, chat_id, source_id):
+    # Called under BEGIN IMMEDIATE: another worker cannot resolve the same
+    # Telegram message for a different player or button at the same time.
+    return source_id is not None and conn.execute(
+        """SELECT 1 FROM game_events
+           WHERE chat_id = ? AND event_type = 'hyperborean_resolved'
+             AND source_id = ? LIMIT 1""",
+        (chat_id, source_id),
+    ).fetchone() is not None
+
+
+def _record_hyperborean_resolution(
+    conn, chat_id, user_id, event_type, source_id, action, result, had_no_dick,
+):
+    # Also persist restoration/no-change outcomes so replaying an operation
+    # cannot toggle the state again or reroll its target. Only a 0 -> 1
+    # transition is presented as a loss in the chronicle.
+    inserted = record_game_event_in_transaction(
+        conn.cursor(), chat_id, user_id, "hyperborean_resolved",
+        {
+            "reason": event_type, "action": action, "result": result,
+            "dick_lost": action == "self" and not had_no_dick and result == "exploded",
+        },
+        source_id=source_id,
+    )
+    if not inserted:
+        raise RuntimeError("Hyperborean resolution was not journalled")
+
+
 def _claim_hyperboreic_huy(
     chat_id: int,
     tg_user,
+    event_type: str = "hyperboreic",
+    source_id: str | None = None,
 ):
     """
     Атомарно разрешает событие в БД.
@@ -186,6 +222,8 @@ def _claim_hyperboreic_huy(
             timeout=10,
         )) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
+            if _was_hyperborean_resolved(conn, chat_id, source_id):
+                return "taken"
             if conn.execute("SELECT 1 FROM deleted_users WHERE user_id = ?", (user_id,)).fetchone():
                 return "missing"
             cursor = conn.execute(
@@ -223,6 +261,10 @@ def _claim_hyperboreic_huy(
                         user_id,
                     ),
                 )
+                _record_hyperborean_resolution(
+                    conn, chat_id, user_id, event_type, source_id,
+                    "self", "restored", had_no_dick,
+                )
                 return "restored"
 
             conn.execute(
@@ -239,6 +281,10 @@ def _claim_hyperboreic_huy(
                     user_id,
                 ),
             )
+            _record_hyperborean_resolution(
+                conn, chat_id, user_id, event_type, source_id,
+                "self", "exploded", had_no_dick,
+            )
             return "exploded"
 
     except Exception:
@@ -254,6 +300,8 @@ def _claim_hyperboreic_huy(
 def _claim_hyperboreic_huy_for_other(
     chat_id: int,
     tg_user,
+    event_type: str = "hyperboreic",
+    source_id: str | None = None,
 ):
     """Resolve the "two for another" action for one user of this chat."""
     try:
@@ -268,6 +316,8 @@ def _claim_hyperboreic_huy_for_other(
             str(_HYPERBOREAN_DB_PATH), timeout=10,
         )) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
+            if _was_hyperborean_resolved(conn, chat_id, source_id):
+                return "taken", None, False
             if conn.execute("SELECT 1 FROM deleted_users WHERE user_id = ?", (tg_user.id,)).fetchone():
                 return "missing", None, False
             candidates = conn.execute(
@@ -305,8 +355,16 @@ def _claim_hyperboreic_huy_for_other(
                     """,
                     (chat_id, user_id),
                 )
+                _record_hyperborean_resolution(
+                    conn, chat_id, user_id, event_type, source_id,
+                    "other", "exploded", had_no_dick,
+                )
                 return "exploded", selected_user, True
 
+            _record_hyperborean_resolution(
+                conn, chat_id, user_id, event_type, source_id,
+                "other", "unchanged", had_no_dick,
+            )
             return "unchanged", selected_user, False
     except Exception:
         logging.exception(
@@ -336,7 +394,8 @@ async def hyperboreic_huy_callback(
         return
     event = ACTIVE_HYPERBOREAN_EVENTS.get(chat_id)
 
-    if not event:
+    message = getattr(query, "message", None)
+    if not event or (message is not None and message.message_id != event["message_id"]):
         await query.answer(
             get_text("hyperborean.alerts.taken"),
             show_alert=True,
@@ -348,6 +407,7 @@ async def hyperboreic_huy_callback(
     ACTIVE_HYPERBOREAN_EVENTS.pop(chat_id, None)
 
     event_type = event.get("event_type", "hyperboreic")
+    source_id = f"hyperborean:{chat_id}:{event['message_id']}"
 
     action = "other" if query.data == "hyperboreic_huy_other" else "self"
     selected_user = None
@@ -356,12 +416,20 @@ async def hyperboreic_huy_callback(
         result, selected_user, _had_no_dick = _claim_hyperboreic_huy_for_other(
             chat_id,
             query.from_user,
+            event_type,
+            source_id,
         )
     else:
         result = _claim_hyperboreic_huy(
             chat_id,
             query.from_user,
+            event_type,
+            source_id,
         )
+
+    if result == "taken":
+        await query.answer(get_text("hyperborean.alerts.taken"), show_alert=True)
+        return
 
     if result == "error":
         ACTIVE_HYPERBOREAN_EVENTS[chat_id] = event

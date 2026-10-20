@@ -171,6 +171,10 @@ def build_recap_model(events: list[dict], user_id: int) -> dict:
                     lost[(item_name, get_text("recap.loss_stolen"))] += 1
         elif kind == "dick_stolen":
             theft_lines.append(get_text("recap.huegryz_theft"))
+        elif kind == "hyperborean_resolved" and data.get("dick_lost") is True:
+            reason = data.get("reason")
+            if reason in {"hyperboreic", "arthur"}:
+                theft_lines.append(get_text(f"recap.event_loss.{reason}"))
         elif kind == "item_found" and data.get("item_event_id") not in missed_ids:
             found[_item_name(data.get("item_id"))] += 1
         elif kind == "item_received":

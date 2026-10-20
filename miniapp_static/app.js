@@ -146,7 +146,7 @@
       content.append(section);
     }
     for (const [key, title] of [
-      ["thefts", "🍆 Кражи"], ["loot", "💎 Добыча"], ["pets", "🦀 Хуекрабы"],
+      ["thefts", "🍆 Происшествия с хуём"], ["loot", "💎 Добыча"], ["pets", "🦀 Хуекрабы"],
     ]) {
       if (!data[key]?.length) continue;
       const section = recapSection(title);
